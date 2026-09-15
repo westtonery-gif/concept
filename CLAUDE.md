@@ -21,7 +21,7 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-15)
-- **All 33 ADRs (0001–0033) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 34 ADRs (0001–0034) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -30,9 +30,10 @@ anything ahead of the queue below — see task 10.
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
   (0029), the external versioned Prompt store (0030), fail-fast Task sequencing with authoritative
-  Schema bindings (0031), resumable QA/human rework routing (0032), and invalid-Output contract
-  errors + the Milestone M2 acceptance (0033) are all implemented and tested. All gates green:
-  ruff, ruff format, mypy --strict, pytest (810 passed, 0 skipped).
+  Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
+  errors + the Milestone M2 acceptance (0033), and the QA verdict field contract (0034) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (843 passed,
+  0 skipped).
 - **ROADMAP Stage 7 / Milestone M2 is closed (ADR-0033).** `tests/test_m2_acceptance.py` (`M2A`,
   `M2_ACCEPTANCE.md`) runs `research-to-script@v1` (Rin → Leo) once through `compile_runtime` with
   only production assets — the bundled Prompt store, Rin's Skill and `current_date` Tool, the real
@@ -341,13 +342,16 @@ process at the time, not a pattern to keep copying.)
     "the QA Agent (ROADMAP Stage 8) implements the same contract." What's missing is a real role
     behind it, on the same template as Rin/Leo (Stage 7): Agent + Prompt (bundled store, ADR-0030)
     + Schema + optionally Skills/Tools. Broken into subtasks:
-    1. **Verdict shape — needs a small ADR.** `EvaluationResult.verdict` is one of
-       `PASSED`/`FLAGGED`/`FAILED` (an enum) plus `flags: tuple[str, ...]`, but the structured
-       LLM port (ADR-0014 Variant B) only returns flat `Mapping[str, str]` fields — no prior agent
-       has produced an enum-constrained field or a multi-value one. Decide and document: how the
-       model's raw structured fields map onto a validated three-way verdict and a flags list (e.g.
-       a `verdict` field with an allowed-value check in the QA Schema, `flags` as some
-       serialization convention) before writing the Schema itself.
+    1. ~~**Verdict shape — needs a small ADR.**~~ — done (ADR-0034, `EVALUATION_SPEC.md` §8.1,
+       `EVALUATION_ACCEPTANCE.md` §4.1 `QVD`, tests in `tests/test_qa_evaluation.py`). Two fields,
+       `QA_VERDICT_FIELDS = ("verdict", "flags")`: `verdict` is exactly `passed`/`flagged`/`failed`
+       (case and surrounding whitespace ignored, nothing else), `flags` is a JSON array of non-blank
+       strings (`[]` = none), and a risk verdict needs at least one flag. The pure
+       `decode_verdict(fields) -> EvaluationResult` in `application/qa_evaluation.py` is the sole
+       judge; any violation raises `QaVerdictError`, which fails closed exactly like any evaluator
+       failure (Evaluation stays `PENDING`) and is never guessed into a verdict. The allowed-value
+       check was deliberately **not** put into `Schema` (the QA path never calls
+       `Schema.validate` — it records no Output) nor into the port's tool schema (Variant B).
     2. **QA Agent role: Prompt + Schema + catalog entry** — e.g. `qa_agent@v1` in
        `agents/qa_agent.py`, mirroring `content_researcher.py`/`script_writer.py`'s shape. The
        system prompt needs real quality **and** medical-compliance judgment criteria for the
@@ -358,14 +362,22 @@ process at the time, not a pattern to keep copying.)
     3. **`LLMArtifactEvaluator`** — an `ArtifactEvaluator` implementation analogous to
        `LLMTaskExecutor` (`infrastructure/llm.py`): calls `LLMClient.complete` with the QA
        Prompt/Schema's generation shape, converts the structured fields into an `EvaluationResult`
-       per subtask 1's mapping. Reuses the existing `LLMClient`/`client_for_role` port — no new
-       provider seam.
+       only through `decode_verdict` (ADR-0034). Reuses the existing `LLMClient`/`client_for_role`
+       port — no new provider seam. Unlike `LLMTaskExecutor`, an `LLMError` must **propagate**
+       (ADR-0018 §6: evaluator failures are never swallowed), not become a managed result.
+       **Open question to settle first (ADR-0034 "Deferred"):** a QA call's metrics have nowhere to
+       go — `Run.record_analytics` requires a started Task (ADR-0020), the QA path opens none, and
+       `ArtifactEvaluator.evaluate` returns no measurements. Decide it (likely a small ADR) before
+       or with this subtask; don't silently drop the QA call's cost.
     4. **Wire it into a real entrypoint** — extend Composition Root helpers (or add a small
        analogous one) to build the QA evaluator from its catalog entry the same way
        `build_executor_map` + `client_for_role` do for Rin/Leo, then pass `qa=` into
        `ContentDirector` in `demo_factory.py` (or a new demo). This is the **first real exercise**
        of a risk verdict actually produced by a model, not a test fake — watch specifically that
-       ADR-0032's rework routing fires correctly off a real `FLAGGED`/`FAILED`.
+       ADR-0032's rework routing fires correctly off a real `FLAGGED`/`FAILED`. Also decide here
+       (ADR-0034 §6) how the Director surfaces a propagated `QaVerdictError`/`LLMError`: leave the
+       Run in `WAITING_QA` with a `PENDING` Evaluation for `resume`, or route it to `FAILED` with a
+       stable reason as ADR-0033 did for an `INVALID` Output.
     5. **Stage 8 acceptance** — a test in the shape of `test_m2_acceptance.py` proving both DoD
        lines end to end: a `PASSED` verdict lets a run complete, a risk verdict fail-closes to
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop

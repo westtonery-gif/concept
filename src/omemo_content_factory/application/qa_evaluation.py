@@ -8,10 +8,16 @@ persists it through its root (``open_evaluation`` / ``record_evaluation``).
 Fail closed by construction: this slice never catches. If the evaluator raises, the exception
 propagates (PROJECT.md §10 — no swallowed errors) and the Evaluation stays ``PENDING``, which the
 Run's approval gate treats as "not passed". There is no default verdict and no fallback.
+
+An evaluator built on the structured LLM port turns the model's flat string fields into a verdict
+only through :func:`decode_verdict` (ADR-0034); a malformed answer raises :class:`QaVerdictError`
+and fails closed like any other evaluator failure.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -21,6 +27,16 @@ from omemo_content_factory.domain.run import Actor, Run
 
 QA_KIND = "qa"
 """The evaluation ``kind`` recorded for the QA gate (DOMAIN_MODEL.md §2.13: "вид оценки")."""
+
+QA_VERDICT_FIELD = "verdict"
+QA_FLAGS_FIELD = "flags"
+QA_VERDICT_FIELDS = (QA_VERDICT_FIELD, QA_FLAGS_FIELD)
+"""The structured fields of a QA answer — the QA role Schema's ``required_fields`` (ADR-0034)."""
+
+_VERDICT_TOKENS = {
+    status.value: status
+    for status in (EvaluationStatus.PASSED, EvaluationStatus.FLAGGED, EvaluationStatus.FAILED)
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +49,47 @@ class EvaluationResult:
 
     verdict: EvaluationStatus
     flags: tuple[str, ...] = ()
+
+
+class QaVerdictError(Exception):
+    """A QA answer's fields break the verdict contract (ADR-0034) — a failure, never a verdict."""
+
+
+def decode_verdict(fields: Mapping[str, str]) -> EvaluationResult:
+    """Turn a QA answer's structured fields into an :class:`EvaluationResult` (ADR-0034).
+
+    ``verdict`` must be exactly ``passed`` / ``flagged`` / ``failed`` (surrounding whitespace and
+    case ignored); ``flags`` must be the JSON text of an array of non-blank strings, kept verbatim
+    and in order. A risk verdict needs at least one flag. Other keys are ignored. Anything else
+    raises :class:`QaVerdictError` — a malformed answer is never guessed into a verdict.
+    """
+    raw_verdict = fields.get(QA_VERDICT_FIELD)
+    if raw_verdict is None:
+        raise QaVerdictError(f"QA answer has no '{QA_VERDICT_FIELD}' field")
+    verdict = _VERDICT_TOKENS.get(raw_verdict.strip().casefold())
+    if verdict is None:
+        raise QaVerdictError(
+            f"'{QA_VERDICT_FIELD}' must be one of {sorted(_VERDICT_TOKENS)}, got {raw_verdict!r}"
+        )
+
+    raw_flags = fields.get(QA_FLAGS_FIELD)
+    if raw_flags is None:
+        raise QaVerdictError(f"QA answer has no '{QA_FLAGS_FIELD}' field")
+    try:
+        parsed: object = json.loads(raw_flags)
+    except json.JSONDecodeError as exc:
+        raise QaVerdictError(f"'{QA_FLAGS_FIELD}' is not valid JSON: {raw_flags!r}") from exc
+    if not isinstance(parsed, list) or not all(
+        isinstance(flag, str) and flag.strip() for flag in parsed
+    ):
+        raise QaVerdictError(
+            f"'{QA_FLAGS_FIELD}' must be a JSON array of non-blank strings, got {raw_flags!r}"
+        )
+    flags = tuple(str(flag) for flag in parsed)
+
+    if verdict is not EvaluationStatus.PASSED and not flags:
+        raise QaVerdictError(f"a '{verdict.value}' verdict needs at least one flag")
+    return EvaluationResult(verdict, flags)
 
 
 class ArtifactEvaluator(Protocol):

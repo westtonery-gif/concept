@@ -3,12 +3,15 @@
 ``evaluate_artifact`` must invoke the evaluator on the candidate's content and persist its verdict
 through the Run root, and must stay fail closed when the evaluator fails. ``ContentDirector`` must
 route by the verdict: ``PASSED`` continues, a risk verdict stops at the Approval Gate with an
-escalation review, no candidate fails the Run, and without QA nothing changes. Scenario ids refer to
-``EVALUATION_ACCEPTANCE.md``. Deterministic fakes only; no LLM, network or infrastructure.
+escalation review, no candidate fails the Run, and without QA nothing changes. ``decode_verdict``
+must turn a QA answer's flat string fields into a verdict by exactly the ADR-0034 grammar and
+refuse everything else. Scenario ids refer to ``EVALUATION_ACCEPTANCE.md``. Deterministic fakes
+only; no LLM, network or infrastructure.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import pytest
@@ -20,8 +23,11 @@ from omemo_content_factory.application.content_director import (
 )
 from omemo_content_factory.application.qa_evaluation import (
     QA_KIND,
+    QA_VERDICT_FIELDS,
     ArtifactEvaluator,
     EvaluationResult,
+    QaVerdictError,
+    decode_verdict,
     evaluate_artifact,
 )
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -82,6 +88,16 @@ class FailingEvaluator:
         raise RuntimeError("QA backend unavailable")
 
 
+@dataclass(frozen=True, slots=True)
+class DecodingEvaluator:
+    """QA double shaped like a structured-port evaluator: fixed fields -> ``decode_verdict``."""
+
+    fields: Mapping[str, str]
+
+    def evaluate(self, content: str) -> EvaluationResult:
+        return decode_verdict(self.fields)
+
+
 def make_run() -> Run:
     return Run.create(
         run_id="run-qa-app-0001", content_brief_ref="brief-0001", workflow_version_ref="wf@v1"
@@ -137,6 +153,92 @@ def test_eap_02_evaluator_failure_propagates_and_keeps_the_gate_shut() -> None:
     run.submit_review(review_id, ReviewStatus.APPROVED, by=REVIEWER)
     with pytest.raises(ArtifactQaNotPassedError):
         run.transition_artifact(artifact_id, ArtifactStatus.APPROVED, by=CD)
+
+
+# --- Verdict decoder (QVD, ADR-0034) -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        ("passed", EvaluationStatus.PASSED),
+        ("flagged", EvaluationStatus.FLAGGED),
+        ("failed", EvaluationStatus.FAILED),
+        ("  FLAGGED\n", EvaluationStatus.FLAGGED),
+        ("Passed", EvaluationStatus.PASSED),
+    ],
+)
+def test_qvd_01_each_verdict_token_decodes_ignoring_case_and_surrounding_space(
+    token: str, expected: EvaluationStatus
+) -> None:
+    result = decode_verdict({"verdict": token, "flags": '["reason"]'})
+    assert result.verdict is expected
+
+
+def test_qvd_02_flags_are_a_json_array_kept_verbatim_and_in_order() -> None:
+    raw = '["  unsupported claim: cures anxiety ", "missing disclaimer", "missing disclaimer"]'
+    result = decode_verdict({"verdict": "flagged", "flags": raw})
+    assert result == EvaluationResult(
+        EvaluationStatus.FLAGGED,
+        ("  unsupported claim: cures anxiety ", "missing disclaimer", "missing disclaimer"),
+    )
+    assert decode_verdict({"verdict": "passed", "flags": "[]"}).flags == ()
+
+
+def test_qvd_03_a_pass_may_carry_remarks() -> None:
+    result = decode_verdict({"verdict": "passed", "flags": '["tone could be warmer"]'})
+    assert result == EvaluationResult(EvaluationStatus.PASSED, ("tone could be warmer",))
+
+
+def test_qvd_04_extra_keys_are_ignored() -> None:
+    result = decode_verdict({"verdict": "passed", "flags": "[]", "score": "97", "notes": "x"})
+    assert result == EvaluationResult(EvaluationStatus.PASSED)
+
+
+@pytest.mark.parametrize(
+    "token", ["", "   ", "pending", "pass", "ok", "risk", "reject", "пройдено", "passed."]
+)
+def test_qvd_05_anything_but_an_exact_token_is_refused(token: str) -> None:
+    with pytest.raises(QaVerdictError):
+        decode_verdict({"verdict": token, "flags": '["reason"]'})
+
+
+@pytest.mark.parametrize("fields", [{"flags": "[]"}, {"verdict": "passed"}, {}])
+def test_qvd_06_a_missing_field_is_refused(fields: dict[str, str]) -> None:
+    with pytest.raises(QaVerdictError):
+        decode_verdict(fields)
+
+
+@pytest.mark.parametrize(
+    "raw_flags",
+    ["", "not json", '"a flag"', '{"a": "b"}', "null", "[1]", '["ok", ""]', '["   "]', '[["a"]]'],
+)
+def test_qvd_07_malformed_flags_are_refused(raw_flags: str) -> None:
+    with pytest.raises(QaVerdictError):
+        decode_verdict({"verdict": "passed", "flags": raw_flags})
+
+
+@pytest.mark.parametrize("token", ["flagged", "failed"])
+def test_qvd_08_a_risk_verdict_without_a_flag_is_refused(token: str) -> None:
+    with pytest.raises(QaVerdictError, match="at least one flag"):
+        decode_verdict({"verdict": token, "flags": "[]"})
+
+
+def test_qvd_09_a_malformed_answer_fails_closed_behind_the_port() -> None:
+    run = make_run()
+    artifact_id = candidate_artifact(run, "content")
+    evaluator = DecodingEvaluator({"verdict": "looks fine", "flags": "[]"})
+    with pytest.raises(QaVerdictError):
+        evaluate_artifact(run, evaluator, artifact_id)
+    assert [view.status for view in run.evaluations] == [EvaluationStatus.PENDING]
+    review_id = run.open_human_review(artifact_id, by=CD)
+    run.submit_review(review_id, ReviewStatus.APPROVED, by=REVIEWER)
+    with pytest.raises(ArtifactQaNotPassedError):
+        run.transition_artifact(artifact_id, ArtifactStatus.APPROVED, by=CD)
+
+
+def test_qvd_10_the_verdict_fields_are_pinned() -> None:
+    assert QA_VERDICT_FIELDS == ("verdict", "flags")
 
 
 # --- ContentDirector routing (ECD) -------------------------------------------------------
