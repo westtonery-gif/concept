@@ -49,24 +49,24 @@ the source of truth — code must never contradict them; on conflict, the docs w
   and tested, but **not yet used by any entrypoint** — `demo.py` and `demo_factory.py` both
   still take one shared client for every role via `OMEMO_LLM_MODEL` (task 6 below).
 
-## Session workflow (branch, push, PR — no need to ask first)
+## Session workflow (push straight to main — no branch/PR ceremony needed)
 
-CONTRIBUTING.md requires trunk-based work: `main` is protected, no direct pushes, merge only
-via a reviewed PR with green CI. For every task in the queue below:
+`main` is not protected (CONTRIBUTING.md "Branching", updated 2026-09-15 — PRs turned out to be
+pure overhead for a solo maintainer + AI assistants, so the earlier "no direct pushes" rule was
+dropped). For every task in the queue below:
 
-1. Create a short-lived branch off `main` (e.g. `feat/evaluation-qa-entity`).
-2. Build → Test locally (the quality gate below) → Commit (Conventional Commits).
-3. **Push the branch to `origin` and open the PR yourself — this is pre-authorized, do not
-   stop to ask.** Wait for CI (`gh pr checks` / the PR's Checks tab) to go green.
-4. Leave the PR **open** for the human to merge, unless they have told you in this session to
-   merge automatically on green CI — merging into `main` is the one step that still needs an
-   explicit go-ahead by default.
-5. After merge, delete the feature branch (local + remote) and pull `main` before starting the
-   next queue item.
+1. Build → Test locally (the quality gate below) → Commit (Conventional Commits) directly on
+   `main` (`git pull --ff-only` first if it's been a while since you last synced).
+2. **Push straight to `origin main` — this is pre-authorized, do not stop to ask.** CI
+   (`.github/workflows/ci.yml`) runs on the push as a post-hoc check; if it goes red, the next
+   session's first job is fixing it forward (`git revert` only if a fix-forward isn't quick).
+3. A short-lived branch + PR is still fine when *you* want CI green before landing (a large or
+   risky change, e.g. one touching `Run`'s public contract), or when two sessions are working
+   concurrently and a PR avoids interleaving unfinished work — but it's your call, not the
+   default, and never something to ask permission for either way.
 
-Never push straight to `main` — that bypasses CI-on-PR and violates CONTRIBUTING.md, regardless
-of the fact that ADR-0016 and earlier `CLAUDE.md` updates were once pushed directly (a mistake,
-not a precedent).
+(History: PRs #1-#4 in this repo predate this rule and went through branch+PR; that was the
+process at the time, not a pattern to keep copying.)
 
 ## Next tasks (ordered queue — one task per session; each ends Build → Test → Commit → Push/PR)
 1. ~~Actualize this file~~ — done.
