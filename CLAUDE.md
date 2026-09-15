@@ -15,11 +15,15 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 16 ADRs (0001–0016) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 17 ADRs (0001–0017) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
-  Run restoration (0015), provider/model selection ownership (0016) are all implemented and
-  tested. All gates green: ruff, ruff format, mypy --strict, pytest (261 passed, 1 skipped).
+  Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
+  (0017) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict,
+  pytest (275 passed, 1 skipped).
+- **Domain errors share one root**: every per-aggregate base (`RunDomainError`,
+  `TaskDomainError`, …) subclasses `DomainError` (`domain/errors.py`, ADR-0017). A new
+  aggregate must root its own error base there; `tests/test_domain_error.py` enforces it.
 - **Two real production roles are migrated and chained**: `content_researcher@v1` (Rin) and
   `script_writer@v1` (Leo) — `src/omemo_content_factory/agents/`. Each is proven alone
   (`tests/test_content_researcher_agent.py`, `tests/test_script_writer_agent.py`) and together
@@ -34,12 +38,12 @@ the source of truth — code must never contradict them; on conflict, the docs w
   still take one shared client for every role via `OMEMO_LLM_MODEL` (task 6 below).
 
 ## Next tasks (ordered queue — one task per session; each ends Build → Test → Commit → Review)
-1. ~~Actualize this file~~ — done by this edit.
-2. Extract the shared `DomainError` base (rule-of-three follow-up; ADR-0005 §9) — small ADR +
-   mechanical refactor across Task/Output/Artifact/Human Review/Schema/Workflow error hierarchies.
+1. ~~Actualize this file~~ — done.
+2. ~~Extract the shared `DomainError` base~~ — done (ADR-0017, `domain/errors.py`).
 3. **Evaluation / QA entity** (`fail closed`; deferred by ADR-0005/0006/0007) — new ADR +
    SPEC/ACCEPTANCE + domain code + wiring into `application/task_execution.py` before the
-   Human Review gate. Blocks ROADMAP Stage 8 (QA Agent) and an honest MVP path.
+   Human Review gate. Blocks ROADMAP Stage 8 (QA Agent) and an honest MVP path. Its error base
+   subclasses `DomainError` (ADR-0017).
 4. **Artifact versioning** (`SUPERSEDED`) — new ADR + domain code; fix `artifact.py`'s stale
    module docstring in the same change.
 5. **Analytics Record** entity — new ADR + domain code. Needed for ROADMAP Stage 14
@@ -52,7 +56,7 @@ the source of truth — code must never contradict them; on conflict, the docs w
    first; likely several sessions each. Prerequisite for Stage 7 (first Agent through the full
    orchestrator) and the Stage 12 MVP.
 
-See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 2–5.
+See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
 - No code before its spec/acceptance/ADR exist. Significant decisions → an ADR.
@@ -62,10 +66,12 @@ See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape 
   core (PROJECT.md §4.11).
 - Provider-agnostic: never hardcode a model; selection lives in config.
 - An aggregate's public API is small: factory `create`, read-only properties, one guarded
-  mutation method, domain events, domain errors. Immutable input via `__slots__` + guarded
-  `__setattr__`. Single guarded `transition` + declarative allowed-transitions table.
+  mutation method, domain events, domain errors (rooted at `DomainError`). Immutable input via
+  `__slots__` + guarded `__setattr__`. Single guarded `transition` + declarative
+  allowed-transitions table.
 
 ## Quality gate (all green before commit; a working `.venv` with Python exists)
+Windows: `.venv/Scripts/python.exe`; macOS/Linux: `.venv/bin/python`.
 ```
 .venv/Scripts/python.exe -m ruff check .
 .venv/Scripts/python.exe -m ruff format --check .

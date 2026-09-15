@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypeAlias
 
+from omemo_content_factory.domain.errors import DomainError
+
 SchemaId: TypeAlias = str
 """Opaque, stable identifier of the logical contract (ADR-0008 §3); shared across its versions."""
 
@@ -78,10 +80,10 @@ class SchemaView:
 
 
 # --- Domain errors -----------------------------------------------------------------------
-# Schema domain-rule violations (ADR-0008 §11). No shared DomainError base is extracted here.
+# Schema domain-rule violations (ADR-0008 §11). Rooted at the shared ``DomainError`` (ADR-0017).
 
 
-class SchemaDomainError(Exception):
+class SchemaDomainError(DomainError):
     """Base class for all Schema domain-rule violations."""
 
 

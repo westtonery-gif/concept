@@ -17,6 +17,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TypeAlias
 
+from omemo_content_factory.domain.errors import DomainError
+
 WorkflowId: TypeAlias = str
 """Opaque, stable identifier of a Workflow (ADR-0009 §4)."""
 
@@ -25,10 +27,10 @@ StepId: TypeAlias = str
 
 
 # --- Domain errors -----------------------------------------------------------------------
-# Workflow domain-rule violations (ADR-0009 §9). No shared DomainError base is extracted here.
+# Workflow domain-rule violations (ADR-0009 §9). Rooted at the shared ``DomainError`` (ADR-0017).
 
 
-class WorkflowDomainError(Exception):
+class WorkflowDomainError(DomainError):
     """Base class for all Workflow domain-rule violations."""
 
 
