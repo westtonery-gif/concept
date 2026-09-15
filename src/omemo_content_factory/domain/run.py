@@ -40,6 +40,7 @@ from omemo_content_factory.domain.artifact import (
     ArtifactView,
     DuplicateArtifactError,
 )
+from omemo_content_factory.domain.errors import DomainError
 from omemo_content_factory.domain.human_review import (
     HumanReview,
     HumanReviewApproved,
@@ -156,10 +157,11 @@ class RunFailed(RunEvent):
 
 
 # --- Domain errors -----------------------------------------------------------------------
-# Raised on domain-rule violations (ADR-0003 §8). Distinct from technical failures.
+# Raised on domain-rule violations (ADR-0003 §8). Distinct from technical failures. Rooted at the
+# shared ``DomainError`` (ADR-0017).
 
 
-class RunDomainError(Exception):
+class RunDomainError(DomainError):
     """Base class for all Run domain-rule violations."""
 
 

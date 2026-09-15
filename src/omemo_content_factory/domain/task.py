@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypeAlias
 
+from omemo_content_factory.domain.errors import DomainError
 from omemo_content_factory.domain.output import (
     DuplicateOutputError,
     InvalidOutputStateError,
@@ -106,12 +107,12 @@ class TaskFailed(TaskEvent):
 
 
 # --- Domain errors -----------------------------------------------------------------------
-# Raised on Task domain-rule violations (ADR-0004 §8). Distinct from technical failures. No
-# shared DomainError base is extracted yet (rule of three; ADR-0004 §8). Actor authorisation
-# reuses Run's ``UnauthorizedActorError`` (ADR-0004 §8), so it is not redefined here.
+# Raised on Task domain-rule violations (ADR-0004 §8). Distinct from technical failures. Rooted
+# at the shared ``DomainError`` (ADR-0017). Actor authorisation reuses Run's
+# ``UnauthorizedActorError`` (ADR-0004 §8), so it is not redefined here.
 
 
-class TaskDomainError(Exception):
+class TaskDomainError(DomainError):
     """Base class for all Task domain-rule violations."""
 
 
