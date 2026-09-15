@@ -1,4 +1,4 @@
-# CLAUDE.md — concept Content Factory
+# CLAUDE.md — Concept Content Factory
 
 Industrial multi-agent content production system (carousels, AI-video, articles).
 Built bottom-up with a strict **spec-before-code** process. The architecture documents are
@@ -21,6 +21,16 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-16)
+- **The domain pivoted: no health content, no OMEMO (ADR-0037; charter `PROJECT.md` is now 1.3).**
+  The factory is **business-agnostic** — domain, brand, audience and rules arrive as a client
+  profile, not baked into the core. Value #1 is now **uniqueness** + quality (not templated, not a
+  repeat of the client's own or a competitor's material), and "Fail closed для домена здоровья"
+  became "Fail closed при сомнении". `PROJECT.md` / `ARCHITECTURE.md` / `ROADMAP.md` were reworded
+  and renamed to *Concept Content Factory*; `PROJECT.md` §11 now matches the direct-push policy it
+  had contradicted since 2026-09-15. **Deliberately not touched:** the three v1 Prompts
+  (`qa-agent`, `content-researcher`, `script-writer`) still say OMEMO/health — a Prompt version is
+  immutable (ADR-0030/0035), so the new criteria land as **v2** (task 12). The Python package keeps
+  the name `omemo_content_factory`; renaming it is a separate mechanical change, if ever.
 - **All 36 ADRs (0001–0036) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
@@ -384,7 +394,9 @@ process at the time, not a pattern to keep copying.)
        maintainer first: v1 criteria are the documented principles only, **pending their review**
        (→ a v2 Prompt). `check_required_elements@v1` was deliberately **not** granted: the QA path
        has no Skill-invocation seam (ADR-0027 wraps a `TaskExecutor`), and the disclaimer wording
-       is domain content too — revisit with 11.3.
+       is domain content too — revisit with 11.3. **The pending review resolved itself (ADR-0037):**
+       there is no health domain any more, so v1's medical criteria are simply off-target and the
+       v2 Prompt carries uniqueness + client rules instead — see task 12.
     3. ~~**`LLMArtifactEvaluator`**~~ — done (ADR-0036, `infrastructure/llm.py`,
        `EVALUATION_SPEC.md` §8.3, `EVALUATION_ACCEPTANCE.md` §4.3 `LAE`,
        `ANALYTICS_RECORD_SPEC.md` / `ANALYTICS_RECORD_ACCEPTANCE.md` 1.2 `AEV`,
@@ -413,6 +425,16 @@ process at the time, not a pattern to keep copying.)
        lines end to end: a `PASSED` verdict lets a run complete, a risk verdict fail-closes to
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop
        (ADR-0032) — covered with a realistic evaluator, not necessarily a live API call.
+
+12. **Retarget the v1 Prompts to the new domain (follow-up of ADR-0037).** `qa-agent` v1 judges
+    "материал о здоровье" on medical-claim criteria; `content-researcher` and `script-writer` v1
+    both open with "Ты … видео-фабрики OMEMO". The charter no longer says either. Add **v2** of each
+    in `prompts/catalogue.toml` — never edit a v1 (ADR-0030/0035 immutability: past Runs must stay
+    reproducible) — and point the roles at them. Criteria for `qa-agent` v2 are now decidable without
+    domain expertise: uniqueness (not templated, not a repeat of the client's own or a competitor's
+    material), factual correctness, no unsubstantiated claims, the client's editorial rules;
+    regulated-niche rules only when a client profile supplies them. This is also the **first real
+    Prompt-version bump**, so it exercises the store's versioning path end to end.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
