@@ -1,15 +1,15 @@
 # PROMPT_STORE_ACCEPTANCE.md — Acceptance Criteria
 
-**Версия:** 1.0
+**Версия:** 1.1 (PST-01, PST-02: QA-роль, ADR-0035)
 **Статус:** Принят
-**Дата:** 2026-09-15
+**Дата:** 2026-09-16
 **Префикс тестов:** `PST`
 
 ## Acceptance
 
 | ID | Критерий |
 |---|---|
-| PST-01 | Встроенный каталог загружает Rin и Leo как `Prompt` с прежними id, версиями, Schema refs и точным текстом. |
+| PST-01 | Встроенный каталог содержит ровно Prompt Rin, Leo и QA-роли; Rin и Leo загружаются с прежними id, версиями, Schema refs и точным текстом (текст QA-роли проверяет QAR-03). |
 | PST-02 | Production role-модули не конструируют `Prompt` и не содержат System/User template. |
 | PST-03 | `build_executor_map(..., prompts=None, ...)` читает встроенный каталог и передаёт его текст и точный version ref в executor. |
 | PST-04 | Верхнеуровневая сборка с `prompts=None` использует один загруженный снимок для executor/schema maps и не вызывает модель на build-time. |

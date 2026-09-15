@@ -2,7 +2,7 @@
 
 > Приёмка реализации `EVALUATION_SPEC.md` (по `ADR-0018`). Каждый критерий фальсифицируем: при
 > неверной реализации соответствующий тест падает. Идентификаторы используются в докстрингах
-> тестов (`tests/test_evaluation.py`, `tests/test_qa_evaluation.py`).
+> тестов (`tests/test_evaluation.py`, `tests/test_qa_evaluation.py`, `tests/test_qa_agent.py`).
 >
 > **Статус:** Accepted. **Дата:** 2026-09-15.
 
@@ -68,6 +68,16 @@
 | QVD-09 | Оценщик с неверным ответом за `evaluate_artifact` | `QaVerdictError` пробрасывается; оценка `PENDING`; одобрение запрещено |
 | QVD-10 | `QA_VERDICT_FIELDS` | ровно `("verdict", "flags")` |
 
+### 4.2 Определение QA-роли (QAR, ADR-0035, `EVALUATION_SPEC.md` §8.2)
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| QAR-01 | Schema роли | `ACTIVE`; `required_fields == QA_VERDICT_FIELDS`; единственная запись каталога `qa-verdict@v1` |
+| QAR-02 | Agent → Prompt → Schema | `qa_agent@v1` → `qa-agent` v1 → `qa-verdict@v1` → та же Schema; нет `skill_refs` и `tool_refs` |
+| QAR-03 | Текст Prompt | System называет оба поля, три токена вердикта, `JSON` и `[]`; User template содержит `{input}` ровно один раз и оба поля |
+| QAR-04 | `build_schema_map` для роли | `SchemaBinding("qa-verdict@v1", Schema роли)`; модель не вызывается |
+| QAR-05 | Ответ `passed` с `[]` | проходит проверку наличия Schema и декодируется в `PASSED` |
+
 ## 5. Маршрутизация ContentDirector (ECD)
 
 | ID | Сценарий | Ожидание |
@@ -86,6 +96,7 @@
 
 ## 7. Что приёмка НЕ проверяет
 
-Качество реального QA-вердикта и правила комплаенса (Этап 8); метку времени; оценку Output.
+Качество реального QA-вердикта и содержание правил комплаенса (Этап 8; QAR проверяет только
+согласованность Prompt и Schema, а не формулировки критериев); метку времени; оценку Output.
 Доработку после риска с новой версией артефакта проверяет отдельный контракт
 `REWORK_ROUTING_ACCEPTANCE.md` (ADR-0032).

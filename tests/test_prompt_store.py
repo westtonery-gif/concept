@@ -11,6 +11,7 @@ import pytest
 
 import omemo_content_factory.composition as composition
 from omemo_content_factory.agents import content_researcher as rin
+from omemo_content_factory.agents import qa_agent as qa
 from omemo_content_factory.agents import script_writer as leo
 from omemo_content_factory.application.skill_execution import SkillPreprocessingTaskExecutor
 from omemo_content_factory.composition import (
@@ -79,10 +80,10 @@ class _NeverCalledClient:
         raise AssertionError("model called during composition")
 
 
-def test_pst_01_bundled_catalogue_preserves_both_prompts_exactly() -> None:
+def test_pst_01_bundled_catalogue_preserves_migrated_prompts_exactly() -> None:
     prompts = load_prompt_catalogue()
 
-    assert set(prompts) == {rin.PROMPT_REF, leo.PROMPT_REF}
+    assert set(prompts) == {rin.PROMPT_REF, leo.PROMPT_REF, qa.PROMPT_REF}
     assert prompts[rin.PROMPT_REF] == Prompt(
         prompt_id="content-researcher",
         version=PromptVersion(1),
@@ -100,7 +101,7 @@ def test_pst_01_bundled_catalogue_preserves_both_prompts_exactly() -> None:
 
 
 def test_pst_02_role_modules_do_not_construct_or_own_prompt_text() -> None:
-    for role in (rin, leo):
+    for role in (rin, leo, qa):
         source = inspect.getsource(role)
         assert "Prompt(" not in source
         assert "system=" not in source

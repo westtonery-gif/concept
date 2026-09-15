@@ -20,8 +20,8 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-15)
-- **All 34 ADRs (0001–0034) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+## Current state (2026-09-16)
+- **All 35 ADRs (0001–0035) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -31,9 +31,18 @@ anything ahead of the queue below — see task 10.
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
   (0029), the external versioned Prompt store (0030), fail-fast Task sequencing with authoritative
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
-  errors + the Milestone M2 acceptance (0033), and the QA verdict field contract (0034) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (843 passed,
-  0 skipped).
+  errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034) and the QA
+  Agent role definition (0035) are all implemented and tested. All gates green: ruff, ruff format,
+  mypy --strict, pytest (848 passed, 0 skipped).
+- **The QA Agent role is defined but not executed yet (ROADMAP Stage 8, ADR-0035).**
+  `agents/qa_agent.py`: `qa_agent@v1` → Prompt `qa-agent` v1 (bundled store) → Schema
+  `qa-verdict@v1` whose `required_fields` *are* `QA_VERDICT_FIELDS`; no Skills, no Tools. It answers
+  with a verdict, not an Output — it goes behind `ArtifactEvaluator`, never into a Workflow step.
+  **The v1 System Prompt uses only the documented criteria** (PROJECT.md §1: factual correctness,
+  no unsubstantiated medical claims, editorial standards) plus the ADR-0034 grammar — the
+  maintainer chose this baseline on 2026-09-16 and **still owes a review**; concrete clinical rules /
+  disclaimer wording land as `qa-agent` v2, never as an edit of v1. Tests: `tests/test_qa_agent.py`
+  (`QAR`, `EVALUATION_ACCEPTANCE.md` §4.2) pin Prompt/Schema consistency, not wording.
 - **ROADMAP Stage 7 / Milestone M2 is closed (ADR-0033).** `tests/test_m2_acceptance.py` (`M2A`,
   `M2_ACCEPTANCE.md`) runs `research-to-script@v1` (Rin → Leo) once through `compile_runtime` with
   only production assets — the bundled Prompt store, Rin's Skill and `current_date` Tool, the real
@@ -352,13 +361,13 @@ process at the time, not a pattern to keep copying.)
        failure (Evaluation stays `PENDING`) and is never guessed into a verdict. The allowed-value
        check was deliberately **not** put into `Schema` (the QA path never calls
        `Schema.validate` — it records no Output) nor into the port's tool schema (Variant B).
-    2. **QA Agent role: Prompt + Schema + catalog entry** — e.g. `qa_agent@v1` in
-       `agents/qa_agent.py`, mirroring `content_researcher.py`/`script_writer.py`'s shape. The
-       system prompt needs real quality **and** medical-compliance judgment criteria for the
-       health domain (ROADMAP Stage 8's own goal) — this is product/domain content, not something
-       to invent unreviewed; flag it for the maintainer's input rather than guessing clinical
-       rules. Consider granting existing Skills (e.g. `check_required_elements@v1` for mandatory
-       disclaimers) — no new Skill/Tool needed unless a real gap shows up.
+    2. ~~**QA Agent role: Prompt + Schema + catalog entry**~~ — done (ADR-0035,
+       `agents/qa_agent.py`, `qa-agent` v1 in `prompts/catalogue.toml`, `EVALUATION_SPEC.md` §8.2,
+       `EVALUATION_ACCEPTANCE.md` §4.2 `QAR`, `PROMPT_STORE_ACCEPTANCE.md` 1.1). Asked the
+       maintainer first: v1 criteria are the documented principles only, **pending their review**
+       (→ a v2 Prompt). `check_required_elements@v1` was deliberately **not** granted: the QA path
+       has no Skill-invocation seam (ADR-0027 wraps a `TaskExecutor`), and the disclaimer wording
+       is domain content too — revisit with 11.3.
     3. **`LLMArtifactEvaluator`** — an `ArtifactEvaluator` implementation analogous to
        `LLMTaskExecutor` (`infrastructure/llm.py`): calls `LLMClient.complete` with the QA
        Prompt/Schema's generation shape, converts the structured fields into an `EvaluationResult`
