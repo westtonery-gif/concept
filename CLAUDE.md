@@ -144,6 +144,14 @@ process at the time, not a pattern to keep copying.)
 
    After 7.5, Stage 7 (first real Agent through the full orchestrator, Milestone M2) becomes
    possible — that is the next queue item after this breakdown, not part of it.
+8. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
+   generation and TTS voiceover via paid provider subscriptions, plus automated video/photo
+   editing (splicing, audio overlay) via editor APIs. Decision made 2026-09-15: deliberately
+   deferred to Stage 13, not pulled forward — see ROADMAP.md Stage 13's new paragraph for the
+   architectural shape (new Adapters for image-gen/video-gen/TTS/video-editing, Tools where an
+   agent needs to invoke one mid-reasoning, editing/overlay likely a deterministic `Workflow`
+   step rather than an agent decision). Don't start this before Stage 12 without asking first —
+   it was an explicit, deliberate call, not an oversight.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
