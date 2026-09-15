@@ -164,7 +164,22 @@ def main() -> None:
         safe_print("committed steps are not run again. Delete that file to start over.")
         director.resume_workflow(run, WORKFLOW, brief=BRIEF)
     show_run(run)
+    _show_model_calls(run)
     print_final_article(run)
+
+
+def _show_model_calls(run: Run) -> None:
+    """Print every captured model call (ADR-0029) — what the M2 live check reads (ADR-0033 §4)."""
+    safe_print("  Model calls (Analytics Records):")
+    for record in run.analytics_records:
+        usage = record.token_usage
+        span = record.time_range.finished_at - record.time_range.started_at
+        safe_print(
+            f"    - {record.task_id} {record.prompt_ref} {record.provider}/{record.model} "
+            f"tokens={usage.input_tokens}+{usage.output_tokens} "
+            f"cost={record.cost.amount} {record.cost.currency} "
+            f"latency={span.total_seconds() * 1000:.0f}ms retries={record.retries}"
+        )
 
 
 if __name__ == "__main__":

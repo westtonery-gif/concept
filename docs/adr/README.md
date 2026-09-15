@@ -56,3 +56,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0030](0030-versioned-prompt-store.md) | Versioned Prompt Store at the Composition Boundary | Accepted |
 | [0031](0031-fail-fast-task-sequencing-and-schema-binding.md) | Fail-fast Task sequencing and authoritative Schema binding | Accepted |
 | [0032](0032-resumable-qa-rework-routing.md) | Resumable QA rework routing through a new Artifact version | Accepted |
+| [0033](0033-invalid-output-contract-error-and-m2-acceptance.md) | Invalid Output as an orchestration contract error, and the Milestone M2 acceptance | Accepted |

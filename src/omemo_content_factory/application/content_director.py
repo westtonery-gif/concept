@@ -24,6 +24,10 @@ Rework routing (ADR-0032): a QA risk still escalates to a Human Review. When its
 producer with the reviewed content and feedback, then creates a new Artifact version from the
 validated Output. The route is bounded by the Run's rework policy and starts fresh QA/review gates.
 
+Contract errors (ADR-0033): an Output its Schema ruled ``INVALID`` stays recorded for audit, but it
+never becomes an Artifact or a new version and is never handed to the next step; the plan stops
+there and the Run is routed to ``FAILED``.
+
 Storage (ADR-0026/0032): when a ``RunStore`` is injected, the Run is saved after every
 orchestration step — each commit that precedes an external call is taken before the call — so a
 stored Run never holds a half-recorded step. :meth:`ContentDirector.resume` continues a Run brought
@@ -51,6 +55,7 @@ from omemo_content_factory.application.task_execution import (
 from omemo_content_factory.domain.artifact import ArtifactId, ArtifactStatus, ArtifactView
 from omemo_content_factory.domain.evaluation import EvaluationStatus, EvaluationView
 from omemo_content_factory.domain.human_review import HumanReviewView, ReviewStatus
+from omemo_content_factory.domain.output import OutputStatus
 from omemo_content_factory.domain.run import (
     Actor,
     ReworkLimitExceededError,
@@ -73,6 +78,9 @@ REWORK_LIMIT_REASON = "Rework requested but the configured iteration limit is ex
 
 REWORK_NO_OUTPUT_REASON = "Rework task succeeded without a validated Output"
 """Failure reason when re-execution cannot produce an Artifact version (ADR-0032 §3)."""
+
+INVALID_OUTPUT_REASON = "Output violates its Schema contract"
+"""Failure reason when a step's recorded Output was ruled ``INVALID`` (ADR-0033 §1)."""
 
 
 class RunResumptionError(Exception):
@@ -233,6 +241,10 @@ class ContentDirector:
             run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
             self._commit(run)
             return False
+        if self._has_invalid_output(run):
+            run.transition(RunStatus.FAILED, by=_CD, reason=INVALID_OUTPUT_REASON)
+            self._commit(run)
+            return False
         run.transition(RunStatus.WAITING_QA, by=_CD)
         self._commit(run)
         return True
@@ -295,7 +307,7 @@ class ContentDirector:
             run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
             self._commit(run)
             return False
-        if task.output is None:
+        if task.output is None or task.output.status is not OutputStatus.VALID:
             run.transition(RunStatus.FAILED, by=_CD, reason=REWORK_NO_OUTPUT_REASON)
             self._commit(run)
             return False
@@ -316,7 +328,11 @@ class ContentDirector:
             self._finish_rework(run, task_id, request, source.artifact_id)
             return
         output = task.output
-        if output is not None and self._artifact_of(run, output.output_id) is None:
+        if (
+            output is not None
+            and output.status is OutputStatus.VALID
+            and self._artifact_of(run, output.output_id) is None
+        ):
             source, _ = self._rework_source(run)
             run.create_artifact_version(source.artifact_id, output.output_id, by=_CD)
             self._commit(run)
@@ -332,7 +348,7 @@ class ContentDirector:
             schema_binding=self._resolve_schema(request.agent_ref),
         )
         output = run.task(task_id).output
-        if output is not None:
+        if output is not None and output.status is OutputStatus.VALID:
             run.create_artifact_version(previous_artifact_id, output.output_id, by=_CD)
         self._commit(run)
 
@@ -380,11 +396,12 @@ class ContentDirector:
         return review is not None and review.status is ReviewStatus.CHANGES_REQUESTED
 
     def _run_steps(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
-        """Run requests in order, chaining Output and stopping at the first failed Task.
+        """Run requests in order, chaining Output and stopping at the first failed step.
 
         Commits once when a Task is started (before its executor is called) and once when its
         outcome, Output and Artifact are all recorded (ADR-0026 §2). A non-successful Task stops
-        the sequential plan before any downstream request is opened or resumed (ADR-0031).
+        the sequential plan before any downstream request is opened or resumed (ADR-0031), and so
+        does a successful one whose Output was ruled ``INVALID`` (ADR-0033 §1).
         """
         existing = run.tasks
         chained_input: str | None = None
@@ -403,9 +420,11 @@ class ContentDirector:
                 self._commit(run)
                 self._finish(run, task_id, request)
             task = run.task(task_id)
-            if task.status is not TaskStatus.SUCCEEDED:
-                break
             output = task.output
+            if task.status is not TaskStatus.SUCCEEDED or (
+                output is not None and output.status is OutputStatus.INVALID
+            ):
+                break
             if output is not None:
                 chained_input = output.payload
 
@@ -441,9 +460,16 @@ class ContentDirector:
         self._commit(run)
 
     def _add_artifact(self, run: Run, task_id: str, request: TaskRequest) -> bool:
-        """Create the Artifact of the Task's Output if it has one and none exists; whether made."""
+        """Create the Artifact of the Task's VALID Output if none exists yet; whether made.
+
+        An ``INVALID`` Output never becomes an Artifact (ADR-0033 §1).
+        """
         output = run.task(task_id).output
-        if output is None or self._artifact_of(run, output.output_id) is not None:
+        if (
+            output is None
+            or output.status is OutputStatus.INVALID
+            or self._artifact_of(run, output.output_id) is not None
+        ):
             return False
         run.create_artifact(output.output_id, kind=request.artifact_kind, by=_CD)
         return True
@@ -570,6 +596,14 @@ class ContentDirector:
             if view.output_ref == output_id:
                 return view.artifact_id
         return None
+
+    @staticmethod
+    def _has_invalid_output(run: Run) -> bool:
+        """Whether any Task of ``run`` recorded an Output its Schema ruled ``INVALID``."""
+        return any(
+            view.output is not None and view.output.status is OutputStatus.INVALID
+            for view in run.tasks
+        )
 
     @staticmethod
     def _all_tasks_succeeded(run: Run) -> bool:

@@ -21,7 +21,7 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-15)
-- **All 32 ADRs (0001–0032) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 33 ADRs (0001–0033) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -30,9 +30,19 @@ anything ahead of the queue below — see task 10.
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
   (0029), the external versioned Prompt store (0030), fail-fast Task sequencing with authoritative
-  Schema bindings (0031), and resumable QA/human rework routing (0032) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (801 passed,
-  0 skipped).
+  Schema bindings (0031), resumable QA/human rework routing (0032), and invalid-Output contract
+  errors + the Milestone M2 acceptance (0033) are all implemented and tested. All gates green:
+  ruff, ruff format, mypy --strict, pytest (810 passed, 0 skipped).
+- **ROADMAP Stage 7 / Milestone M2 is closed (ADR-0033).** `tests/test_m2_acceptance.py` (`M2A`,
+  `M2_ACCEPTANCE.md`) runs `research-to-script@v1` (Rin → Leo) once through `compile_runtime` with
+  only production assets — the bundled Prompt store, Rin's Skill and `current_date` Tool, the real
+  `AnthropicLLMClient` (only the transport below the SDK is scripted) and the real
+  `SqliteRunStore` — and checks every Stage 7 DoD line in that one pass. Found and fixed on the
+  way: an `INVALID` Output used to become an Artifact, feed the next step and let the Run complete.
+  Now it stays recorded for audit but stops the plan, never becomes an Artifact or version, and
+  fails the Run with `INVALID_OUTPUT_REASON` (in rework: `REWORK_NO_OUTPUT_REASON`). Retry on
+  `INVALID` is deferred (needs a Task/Run decision). A live-provider run is the operator's check
+  via `demo_factory.py`, which now prints each call's model/tokens/cost/latency/retries/prompt.
 - **QA rework routing is real (ROADMAP Stage 7, ADR-0032).** A QA risk still fails closed into
   `WAITING_HUMAN` with an escalation review. When the current candidate's latest decision is
   `CHANGES_REQUESTED`, `ContentDirector.resume` re-enters `RUNNING`, re-executes only that
@@ -176,8 +186,8 @@ anything ahead of the queue below — see task 10.
   `SUPERSEDED` is deliberately **not** reachable via `transition_artifact`
   (`ArtifactSupersessionError`). A new version inherits neither the predecessor's approval nor its
   QA verdict — the gates key on the artifact id, so rework restarts the lifecycle by construction.
-  Orchestrating rework (ContentDirector routing a risk verdict into a re-run) is still open —
-  ADR-0019 "Deferred", ROADMAP Stage 7/8.
+  Orchestrating rework (ContentDirector routing a reviewed risk verdict into a re-run) is done —
+  ADR-0032.
 - **`client_for_role` is wired into `demo_factory.py`** (ADR-0016 realization,
   `infrastructure/provider_model.py`): each role resolves its own provider/model plus explicit token
   prices/currency, with no shared/default client — an incomplete binding fails closed
@@ -253,7 +263,8 @@ process at the time, not a pattern to keep copying.)
       one module; the cases the contract leaves open were decided as fail-loud (ADR-0025 §3).
       Failure injection (a stub raising on demand, to test that a failed report/export never
       blocks the Run) was deliberately left to Stage 7 wiring — no reader before then.
-8. **ROADMAP Stage 7 — first real Agent through the full orchestrator (Milestone M2).** Next.
+8. ~~**ROADMAP Stage 7 — first real Agent through the full orchestrator (Milestone M2)**~~ — done
+   (closed by subtask 8 below, ADR-0033).
    Checked line-by-line against Stage 7's own DoD (ROADMAP.md): the two migrated roles (Rin/Leo)
    already satisfy "input → reasoning → Structured Output → recorded in Run" and "invalid output
    -> contract error", but nothing here uses a Skill or a Tool, no adapter is wired into a real
@@ -299,9 +310,11 @@ process at the time, not a pattern to keep copying.)
       candidate's producer, then create the successor with `Run.create_artifact_version`; canonical
       JSON feedback input, bounded failure and crash-safe resumption are specified in
       `REWORK_ROUTING_SPEC.md` / `REWORK_ROUTING_ACCEPTANCE.md`, tests `RWR`/`RWF`/`RWS`/`RWG`).
-   8. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`
-      exercising Storage + a Skill + a Tool + captured metrics + an externally-stored prompt in
-      one pass; this is what actually closes Stage 7, not any subtask alone.
+   8. ~~**Bring it together (Milestone M2 acceptance)**~~ — done (ADR-0033, `M2_ACCEPTANCE.md`,
+      `tests/test_m2_acceptance.py` `M2A`): one pass through `compile_runtime` exercising Storage +
+      a Skill + a Tool + captured metrics + the externally-stored prompt. The DoD's "invalid output
+      -> contract error" line turned out to be unmet (an `INVALID` Output was chained and turned
+      into an Artifact) and is now an error state; the retry half is deferred (ADR-0033 §3).
 9. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
    generation and TTS voiceover via paid provider subscriptions, plus automated video/photo
    editing (splicing, audio overlay) via editor APIs. Decision made 2026-09-15: deliberately
@@ -321,6 +334,10 @@ process at the time, not a pattern to keep copying.)
     MVP) before Stage 13, or carve out an earlier narrow video slice. §19 has the doc's own
     suggested opening question for whichever session picks this up. Do not start any of §16's
     "video vertical slice" work, or reorder Stage 8-13, without that explicit ADR decision first.
+11. **ROADMAP Stage 8 — QA Agent.** Next (ROADMAP order; also `CONTENT_FACTORY_THOUGHTS.md` §16's
+    first step after Stage 7). First session: break it into session-sized subtasks here, as tasks 7
+    and 8 were. The fail-closed gate (ADR-0018) and rework routing (ADR-0032) already exist; what's
+    missing is a real `ArtifactEvaluator` role wired into an entrypoint.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
