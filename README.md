@@ -1,6 +1,6 @@
 # Concept Content Factory
 
-Industrial multi-agent content production system for **OMEMO Health** — a
+Industrial multi-agent content production system for **Concept** — a
 managed, reproducible, human-in-the-loop pipeline for producing content.
 
 > **Status:** ROADMAP **Stage 2 — domain models & contracts**.
