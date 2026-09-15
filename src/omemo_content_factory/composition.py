@@ -35,6 +35,7 @@ from typing import TypeAlias
 
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.skill_execution import (
     SkillPreprocessingTaskExecutor,
     TaskInputSkillInvocation,
@@ -250,18 +251,19 @@ def build_schema_map(
     agents: Iterable[Agent],
     prompts: PromptCatalogueInput,
     schemas: Mapping[str, Schema],
-) -> dict[str, Schema]:
-    """Compile the `agent_ref → Schema` map from the catalogues (build-time, structural only).
+) -> dict[str, SchemaBinding]:
+    """Compile the `agent_ref → SchemaBinding` map (build-time, structural only).
 
     Resolves `agent.prompt_ref → Prompt → prompt.schema_ref → Schema` as pure key-presence lookups
     (duplicate `agent_ref` / unknown `prompt_ref` / unknown `schema_ref` → ``CompositionError``).
-    It does **not** validate anything, run a Task, or interpret Schema/Workflow semantics — and this
-    map is **not** yet used by execution (wiring is a later sub-slice). Composition-Root scope only
-    (`ADR-0012`): structural existence check, no policy.
+    The resulting immutable binding preserves the exact opaque catalogue key beside the resolved
+    authority (ADR-0031). It does **not** validate anything, run a Task, or interpret
+    Schema/Workflow semantics. Composition-Root scope only (`ADR-0012`): structural existence
+    check, no policy.
     ``prompts=None`` reads the bundled Prompt store (`ADR-0030`).
     """
     resolved_prompts = _resolve_prompts(prompts)
-    result: dict[str, Schema] = {}
+    result: dict[str, SchemaBinding] = {}
     for agent in agents:
         if agent.agent_id in result:
             raise CompositionError(f"duplicate agent_ref '{agent.agent_id}'")
@@ -275,7 +277,7 @@ def build_schema_map(
             raise CompositionError(
                 f"prompt '{prompt.prompt_id}' references unknown schema '{prompt.schema_ref}'"
             )
-        result[agent.agent_id] = schema
+        result[agent.agent_id] = SchemaBinding(prompt.schema_ref, schema)
     return result
 
 

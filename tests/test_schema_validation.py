@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from omemo_content_factory.application.schema_validation import (
+    SchemaBinding,
     resolve_active_schema,
     validate_and_record_output,
 )
@@ -65,10 +66,9 @@ def test_valid_result_is_recorded_via_existing_record_output() -> None:
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a", "structure": "b"},
         payload="the produced content",
-        schema_ref="research-notes@1",
     )
 
     assert output_id is not None
@@ -87,10 +87,9 @@ def test_invalid_result_is_recorded_as_invalid() -> None:
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a"},  # missing "structure"
         payload="the produced content",
-        schema_ref="research-notes@1",
     )
 
     assert output_id is not None
@@ -119,9 +118,8 @@ def test_validation_against_non_active_schema_raises() -> None:
         validate_and_record_output(
             run,
             task_id,
-            schema=draft,
+            schema_binding=SchemaBinding("research-notes@1", draft),
             payload_fields={"facts": "a"},
             payload="x",
-            schema_ref="research-notes@1",
         )
     assert run.task(task_id).output is None

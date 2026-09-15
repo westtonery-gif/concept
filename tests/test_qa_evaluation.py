@@ -24,6 +24,7 @@ from omemo_content_factory.application.qa_evaluation import (
     EvaluationResult,
     evaluate_artifact,
 )
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import ExecutionResult
 from omemo_content_factory.domain.artifact import ArtifactQaNotPassedError, ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus
@@ -100,7 +101,10 @@ def candidate_artifact(run: Run, content: str) -> str:
 
 def run_director(qa: ArtifactEvaluator | None, *, with_schemas: bool = True) -> Run:
     """Create a Run and orchestrate the two-step workflow through a ContentDirector."""
-    schemas = {"researcher@v1": _open_schema(), "writer@v1": _open_schema()}
+    schemas = {
+        "researcher@v1": SchemaBinding("s@v1", _open_schema()),
+        "writer@v1": SchemaBinding("s@v1", _open_schema()),
+    }
     director = ContentDirector(OutputtingExecutor(), schemas if with_schemas else None, qa=qa)
     run = make_run()
     director.execute(run, REQUESTS)

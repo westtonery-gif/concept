@@ -25,6 +25,7 @@ from omemo_content_factory.application.content_director import (
     TaskRequest,
 )
 from omemo_content_factory.application.qa_evaluation import EvaluationResult
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import ExecutionResult
 from omemo_content_factory.composition import (
     DEFAULT_RUN_STORE_PATH,
@@ -173,7 +174,10 @@ def _director(
     store: RunStore | None,
     qa: CountingEvaluator | None = None,
 ) -> ContentDirector:
-    schemas = {"researcher@v1": _schema(), "writer@v1": _schema()}
+    schemas = {
+        "researcher@v1": SchemaBinding("s@v1", _schema()),
+        "writer@v1": SchemaBinding("s@v1", _schema()),
+    }
     return ContentDirector(executor, schemas, qa=qa, store=store)
 
 

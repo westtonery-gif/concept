@@ -63,11 +63,13 @@ def test_workflow_with_all_tasks_succeeding_completes_the_run() -> None:
 
 
 def test_workflow_with_a_failing_task_routes_the_run_to_failed() -> None:
-    """A single failing Task -> the coordinator routes the Run to FAILED, not COMPLETED."""
+    """A failed Task stops the sequential plan before any downstream Task is opened."""
     director = ContentDirector(ExecutorFailingOn("structure from research"))
     run = run_demo_workflow(director)
     assert run.status is RunStatus.FAILED
     assert run.failure_reason == "one or more tasks failed"
+    assert [task.workflow_step_ref for task in run.tasks] == ["step-research", "step-write"]
+    assert [task.status for task in run.tasks] == [TaskStatus.SUCCEEDED, TaskStatus.FAILED]
 
 
 def test_workflow_opens_one_task_per_request_preserving_its_references() -> None:

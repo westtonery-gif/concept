@@ -36,6 +36,7 @@ from omemo_content_factory.application.qa_evaluation import (
     ArtifactEvaluator,
     record_verdict,
 )
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import (
     TaskExecutor,
     finish_task,
@@ -44,7 +45,6 @@ from omemo_content_factory.application.task_execution import (
 from omemo_content_factory.domain.artifact import ArtifactId, ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus, EvaluationView
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
-from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.task import TaskRetryLimitExceededError, TaskStatus
 from omemo_content_factory.domain.workflow import Workflow
 
@@ -96,7 +96,7 @@ class ContentDirector:
     def __init__(
         self,
         executor: TaskExecutor | Mapping[str, TaskExecutor],
-        schemas: Mapping[str, Schema] | None = None,
+        schemas: Mapping[str, SchemaBinding] | None = None,
         qa: ArtifactEvaluator | None = None,
         store: RunStore | None = None,
     ) -> None:
@@ -203,10 +203,11 @@ class ContentDirector:
             self._commit(run)
 
     def _run_steps(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
-        """Run every request whose Task is not terminal yet, chaining Output into the next input.
+        """Run requests in order, chaining Output and stopping at the first failed Task.
 
         Commits once when a Task is started (before its executor is called) and once when its
-        outcome, Output and Artifact are all recorded (ADR-0026 §2).
+        outcome, Output and Artifact are all recorded (ADR-0026 §2). A non-successful Task stops
+        the sequential plan before any downstream request is opened or resumed (ADR-0031).
         """
         existing = run.tasks
         chained_input: str | None = None
@@ -224,7 +225,10 @@ class ContentDirector:
                 )
                 self._commit(run)
                 self._finish(run, task_id, request)
-            output = run.task(task_id).output
+            task = run.task(task_id)
+            if task.status is not TaskStatus.SUCCEEDED:
+                break
+            output = task.output
             if output is not None:
                 chained_input = output.payload
 
@@ -254,7 +258,7 @@ class ContentDirector:
             run,
             self._resolve(request.agent_ref),
             task_id,
-            schema=self._resolve_schema(request.agent_ref),
+            schema_binding=self._resolve_schema(request.agent_ref),
         )
         self._add_artifact(run, task_id, request)
         self._commit(run)
@@ -331,10 +335,10 @@ class ContentDirector:
             return executor[agent_ref]
         return executor
 
-    def _resolve_schema(self, agent_ref: str) -> Schema | None:
-        """Select the role's Schema from the injected map (selection only; ADR-0013 §8).
+    def _resolve_schema(self, agent_ref: str) -> SchemaBinding | None:
+        """Select the role's Schema binding from the injected map (ADR-0013 §8; ADR-0031).
 
-        Returns ``None`` when no schema map is wired — then ``execute_task`` records no Output (the
+        Returns ``None`` when no schema map is wired — then ``finish_task`` records no Output (the
         validated finalization is the only path; there is no always-VALID fallback).
         """
         if self._schemas is None:

@@ -54,3 +54,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0028](0028-llm-tool-use-loop.md) | Provider-neutral LLM tool-use loop | Accepted |
 | [0029](0029-llm-call-metrics-capture-and-pricing.md) | LLM call metrics capture and explicit token pricing | Accepted |
 | [0030](0030-versioned-prompt-store.md) | Versioned Prompt Store at the Composition Boundary | Accepted |
+| [0031](0031-fail-fast-task-sequencing-and-schema-binding.md) | Fail-fast Task sequencing and authoritative Schema binding | Accepted |

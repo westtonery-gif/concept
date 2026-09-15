@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import ExecutionResult, execute_task
 from omemo_content_factory.domain.output import (
     DuplicateOutputError,
@@ -177,7 +178,7 @@ def test_execute_task_records_validated_output_with_schema_and_payload_fields() 
         workflow_step_ref=STEP_REF,
         agent_ref=AGENT_REF,
         task_input=TASK_INPUT,
-        schema=_active_schema(),
+        schema_binding=SchemaBinding("draft@v1", _active_schema()),
     )
     output = run.task(task_id).output
     assert output is not None
@@ -198,11 +199,36 @@ def test_execute_task_records_invalid_output_when_required_fields_missing() -> N
         workflow_step_ref=STEP_REF,
         agent_ref=AGENT_REF,
         task_input=TASK_INPUT,
-        schema=_active_schema(),
+        schema_binding=SchemaBinding("draft@v1", _active_schema()),
     )
     output = run.task(task_id).output
     assert output is not None
     assert output.status is OutputStatus.INVALID
+
+
+def test_execute_task_records_the_authoritative_binding_not_the_executor_schema_ref() -> None:
+    """ADR-0031: validation and Output labelling use the same trusted Schema binding."""
+    run = make_run()
+    executor = StaticTaskExecutor(
+        ExecutionResult(
+            succeeded=True,
+            output="draft v1",
+            schema_ref="untrusted-other-schema@v9",
+            payload_fields={"body": "x"},
+        )
+    )
+    task_id = execute_task(
+        run,
+        executor,
+        workflow_step_ref=STEP_REF,
+        agent_ref=AGENT_REF,
+        task_input=TASK_INPUT,
+        schema_binding=SchemaBinding("draft@v1", _active_schema()),
+    )
+
+    output = run.task(task_id).output
+    assert output is not None
+    assert output.schema_ref == "draft@v1"
 
 
 def test_execute_task_records_no_output_without_a_schema() -> None:

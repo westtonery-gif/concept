@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import pytest
 
 from omemo_content_factory.application.content_director import ContentDirector, TaskRequest
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import ExecutionResult
 from omemo_content_factory.domain.artifact import (
     ArtifactCreated,
@@ -197,7 +198,10 @@ def test_only_content_director_can_transition_an_artifact() -> None:
 
 def test_workflow_creates_one_artifact_per_output_with_provenance() -> None:
     """A full workflow yields one Artifact per produced Output, each tracing back to its Output."""
-    schemas = {"writer@v1": _open_schema(), "editor@v1": _open_schema()}
+    schemas = {
+        "writer@v1": SchemaBinding("s@v1", _open_schema()),
+        "editor@v1": SchemaBinding("s@v1", _open_schema()),
+    }
     director = ContentDirector(OutputtingExecutor(), schemas)
     run = Run.create(
         run_id="run-art-wf", content_brief_ref=BRIEF_REF, workflow_version_ref=WORKFLOW_REF

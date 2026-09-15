@@ -20,6 +20,7 @@ from decimal import Decimal
 import pytest
 
 from omemo_content_factory.application.content_director import ContentDirector, TaskRequest
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskStatus
@@ -197,9 +198,9 @@ def test_three_role_pipeline_records_validated_output_through_the_root() -> None
         ),
     }
     schemas = {
-        "researcher@v1": _active_schema("notes"),
-        "writer@v1": _active_schema("draft"),
-        "editor@v1": _active_schema("final"),
+        "researcher@v1": SchemaBinding("notes@v1", _active_schema("notes")),
+        "writer@v1": SchemaBinding("draft@v1", _active_schema("draft")),
+        "editor@v1": SchemaBinding("final@v1", _active_schema("final")),
     }
     director = ContentDirector(executors, schemas)
     run = Run.create(

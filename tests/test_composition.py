@@ -11,6 +11,7 @@ from collections.abc import Sequence
 
 import pytest
 
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.composition import (
     CompositionError,
     build_content_director,
@@ -197,7 +198,7 @@ def test_build_schema_map_resolves_agent_ref_to_schema() -> None:
     schema = _schema()
     # _prompt().schema_ref == "p1@1"
     result = build_schema_map([_agent()], {"p1": _prompt()}, {"p1@1": schema})
-    assert result == {"researcher@v1": schema}
+    assert result == {"researcher@v1": SchemaBinding("p1@1", schema)}
 
 
 def test_build_schema_map_unknown_schema_ref_raises_build_time() -> None:

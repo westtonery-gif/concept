@@ -21,7 +21,7 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-15)
-- **All 30 ADRs (0001–0030) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 31 ADRs (0001–0031) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -29,8 +29,15 @@ anything ahead of the queue below — see task 10.
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
-  (0029), and the external versioned Prompt store (0030) are all implemented and tested. All gates
-  green: ruff, ruff format, mypy --strict, pytest (785 passed, 0 skipped).
+  (0029), the external versioned Prompt store (0030), and fail-fast Task sequencing with
+  authoritative Schema bindings (0031) are all implemented and tested. All gates green: ruff,
+  ruff format, mypy --strict, pytest (786 passed, 0 skipped).
+- **The Stage 7 correctness review is closed (ADR-0031).** `ContentDirector` stops a sequential
+  plan at its first non-successful Task, so no downstream Task is opened or executor called after
+  a failure (including on resume). The Composition Root now preserves each Prompt's exact opaque
+  `schema_ref` together with the resolved Schema in an immutable `SchemaBinding`; validation uses
+  that Schema and Output recording uses that binding's reference, never the executor's untrusted
+  self-report. Existing reference spellings and all Run/Schema domain contracts remain unchanged.
 - **Production Prompts are stored outside Python code (ROADMAP Stage 7.5, ADR-0030).** Rin and
   Leo's exact v1 System/User text lives in the bundled `prompts/catalogue.toml`; their role modules
   own only Agent/Schema/Skill/Tool declarations. `composition.load_prompt_catalogue()` strictly,
@@ -267,18 +274,12 @@ process at the time, not a pattern to keep copying.)
       Root loads and strictly validates it fail-closed when `prompts=None`, once per top-level build;
       explicit Prompt mappings remain supported and the built wheel contains the TOML resource;
       tests `PST`).
-   6. **Two correctness bugs found in code review** (`CONTENT_FACTORY_THOUGHTS.md` §15.4,
-      confirmed against current code 2026-09-15) — fix before building more on top:
-      - `ContentDirector._run_steps` has no fail-fast: after a Task fails, the loop still runs
-        every later step (with whatever `task_input` it started with, since `chained_input`
-        never advances past a failure). Harmless for cheap text calls; will trigger pointless
-        paid generations once a step is expensive (media). Decide and implement the policy —
-        stop the remaining steps, or an explicit configurable skip — as its own small change.
-      - `finish_task` → `validate_and_record_output` persists `schema_ref=result.schema_ref`
-        (whatever the executor self-reports) without checking it against the `schema` object
-        actually used for `schema.validate(...)`. An Output can end up validated by one Schema
-        but tagged as conforming to a different one. Add the cross-check (raise or normalize to
-        the schema actually used) plus a regression test.
+   6. ~~**Two correctness bugs found in code review**~~ — done (ADR-0031). `_run_steps` now
+      stops at the first non-successful Task and leaves later requests unopened; resumption obeys
+      the same fail-fast boundary. `SchemaBinding` keeps the trusted opaque catalogue reference
+      beside the exact Schema authority; `validate_and_record_output` validates with that object
+      and records that reference, normalizing away any different executor self-report. Tests cover
+      both regressions.
    7. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
       re-run that calls `Run.create_artifact_version` for the new version (ADR-0019 "Deferred").
    8. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`

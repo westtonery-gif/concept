@@ -7,7 +7,10 @@ behaviour of the validated wiring.
 from __future__ import annotations
 
 from omemo_content_factory.application.schema_observability import InMemoryValidationLog
-from omemo_content_factory.application.schema_validation import validate_and_record_output
+from omemo_content_factory.application.schema_validation import (
+    SchemaBinding,
+    validate_and_record_output,
+)
 from omemo_content_factory.domain.output import OutputStatus
 from omemo_content_factory.domain.run import Actor, Run
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
@@ -47,10 +50,9 @@ def test_valid_decision_is_traced() -> None:
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a", "structure": "b"},
         payload="content",
-        schema_ref="research-notes@1",
         observer=log,
     )
 
@@ -71,10 +73,9 @@ def test_invalid_decision_is_traced_and_recorded_invalid() -> None:
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a"},  # missing "structure"
         payload="content",
-        schema_ref="research-notes@1",
         observer=log,
     )
 
@@ -93,10 +94,9 @@ def test_observation_is_optional_and_behaviour_identical_without_observer() -> N
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a", "structure": "b"},
         payload="content",
-        schema_ref="research-notes@1",
     )
 
     assert output_id is not None
@@ -114,10 +114,9 @@ def test_observer_error_does_not_affect_behaviour() -> None:
     output_id = validate_and_record_output(
         run,
         task_id,
-        schema=schema,
+        schema_binding=SchemaBinding("research-notes@1", schema),
         payload_fields={"facts": "a", "structure": "b"},
         payload="content",
-        schema_ref="research-notes@1",
         observer=_Broken(),
     )
 

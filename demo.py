@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from decimal import Decimal, InvalidOperation
 
 from omemo_content_factory.application.content_director import ContentDirector, TaskRequest
+from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.domain.artifact import ArtifactCreated, ArtifactEvent
 from omemo_content_factory.domain.output import OutputEvent
@@ -210,10 +211,14 @@ def main() -> None:
         ),
     }
     # Per-role ACTIVE Schemas (the generation shape + the validated-Output authority, ADR-0014).
-    schemas: Mapping[str, Schema] = {
-        "researcher@v1": _active_schema("research-notes@v1", "notes"),
-        "writer@v1": _active_schema("article-draft@v1", "draft"),
-        "editor@v1": _active_schema("final-article@v1", "article"),
+    schemas: Mapping[str, SchemaBinding] = {
+        "researcher@v1": SchemaBinding(
+            "research-notes@v1", _active_schema("research-notes@v1", "notes")
+        ),
+        "writer@v1": SchemaBinding("article-draft@v1", _active_schema("article-draft@v1", "draft")),
+        "editor@v1": SchemaBinding(
+            "final-article@v1", _active_schema("final-article@v1", "article")
+        ),
     }
     director = ContentDirector(executors, schemas)
 
