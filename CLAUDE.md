@@ -15,14 +15,31 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 25 ADRs (0001–0025) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 26 ADRs (0001–0026) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
-  Adapter (0024), in-memory adapter stubs (0025) are all implemented and tested. All gates green:
-  ruff, ruff format, mypy --strict, pytest (696 passed, 0 skipped).
+  Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026) are all implemented and
+  tested. All gates green: ruff, ruff format, mypy --strict, pytest (723 passed, 0 skipped).
+- **Storage is wired (ROADMAP Stage 7.1, ADR-0026).** `ContentDirector(..., store=RunStore)` saves
+  the Run after every **orchestration step**, not every aggregate call: a Task start is committed
+  *before* its executor is called, the executor's answer together with its Output + Artifact, the
+  QA gate's opening *before* the evaluator, the verdict, and each Run transition (table: ADR-0026
+  §2) — so a stored Run never holds a half-recorded step. `ContentDirector.resume` /
+  `resume_workflow` continue a loaded Run from its own state: Tasks match requests by position
+  (mismatch → `RunResumptionError`, nothing changed), terminal Tasks are not re-run, a `RUNNING`
+  one is retried on its stored input (re-entry into `RUNNING`; attempts exhausted → `FAILED` with
+  `RESUME_LIMIT_REASON`), a `PENDING` QA Evaluation is finished rather than duplicated, a Run
+  waiting for a human or terminal is left alone. `execute` still requires a `CREATED` Run. To commit
+  between the halves, `execute_task` = `start_task` + `finish_task` and `evaluate_artifact` =
+  `open_evaluation` + `record_verdict` (signatures of the old functions unchanged).
+  `composition.build_run_store(environ)` → `SqliteRunStore` at `OMEMO_RUN_STORE_PATH` (default
+  `.omemo/runs.sqlite3`, git-ignored); `build_content_director` / `compile_runtime` take `store=`.
+  `demo_factory.py` loads-or-creates its Run, so a re-run resumes instead of repeating model calls.
+  Tests: `tests/test_storage_wiring.py` (SWR, `ADAPTER_ACCEPTANCE.md` §7) — incl. a crash after
+  every one of the 11 commit points, each resuming with exactly one call per step.
 - **ROADMAP Stage 6 is complete.** In-memory stubs of the other three contracts exist (Stage 6c,
   ADR-0025, `infrastructure/in_memory_adapters.py`): `InMemoryBriefBoard`, `InMemoryReviewDesk`,
   `InMemoryAnalyticsSink` — infrastructure like `FakeLLMClient`, not test doubles. Each has a
@@ -33,8 +50,7 @@ the source of truth — code must never contradict them; on conflict, the docs w
   second different decision, a different record under a delivered `record_id` → the contract's own
   error (a refused export delivers nothing). Tests: `tests/test_in_memory_adapters.py` (STB,
   `ADAPTER_ACCEPTANCE.md` §6). **Not wired** — Stage 7.
-- **Run persistence exists (ROADMAP Stage 6b, ADR-0024)** but is **not wired** — nothing saves a
-  Run yet (Stage 7). Domain: `Run.snapshot` (read-only `RunSnapshot`: everything incl. policies,
+- **Run persistence exists (ROADMAP Stage 6b, ADR-0024)**, wired by ADR-0026 (above). Domain: `Run.snapshot` (read-only `RunSnapshot`: everything incl. policies,
   the five id counters and the journal) and `Run.restore(snapshot)` (second factory, no transition,
   no event; verify/reject → `RunRestorationError`), per `RUN_RESTORE_SPEC.md` **1.1** (amended:
   evaluations/analytics + their counters, events' `run_id`, id uniqueness, 1:1, policy bounds,
@@ -58,7 +74,7 @@ the source of truth — code must never contradict them; on conflict, the docs w
   `tests/test_adapter_contract.py` enforces the boundary: outside `infrastructure/` no module
   imports a third-party package or network/storage stdlib, and only `composition.py` imports
   `infrastructure`. `RunStore` is implemented (`SqliteRunStore`, ADR-0024); the other three have
-  in-memory stubs (ADR-0025). **No adapter is wired yet** (Stage 7).
+  in-memory stubs (ADR-0025). Only `RunStore` is wired (ADR-0026); the other three are not yet.
 - **Tool Layer exists (ROADMAP Stage 5, ADR-0022, `TOOL_SPEC.md`)**: passive `ToolDescriptor`
   in `domain/tool.py` (unlike a Skill it carries its declared `ToolParameter`s — the model and the
   Toolbox both read them); executable `Tool` Protocol in `tools/contract.py` (`descriptor` +
@@ -191,8 +207,14 @@ process at the time, not a pattern to keep copying.)
    -> contract error", but nothing here uses a Skill or a Tool, no adapter is wired into a real
    run, no call produces an Analytics Record, and a Prompt is a Python string literal, not
    something "stored separately from code". Broken into subtasks:
-   1. **Storage wiring** — save `Run` via `RunStore` after each transition in a real run
-      (`ContentDirector`/Composition Root), restore via `Run.restore` (ADR-0024 §6 "Deferred").
+   1. ~~**Storage wiring**~~ — done (ADR-0026, `ContentDirector(store=…)` + `resume` /
+      `resume_workflow`, `composition.build_run_store`, `demo_factory.py` load-or-create,
+      `ADAPTER_SPEC.md` §4 "Проводка", `ADAPTER_ACCEPTANCE.md` §7 SWR,
+      `tests/test_storage_wiring.py`). Commit granularity was decided as one orchestration step,
+      not one aggregate call (a stored `SUCCEEDED` Task always has its Output + Artifact); an
+      uncommitted executor/evaluator call is at-least-once across a crash (ADR-0026 §4). Deliberately
+      left: listing unfinished Runs for a "resume everything" entrypoint, and the human-decision
+      round-trip at `WAITING_HUMAN` (Stage 10 / subtask 6).
    2. **First Skill consumer** — pick an existing Skill (e.g. `check_required_elements@v1`) and
       decide + document (small ADR) how a Skill is actually invoked around a Task's execution
       (ADR-0021 "Deferred").

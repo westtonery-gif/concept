@@ -22,7 +22,9 @@ point inward, `PROJECT.md` §7).
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 
+from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.domain.agent import Agent
@@ -30,10 +32,34 @@ from omemo_content_factory.domain.prompt import Prompt, PromptId
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
 from omemo_content_factory.infrastructure.llm import LLMClient, LLMTaskExecutor
+from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
+
+RUN_STORE_PATH_VAR = "OMEMO_RUN_STORE_PATH"
+"""Environment variable naming the SQLite file every Run is saved to (ADR-0026 §5)."""
+
+DEFAULT_RUN_STORE_PATH = Path(".omemo") / "runs.sqlite3"
+"""The Run store when ``OMEMO_RUN_STORE_PATH`` is unset or blank, relative to the working dir."""
 
 
 class CompositionError(Exception):
     """A build-time composition-invariant violation (never raised at runtime)."""
+
+
+def run_store_path(environ: Mapping[str, str]) -> Path:
+    """Where the Run store lives: ``OMEMO_RUN_STORE_PATH``, or the default when unset or blank."""
+    raw = environ.get(RUN_STORE_PATH_VAR, "").strip()
+    return Path(raw) if raw else DEFAULT_RUN_STORE_PATH
+
+
+def build_run_store(environ: Mapping[str, str]) -> RunStore:
+    """Build the ``RunStore`` a real run commits to (ADR-0026 §5): SQLite at :func:`run_store_path`.
+
+    Creates the file's parent directory, since ``SqliteRunStore`` needs it to exist (ADR-0024 §3);
+    the database file itself is created on first use.
+    """
+    path = run_store_path(environ)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return SqliteRunStore(path)
 
 
 def build_executor_map(
@@ -117,16 +143,19 @@ def build_content_director(
     prompts: Mapping[PromptId, Prompt],
     client: LLMClient,
     schemas: Mapping[str, Schema],
+    *,
+    store: RunStore | None = None,
 ) -> ContentDirector:
     """Compile the executor and schema maps and hand them to a ``ContentDirector``.
 
     The Content Director only *selects* from the assembled maps at runtime (`ADR-0013` §8); it
     never builds them. ``schemas`` is **required**: it supplies both the generation shape injected
     into each executor (`ADR-0014` §3) and the `agent_ref → Schema` map through which execution
-    finalizes Output via the validated path (`ADR-0013` §8, Variant A).
+    finalizes Output via the validated path (`ADR-0013` §8, Variant A). ``store``, when given, is
+    the ``RunStore`` the Director commits every step to (`ADR-0026`).
     """
     executors = build_executor_map(agents, prompts, client, schemas)
-    return ContentDirector(executors, build_schema_map(agents, prompts, schemas))
+    return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)
 
 
 def validate_workflow_executors(workflow: Workflow, executors: Mapping[str, TaskExecutor]) -> None:
@@ -151,6 +180,8 @@ def compile_runtime(
     client: LLMClient,
     workflow: Workflow,
     schemas: Mapping[str, Schema],
+    *,
+    store: RunStore | None = None,
 ) -> ContentDirector:
     """Build executor + schema maps, structurally check vs ``workflow``, wire the CD.
 
@@ -158,8 +189,9 @@ def compile_runtime(
     workflow-semantics, no policy) catches an unknown ``agent_ref`` as a ``CompositionError`` here,
     so selection never raises at runtime. ``schemas`` is **required** — it supplies the generation
     shape per executor (`ADR-0014` §3) and the `agent_ref → Schema` map for the validated Output
-    path (`ADR-0013` §8, Variant A).
+    path (`ADR-0013` §8, Variant A). ``store``, when given, is the ``RunStore`` the Director commits
+    every step to (`ADR-0026`).
     """
     executors = build_executor_map(agents, prompts, client, schemas)
     validate_workflow_executors(workflow, executors)
-    return ContentDirector(executors, build_schema_map(agents, prompts, schemas))
+    return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)

@@ -81,6 +81,21 @@ def execute_task(
     ``Schema.validate`` (Schema = authority) and the **pure sink** ``Run.record_output`` persists
     the VALID/INVALID verdict. There is no legacy always-VALID recording path: with no ``schema``
     (or no structured fields) no Output is produced. Returns the new Task's id.
+
+    The composition of :func:`start_task` and :func:`finish_task`; a caller that commits the Run
+    between the two (the Content Director with a store, ADR-0026 §2) uses them directly.
+    """
+    task_id = start_task(
+        run, workflow_step_ref=workflow_step_ref, agent_ref=agent_ref, task_input=task_input
+    )
+    finish_task(run, executor, task_id, schema=schema)
+    return task_id
+
+
+def start_task(run: Run, *, workflow_step_ref: str, agent_ref: str, task_input: str) -> TaskId:
+    """Open one Task inside ``run`` and put it in ``RUNNING`` — everything before the executor call.
+
+    Returns the new Task's id. The Task's work is done by :func:`finish_task` (ADR-0026 §2).
     """
     task_id = run.open_task(
         workflow_step_ref=workflow_step_ref,
@@ -89,7 +104,19 @@ def execute_task(
         by=Actor.CONTENT_DIRECTOR,
     )
     run.transition_task(task_id, TaskStatus.RUNNING, by=Actor.CONTENT_DIRECTOR)
-    result = executor.execute(task_input)
+    return task_id
+
+
+def finish_task(
+    run: Run, executor: TaskExecutor, task_id: TaskId, *, schema: Schema | None = None
+) -> None:
+    """Run a ``RUNNING`` Task's executor on the Task's own input and record the outcome.
+
+    Everything after :func:`start_task`: the executor is handed the input stored on the Task (so a
+    resumed Task gets exactly what it was opened with, ADR-0026 §3), then the Task ends in
+    ``SUCCEEDED`` (with its Output, via the validated path) or ``FAILED`` with the reason.
+    """
+    result = executor.execute(run.task(task_id).task_input)
     if not result.succeeded:
         run.transition_task(
             task_id,
@@ -97,7 +124,7 @@ def execute_task(
             by=Actor.CONTENT_DIRECTOR,
             reason=result.failure_reason,
         )
-        return task_id
+        return
     run.transition_task(task_id, TaskStatus.SUCCEEDED, by=Actor.CONTENT_DIRECTOR)
     if (
         schema is not None
@@ -114,4 +141,3 @@ def execute_task(
             schema_ref=result.schema_ref,
             by=Actor.CONTENT_DIRECTOR,
         )
-    return task_id

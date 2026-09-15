@@ -60,8 +60,19 @@ def evaluate_artifact(
     Returns the new evaluation's id.
     """
     evaluation_id = run.open_evaluation(artifact_id, kind=kind, by=Actor.CONTENT_DIRECTOR)
-    result = evaluator.evaluate(run.artifact(artifact_id).content)
+    record_verdict(run, evaluator, evaluation_id)
+    return evaluation_id
+
+
+def record_verdict(run: Run, evaluator: ArtifactEvaluator, evaluation_id: EvaluationId) -> None:
+    """Ask ``evaluator`` about a ``PENDING`` Evaluation's Artifact and record the verdict.
+
+    The half of :func:`evaluate_artifact` after the evaluation is opened, so a caller can commit the
+    Run in between, or finish an evaluation a restart left ``PENDING`` (ADR-0026 §2-3). Fail closed
+    as above: an evaluator exception propagates and the evaluation stays ``PENDING``.
+    """
+    artifact_ref = run.evaluation(evaluation_id).artifact_ref
+    result = evaluator.evaluate(run.artifact(artifact_ref).content)
     run.record_evaluation(
         evaluation_id, result.verdict, by=Actor.CONTENT_DIRECTOR, flags=result.flags
     )
-    return evaluation_id

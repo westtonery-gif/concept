@@ -73,6 +73,18 @@ Artifact/Human Review/Evaluation/Analytics Record/журнал сохраняю�
 Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1). Приёмка —
 `ADAPTER_ACCEPTANCE.md` §5.
 
+**Проводка (Этап 7, ADR-0026).** `ContentDirector(..., store=...)` сохраняет Run после каждого
+**шага** оркестрации, а не после каждого вызова агрегата: запуск Task — *до* вызова исполнителя;
+ответ исполнителя — вместе с Output и Artifact; открытие QA-ворот — *до* вызова оценщика; вердикт;
+каждый переход Run (таблица точек фиксации — ADR-0026 §2). Поэтому сохранённый Run никогда не
+содержит полузаписанного шага: `SUCCEEDED` Task — с Output и его Artifact, `RUNNING` Task и
+`PENDING` Evaluation — вызовы, ответ которых не был зафиксирован. `ContentDirector.resume` /
+`resume_workflow` продолжает загруженный Run по его собственному состоянию: завершённая работа не
+повторяется, незафиксированный вызов делается снова (повторный вход Task в `RUNNING`, в пределах её
+политики попыток); Run и план, которые не совпадают, → `RunResumptionError`. Без store поведение
+прежнее. Где база: `composition.build_run_store(environ)` — `OMEMO_RUN_STORE_PATH`, по умолчанию
+`.omemo/runs.sqlite3`. Приёмка — `ADAPTER_ACCEPTANCE.md` §7.
+
 ## 5. `BriefBoard` (`adapters/brief_board.py`)
 
 | Метод | Поведение |

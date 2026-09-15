@@ -21,6 +21,11 @@ Run with: ``python demo_factory.py``. Needs ``ANTHROPIC_API_KEY`` plus a per-rol
 ``OMEMO_PROVIDER__<ROLE>`` / ``OMEMO_MODEL__<ROLE>`` binding for each of Rin and Leo (see the
 printed instructions, or README.md); missing either, the demo explains what to set and exits
 cleanly. No QA, Human Review, publication or external integrations are involved.
+
+The Run is saved after every step to the Run store (`ADR-0026`; ``OMEMO_RUN_STORE_PATH``, default
+``.omemo/runs.sqlite3``). Running the demo again resumes the stored Run instead of starting over:
+an interrupted run continues where it stopped, a finished one is only shown — no model is called
+for work already committed.
 """
 
 from __future__ import annotations
@@ -35,7 +40,9 @@ from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.composition import (
     build_executor_map,
+    build_run_store,
     build_schema_map,
+    run_store_path,
     validate_workflow_executors,
 )
 from omemo_content_factory.domain.run import Run
@@ -44,6 +51,8 @@ from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
 )
+
+RUN_ID = "run-magnesium-sleep-001"
 
 BRIEF = (
     "Тема: почему магний важен для сна и восстановления, для взрослой аудитории. "
@@ -120,18 +129,25 @@ def main() -> None:
         return
 
     validate_workflow_executors(WORKFLOW, executors)
-    director = ContentDirector(executors, build_schema_map(AGENTS, PROMPTS, SCHEMAS))
-
-    run = Run.create(
-        run_id="run-magnesium-sleep-001",
-        content_brief_ref="brief-magnesium-sleep",
-        workflow_version_ref=WORKFLOW.workflow_id,
-    )
+    store = build_run_store(os.environ)
+    director = ContentDirector(executors, build_schema_map(AGENTS, PROMPTS, SCHEMAS), store=store)
 
     safe_print("=" * 78)
     safe_print("Rin -> Leo, the real catalogued roles, each on its own configured provider/model")
     safe_print("=" * 78)
-    director.execute_workflow(run, WORKFLOW, brief=BRIEF)
+    run = store.load(RUN_ID)
+    if run is None:
+        run = Run.create(
+            run_id=RUN_ID,
+            content_brief_ref="brief-magnesium-sleep",
+            workflow_version_ref=WORKFLOW.workflow_id,
+        )
+        director.execute_workflow(run, WORKFLOW, brief=BRIEF)
+    else:
+        location = run_store_path(os.environ)
+        safe_print(f"Resuming {RUN_ID} from {location} at '{run.status.value}';")
+        safe_print("committed steps are not run again. Delete that file to start over.")
+        director.resume_workflow(run, WORKFLOW, brief=BRIEF)
     show_run(run)
     print_final_article(run)
 

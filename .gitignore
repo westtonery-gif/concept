@@ -19,6 +19,9 @@ env/
 .env.*
 !.env.example
 
+# --- Local run store (ADR-0026: default OMEMO_RUN_STORE_PATH) ----------------
+.omemo/
+
 # --- Tooling caches ---------------------------------------------------------
 .ruff_cache/
 .mypy_cache/

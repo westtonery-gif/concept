@@ -49,3 +49,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0023](0023-adapter-layer-contracts.md) | Adapter Layer contracts — the LLM Adapter recognised, four new ports | Accepted |
 | [0024](0024-storage-adapter-sqlite-run-store.md) | Storage Adapter — Run restoration realised, an embedded SQLite `RunStore` | Accepted |
 | [0025](0025-in-memory-adapter-stubs.md) | In-memory stubs for the board, the review desk and the analytics sink | Accepted |
+| [0026](0026-storage-wiring-checkpoints-and-resumption.md) | Storage wiring — the Content Director commits every step and resumes a restored Run | Accepted |

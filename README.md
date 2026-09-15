@@ -161,6 +161,11 @@ export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
 python demo_factory.py
 ```
 
+The Run is saved after every step to `OMEMO_RUN_STORE_PATH` (default `.omemo/runs.sqlite3`,
+git-ignored; ADR-0026). Running the demo again **resumes** that Run instead of starting over: an
+interrupted run continues where it stopped, a finished one is only shown, and no model is called
+for work already committed. Delete the file to start from scratch.
+
 A role with no `OMEMO_PROVIDER__<ROLE>` binding fails closed
 (`ProviderModelSelectionError`) — the demo prints the exact exports each role still needs and
 exits cleanly, same as it does when `ANTHROPIC_API_KEY` is missing.
