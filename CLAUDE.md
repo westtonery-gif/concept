@@ -45,9 +45,12 @@ the source of truth — code must never contradict them; on conflict, the docs w
   QA verdict — the gates key on the artifact id, so rework restarts the lifecycle by construction.
   Orchestrating rework (ContentDirector routing a risk verdict into a re-run) is still open —
   ADR-0019 "Deferred", ROADMAP Stage 7/8.
-- `client_for_role` (ADR-0016 realization, `infrastructure/provider_model.py`) is implemented
-  and tested, but **not yet used by any entrypoint** — `demo.py` and `demo_factory.py` both
-  still take one shared client for every role via `OMEMO_LLM_MODEL` (task 6 below).
+- **`client_for_role` is wired into `demo_factory.py`** (ADR-0016 realization,
+  `infrastructure/provider_model.py`): each role resolves its own provider/model via
+  `OMEMO_PROVIDER__<ROLE>` / `OMEMO_MODEL__<ROLE>`, no shared/default client — a role with no
+  binding fails closed (`ProviderModelSelectionError`), and the demo prints the exact exports
+  still needed. `demo.py` predates the Rin/Leo migration and is untouched (out of scope, no
+  catalogued Agent/Prompt/Schema to key a binding on).
 
 ## Session workflow (push straight to main — no branch/PR ceremony needed)
 
@@ -80,11 +83,13 @@ process at the time, not a pattern to keep copying.)
    verdict / `CHANGES_REQUESTED` into a re-run that produces the new version is still open
    (ADR-0019 "Deferred", ROADMAP Stage 7/8).
 5. **Analytics Record** entity — new ADR + domain code. Needed for ROADMAP Stage 14
-   (metrics), not before — lowest urgency of the domain gaps.
-6. Wire `client_for_role` into a real entrypoint (e.g. `demo_factory.py`) so each role actually
-   gets its own configured provider/model instead of one shared client. No Composition Root
-   change needed — call `build_executor_map` once per agent with that agent's
-   `client_for_role(agent_ref, os.environ)` client and merge the resulting dicts.
+   (metrics), not before — lowest urgency of the domain gaps. Note: this is genuinely Stage-14
+   work (needs Stages 4-13 first) — CONTRIBUTING.md's scope-discipline rule says not to build
+   domain models ahead of their ROADMAP stage, unlike tasks 2-4 which closed gaps already
+   deferred *within* the active Stage 2 aggregates. Worth double-checking before starting it.
+6. ~~Wire `client_for_role` into a real entrypoint~~ — done (`demo_factory.py`: each role
+   resolves its own provider/model via `build_executor_map` called once per agent + merged;
+   `demo.py` untouched, out of scope).
 7. ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer) — each needs its own ADR
    first; likely several sessions each. Prerequisite for Stage 7 (first Agent through the full
    orchestrator) and the Stage 12 MVP.

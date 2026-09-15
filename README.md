@@ -147,14 +147,22 @@ integrations are involved.
 
 `demo_factory.py` runs the same kind of end-to-end Workflow, but through the **actual catalogued
 production roles** migrated from Main Core (ADR-0016) — Rin (`content_researcher@v1`) then Leo
-(`script_writer@v1`) — assembled by the real Composition Root (`compile_runtime`) instead of
-`demo.py`'s hand-written one-off prompts:
+(`script_writer@v1`) — assembled by the real Composition Root instead of `demo.py`'s hand-written
+one-off prompts. Unlike `demo.py`, each role resolves **its own** provider/model via
+`client_for_role` (ADR-0016) — there is no shared/default model:
 
 ```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+export OMEMO_PROVIDER__CONTENT_RESEARCHER_V1=anthropic
+export OMEMO_MODEL__CONTENT_RESEARCHER_V1=claude-sonnet-4-6
+export OMEMO_PROVIDER__SCRIPT_WRITER_V1=anthropic
+export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
 python demo_factory.py
 ```
 
-Same `ANTHROPIC_API_KEY` / `OMEMO_LLM_MODEL` requirements as `demo.py`.
+A role with no `OMEMO_PROVIDER__<ROLE>` binding fails closed
+(`ProviderModelSelectionError`) — the demo prints the exact exports each role still needs and
+exits cleanly, same as it does when `ANTHROPIC_API_KEY` is missing.
 
 ## Project layout
 
