@@ -7,6 +7,10 @@
 > **Amended by ADR-0029 (2026-09-15).** ROADMAP Stage 7's explicit metrics Definition of Done
 > brings the deferred port change, explicit pricing and `finish_task` capture forward from Stage
 > 14. The domain entity and its invariants in this ADR are unchanged.
+>
+> **Amended by ADR-0036 (2026-09-16).** A record's subject is a Task **or** an Evaluation (an
+> evaluator's call); `task_id` and `retries` become optional accordingly, and attribution stays
+> derived — from the Evaluation's `evaluator_ref`. §3-§5 below describe the Task case.
 
 ## Context
 

@@ -17,7 +17,8 @@ QA gate (ADR-0018 §7): when a QA evaluator is injected, the ``WAITING_QA`` step
 final step's Artifact is made a ``CANDIDATE`` and evaluated (``evaluate_artifact``). Only a
 ``PASSED`` verdict lets the Run go on; a risk verdict is **fail closed**: the Run stops at the
 Approval Gate (``WAITING_HUMAN``) with a Human Review opened for escalation, never ``COMPLETED``.
-Without an evaluator the flow is unchanged.
+Without an evaluator the flow is unchanged. The Evaluation names the evaluator's role, and the
+evaluator's model calls are recorded against it — and committed even when it then fails (ADR-0036).
 
 Rework routing (ADR-0032): a QA risk still escalates to a Human Review. When its latest decision is
 ``CHANGES_REQUESTED``, :meth:`ContentDirector.resume` re-executes only the current candidate's
@@ -44,6 +45,7 @@ from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.qa_evaluation import (
     QA_KIND,
     ArtifactEvaluator,
+    MeasuredEvaluatorError,
     record_verdict,
 )
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -494,10 +496,16 @@ class ContentDirector:
         if evaluation is None:
             if run.artifact(candidate).status is ArtifactStatus.DRAFT:
                 run.transition_artifact(candidate, ArtifactStatus.CANDIDATE, by=_CD)
-            evaluation = run.evaluation(run.open_evaluation(candidate, kind=QA_KIND, by=_CD))
+            evaluation = run.evaluation(
+                run.open_evaluation(candidate, kind=QA_KIND, by=_CD, evaluator_ref=qa.evaluator_ref)
+            )
             self._commit(run)
         if evaluation.status is EvaluationStatus.PENDING:
-            record_verdict(run, qa, evaluation.evaluation_id)
+            try:
+                record_verdict(run, qa, evaluation.evaluation_id)
+            except MeasuredEvaluatorError:
+                self._commit(run)  # the failed evaluator's recorded calls are facts (ADR-0036 §3)
+                raise
             self._commit(run)
         if run.evaluation(evaluation.evaluation_id).status is EvaluationStatus.PASSED:
             return True

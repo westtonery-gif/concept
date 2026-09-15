@@ -59,3 +59,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0033](0033-invalid-output-contract-error-and-m2-acceptance.md) | Invalid Output as an orchestration contract error, and the Milestone M2 acceptance | Accepted |
 | [0034](0034-qa-verdict-field-contract.md) | The QA verdict field contract — a three-way verdict and flags over flat string fields | Accepted |
 | [0035](0035-qa-agent-role-definition.md) | The QA Agent role definition — `qa_agent@v1` with a baseline, review-pending Prompt | Accepted |
+| [0036](0036-qa-call-metrics-attributed-to-the-evaluation.md) | QA call metrics attributed to the Evaluation, and the `LLMArtifactEvaluator` | Accepted |

@@ -5,13 +5,16 @@ Evaluation ownership follows Variant A (ADR-0013 §8), as Schema validation does
 (a QA Agent behind a port) decides the verdict, the **application** invokes it, and **Run**
 persists it through its root (``open_evaluation`` / ``record_evaluation``).
 
-Fail closed by construction: this slice never catches. If the evaluator raises, the exception
-propagates (PROJECT.md §10 — no swallowed errors) and the Evaluation stays ``PENDING``, which the
-Run's approval gate treats as "not passed". There is no default verdict and no fallback.
+Fail closed by construction: there is no default verdict and no fallback. If the evaluator raises,
+the exception propagates (PROJECT.md §10 — no swallowed errors) and the Evaluation stays
+``PENDING``, which the Run's approval gate treats as "not passed". The one catch is for a
+:class:`MeasuredEvaluatorError`: the measurements of the model calls the evaluator already made are
+recorded first, then the same exception is re-raised (ADR-0036 §3).
 
 An evaluator built on the structured LLM port turns the model's flat string fields into a verdict
 only through :func:`decode_verdict` (ADR-0034); a malformed answer raises :class:`QaVerdictError`
-and fails closed like any other evaluator failure.
+and fails closed like any other evaluator failure. Every call it makes is attributed to the
+Evaluation through the evaluator's ``evaluator_ref`` (ADR-0036).
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
+from omemo_content_factory.application.task_execution import AnalyticsMeasurement
 from omemo_content_factory.domain.artifact import ArtifactId
 from omemo_content_factory.domain.evaluation import EvaluationId, EvaluationStatus
 from omemo_content_factory.domain.run import Actor, Run
@@ -45,14 +49,33 @@ class EvaluationResult:
 
     ``verdict`` is the terminal outcome (``PASSED`` / ``FLAGGED`` / ``FAILED``; ``PENDING`` is
     rejected by the domain). ``flags`` are the remarks / risk flags shown to the human.
+    ``analytics`` carries one measurement per completed model call, in call order (ADR-0036 §3);
+    an evaluator that makes no model call keeps the empty default.
     """
 
     verdict: EvaluationStatus
     flags: tuple[str, ...] = ()
+    analytics: tuple[AnalyticsMeasurement, ...] = ()
 
 
-class QaVerdictError(Exception):
+class MeasuredEvaluatorError(Exception):
+    """An evaluator failure after model calls were made; it keeps their measurements (ADR-0036).
+
+    :func:`record_verdict` records ``analytics`` and re-raises the same exception, so the failure
+    still fails closed while the calls it cost are not lost.
+    """
+
+    def __init__(self, message: str, *, analytics: tuple[AnalyticsMeasurement, ...] = ()) -> None:
+        super().__init__(message)
+        self.analytics = analytics
+
+
+class QaVerdictError(MeasuredEvaluatorError):
     """A QA answer's fields break the verdict contract (ADR-0034) — a failure, never a verdict."""
+
+
+class QaCallError(MeasuredEvaluatorError):
+    """The QA evaluator's model call itself failed (ADR-0036 §4) — a failure, never a verdict."""
 
 
 def decode_verdict(fields: Mapping[str, str]) -> EvaluationResult:
@@ -97,7 +120,12 @@ class ArtifactEvaluator(Protocol):
 
     A single, explicit, injected dependency (PROJECT.md §6), like ``TaskExecutor``: tests supply a
     deterministic fake; the QA Agent (ROADMAP Stage 8) implements the same contract.
+    ``evaluator_ref`` is the ``agent_ref`` of the answering role: every Evaluation it decides is
+    opened with it, so its calls' metrics are attributed to that role (ADR-0036 §1, §3).
     """
+
+    @property
+    def evaluator_ref(self) -> str: ...
 
     def evaluate(self, content: str) -> EvaluationResult: ...
 
@@ -112,11 +140,13 @@ def evaluate_artifact(
     """Evaluate one candidate Artifact of ``run`` and record the verdict, through the root.
 
     Acts in the Content Director role: opens a ``PENDING`` evaluation (the Artifact must be
-    ``CANDIDATE``), hands the Artifact's content to ``evaluator`` and records its verdict and
-    flags. An evaluator exception propagates and leaves the evaluation ``PENDING`` (fail closed).
-    Returns the new evaluation's id.
+    ``CANDIDATE``) naming the evaluator's role, hands the Artifact's content to ``evaluator`` and
+    records its calls, verdict and flags. An evaluator exception propagates and leaves the
+    evaluation ``PENDING`` (fail closed). Returns the new evaluation's id.
     """
-    evaluation_id = run.open_evaluation(artifact_id, kind=kind, by=Actor.CONTENT_DIRECTOR)
+    evaluation_id = run.open_evaluation(
+        artifact_id, kind=kind, by=Actor.CONTENT_DIRECTOR, evaluator_ref=evaluator.evaluator_ref
+    )
     record_verdict(run, evaluator, evaluation_id)
     return evaluation_id
 
@@ -125,11 +155,35 @@ def record_verdict(run: Run, evaluator: ArtifactEvaluator, evaluation_id: Evalua
     """Ask ``evaluator`` about a ``PENDING`` Evaluation's Artifact and record the verdict.
 
     The half of :func:`evaluate_artifact` after the evaluation is opened, so a caller can commit the
-    Run in between, or finish an evaluation a restart left ``PENDING`` (ADR-0026 §2-3). Fail closed
-    as above: an evaluator exception propagates and the evaluation stays ``PENDING``.
+    Run in between, or finish an evaluation a restart left ``PENDING`` (ADR-0026 §2-3). Every model
+    call the evaluator reports is recorded first, through the Run root and attributed to the
+    Evaluation (ADR-0036 §3). Fail closed as above: an evaluator exception propagates and the
+    evaluation stays ``PENDING`` — a :class:`MeasuredEvaluatorError` after its calls are recorded.
     """
     artifact_ref = run.evaluation(evaluation_id).artifact_ref
-    result = evaluator.evaluate(run.artifact(artifact_ref).content)
+    try:
+        result = evaluator.evaluate(run.artifact(artifact_ref).content)
+    except MeasuredEvaluatorError as exc:
+        _record_calls(run, evaluation_id, exc.analytics)
+        raise
+    _record_calls(run, evaluation_id, result.analytics)
     run.record_evaluation(
         evaluation_id, result.verdict, by=Actor.CONTENT_DIRECTOR, flags=result.flags
     )
+
+
+def _record_calls(
+    run: Run, evaluation_id: EvaluationId, analytics: tuple[AnalyticsMeasurement, ...]
+) -> None:
+    """Record each measured evaluator call through the Run root, in call order (ADR-0036 §3)."""
+    for measurement in analytics:
+        run.record_evaluation_analytics(
+            evaluation_id,
+            provider=measurement.provider,
+            model=measurement.model,
+            token_usage=measurement.token_usage,
+            cost=measurement.cost,
+            time_range=measurement.time_range,
+            prompt_ref=measurement.prompt_ref,
+            by=Actor.CONTENT_DIRECTOR,
+        )

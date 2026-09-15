@@ -112,6 +112,7 @@ class CountingEvaluator:
     crash: bool = False
     observe: Callable[[], None] | None = None
     calls: int = 0
+    evaluator_ref: str = "qa@v1"
 
     def evaluate(self, content: str) -> EvaluationResult:
         self.calls += 1

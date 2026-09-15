@@ -10,8 +10,11 @@ Created and decided **only via Run** (``Run.open_evaluation`` / ``Run.record_eva
 verdict is produced outside the domain (a QA evaluator, invoked by the application layer) and Run
 only persists it — evaluation-ownership Variant A (ADR-0013 §8), as for Schema validation.
 
+An Evaluation may name the role that answers it (``evaluator_ref``, ADR-0036 §1); the metrics of
+that role's model calls are attributed to the Evaluation through it.
+
 This module depends only on stdlib and ``domain.errors``; its references (``run_id``,
-``artifact_ref``) are opaque ``str`` (ADR-0003 §3), avoiding any import cycle.
+``artifact_ref``, ``evaluator_ref``) are opaque ``str`` (ADR-0003 §3), avoiding any import cycle.
 
 Scope note (ADR-0018): evaluating an Output, a confidence score, a criteria (Prompt version)
 reference and an audit timestamp are deferred.
@@ -59,6 +62,7 @@ class EvaluationView:
     kind: str
     status: EvaluationStatus
     flags: tuple[str, ...]
+    evaluator_ref: str | None = None
 
 
 # --- Domain events -----------------------------------------------------------------------
@@ -91,6 +95,10 @@ class EvaluationDomainError(DomainError):
     """Base class for all Evaluation domain-rule violations."""
 
 
+class InvalidEvaluationError(EvaluationDomainError):
+    """An Evaluation cannot be opened with the given data: a blank ``evaluator_ref`` (ADR-0036)."""
+
+
 class InvalidEvaluationTransitionError(EvaluationDomainError):
     """A verdict was requested on a decided evaluation, or the verdict is not terminal."""
 
@@ -116,10 +124,12 @@ _IMMUTABLE_EVALUATION_ATTRIBUTES = frozenset(
         "run_id",
         "artifact_ref",
         "kind",
+        "evaluator_ref",
         "_evaluation_id",
         "_run_id",
         "_artifact_ref",
         "_kind",
+        "_evaluator_ref",
     }
 )
 
@@ -131,13 +141,14 @@ class Evaluation:
     """The Evaluation child entity — one verdict on a candidate Artifact.
 
     **Not** a public API: created only by ``Run.open_evaluation`` and decided only by
-    ``Run.record_evaluation``. ``__slots__`` + a guarded ``__setattr__`` make identity, subject and
-    kind write-once; only the verdict (``status`` + ``flags``) is set, exactly once.
+    ``Run.record_evaluation``. ``__slots__`` + a guarded ``__setattr__`` make identity, subject,
+    kind and evaluator write-once; only the verdict (``status`` + ``flags``) is set, exactly once.
     """
 
     __slots__ = (
         "_artifact_ref",
         "_evaluation_id",
+        "_evaluator_ref",
         "_flags",
         "_kind",
         "_run_id",
@@ -148,16 +159,23 @@ class Evaluation:
     _run_id: str
     _artifact_ref: str
     _kind: str
+    _evaluator_ref: str | None
     _status: EvaluationStatus
     _flags: tuple[str, ...]
 
     def __init__(
-        self, evaluation_id: EvaluationId, run_id: str, artifact_ref: str, kind: str
+        self,
+        evaluation_id: EvaluationId,
+        run_id: str,
+        artifact_ref: str,
+        kind: str,
+        evaluator_ref: str | None = None,
     ) -> None:
         object.__setattr__(self, "_evaluation_id", evaluation_id)
         object.__setattr__(self, "_run_id", run_id)
         object.__setattr__(self, "_artifact_ref", artifact_ref)
         object.__setattr__(self, "_kind", kind)
+        object.__setattr__(self, "_evaluator_ref", evaluator_ref)
         self._status = EvaluationStatus.PENDING
         self._flags = ()
 
@@ -179,6 +197,7 @@ class Evaluation:
             run_id=view.run_id,
             artifact_ref=view.artifact_ref,
             kind=view.kind,
+            evaluator_ref=view.evaluator_ref,
         )
         evaluation._status = view.status
         evaluation._flags = view.flags
@@ -188,6 +207,11 @@ class Evaluation:
     def artifact_ref(self) -> str:
         """The candidate Artifact under evaluation (used by Run's approval gate)."""
         return self._artifact_ref
+
+    @property
+    def evaluator_ref(self) -> str | None:
+        """The role answering this evaluation, if named (ADR-0036 §1; used to attribute calls)."""
+        return self._evaluator_ref
 
     @property
     def status(self) -> EvaluationStatus:
@@ -204,6 +228,7 @@ class Evaluation:
             kind=self._kind,
             status=self._status,
             flags=self._flags,
+            evaluator_ref=self._evaluator_ref,
         )
 
     def decide(self, verdict: EvaluationStatus, flags: tuple[str, ...]) -> None:

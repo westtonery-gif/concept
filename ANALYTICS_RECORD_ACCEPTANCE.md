@@ -2,10 +2,11 @@
 
 > Приёмка реализации `ANALYTICS_RECORD_SPEC.md` (по `ADR-0020`). Каждый критерий фальсифицируем:
 > при неверной реализации соответствующий тест падает. Идентификаторы используются в докстрингах
-> тестов (`tests/test_analytics_record.py`).
+> тестов (`tests/test_analytics_record.py`, `tests/test_metrics_capture.py`,
+> `tests/test_qa_call_metrics.py`).
 >
-> **Версия:** 1.1. **Статус:** Accepted. **Дата:** 2026-09-15.
-> Версия 1.1 добавляет приёмку сбора по `ADR-0029`.
+> **Версия:** 1.2. **Статус:** Accepted. **Дата:** 2026-09-16.
+> Версия 1.1 добавляет приёмку сбора по `ADR-0029`; версия 1.2 — записи Evaluation (§6, `ADR-0036`).
 
 ---
 
@@ -64,7 +65,19 @@
 | MTC-08 | Повтор Task | запись нового вызова получает `retries == attempt_count - 1`; предыдущие записи неизменны |
 | MTC-09 | Fake provider | один результат с собственным provider/model, 0/0 tokens, exact zero cost и измеренным aware time range |
 
-## 6. Что приёмка НЕ проверяет
+## 6. Записи Evaluation (AEV, версия 1.2)
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| AEV-01 | Записать вызов оценщика по Evaluation с `evaluator_ref` | запись: `evaluation_id`, `task_id is None`, `agent_ref == evaluator_ref`, `retries is None`, переданные метрики и `prompt_ref`; последнее событие `AnalyticsRecordCaptured` с `task_id=None` и `evaluation_id` |
+| AEV-02 | Evaluation без `evaluator_ref` | `InvalidAnalyticsRecordError`; записей нет, журнал не вырос, id не израсходован |
+| AEV-03 | Чужая Evaluation / записывает не Content Director | `KeyError` / `UnauthorizedActorError`; записей нет |
+| AEV-04 | Evaluation уже решена | запись принимается |
+| AEV-05 | Запись с двумя субъектами, без субъекта, Task без `retries`, Evaluation с `retries` | `InvalidAnalyticsRecordError` при создании |
+| AEV-06 | Снимок с записью Evaluation | `Run.restore` и кодек формата 2 сохраняют её; запись с чужой Evaluation или не с её оценщиком → `RunRestorationError`; документ формата 1 → `SnapshotFormatError` |
+
+## 7. Что приёмка НЕ проверяет
 
 Агрегаты/отчёты, экспорт в Analytics Sink и Analytics Agent; повторы на стороне поставщика;
-исход вызова; метрика запроса без provider-response; провайдерские категории биллинга кэша.
+исход вызова; метрика запроса без provider-response; провайдерские категории биллинга кэша;
+число попыток оценки.

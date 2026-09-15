@@ -21,7 +21,7 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-16)
-- **All 35 ADRs (0001–0035) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 36 ADRs (0001–0036) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -31,10 +31,27 @@ anything ahead of the queue below — see task 10.
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
   (0029), the external versioned Prompt store (0030), fail-fast Task sequencing with authoritative
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
-  errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034) and the QA
-  Agent role definition (0035) are all implemented and tested. All gates green: ruff, ruff format,
-  mypy --strict, pytest (848 passed, 0 skipped).
-- **The QA Agent role is defined but not executed yet (ROADMAP Stage 8, ADR-0035).**
+  errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
+  Agent role definition (0035) and QA call metrics attributed to the Evaluation +
+  `LLMArtifactEvaluator` (0036) are all implemented and tested. All gates green: ruff, ruff format,
+  mypy --strict, pytest (875 passed, 0 skipped).
+- **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
+  ADR-0036) — but no entrypoint wires it yet (11.4).** `infrastructure/llm.py`
+  `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
+  `LLMClient.complete` and decodes only through `decode_verdict`; an `LLMError` becomes
+  `QaCallError`, a malformed answer a `QaVerdictError` — both `MeasuredEvaluatorError`s carrying
+  the completed turns' measurements, never a verdict. **Metrics attribution (the maintainer's
+  choice, 2026-09-16):** an `Evaluation` names its `evaluator_ref` (`open_evaluation(...,
+  evaluator_ref=)`, taken from the port's new `ArtifactEvaluator.evaluator_ref`); an
+  `AnalyticsRecord` has **exactly one subject** — `task_id` *or* `evaluation_id` — and `retries` is
+  `None` for an Evaluation record (no attempt model; unknown is not zero). The additive
+  `Run.record_evaluation_analytics` derives `agent_ref` from the Evaluation. `record_verdict` records
+  every measurement before the verdict, and on a `MeasuredEvaluatorError` records its measurements
+  then re-raises the same exception (Evaluation stays `PENDING`); the Director commits before
+  re-raising. `DOMAIN_MODEL.md` §2.13/§2.15/§5/§6 were amended. **Snapshot `FORMAT_VERSION` is 2**:
+  a Run stored under format 1 (local `.omemo/runs.sqlite3`) is refused — start it again. Tests:
+  `tests/test_qa_call_metrics.py` (`AEV`, `EFL-07`, `LAE`).
+- **The QA Agent role is defined (ROADMAP Stage 8, ADR-0035); its evaluator exists (ADR-0036).**
   `agents/qa_agent.py`: `qa_agent@v1` → Prompt `qa-agent` v1 (bundled store) → Schema
   `qa-verdict@v1` whose `required_fields` *are* `QA_VERDICT_FIELDS`; no Skills, no Tools. It answers
   with a verdict, not an Output — it goes behind `ArtifactEvaluator`, never into a Workflow step.
@@ -368,16 +385,15 @@ process at the time, not a pattern to keep copying.)
        (→ a v2 Prompt). `check_required_elements@v1` was deliberately **not** granted: the QA path
        has no Skill-invocation seam (ADR-0027 wraps a `TaskExecutor`), and the disclaimer wording
        is domain content too — revisit with 11.3.
-    3. **`LLMArtifactEvaluator`** — an `ArtifactEvaluator` implementation analogous to
-       `LLMTaskExecutor` (`infrastructure/llm.py`): calls `LLMClient.complete` with the QA
-       Prompt/Schema's generation shape, converts the structured fields into an `EvaluationResult`
-       only through `decode_verdict` (ADR-0034). Reuses the existing `LLMClient`/`client_for_role`
-       port — no new provider seam. Unlike `LLMTaskExecutor`, an `LLMError` must **propagate**
-       (ADR-0018 §6: evaluator failures are never swallowed), not become a managed result.
-       **Open question to settle first (ADR-0034 "Deferred"):** a QA call's metrics have nowhere to
-       go — `Run.record_analytics` requires a started Task (ADR-0020), the QA path opens none, and
-       `ArtifactEvaluator.evaluate` returns no measurements. Decide it (likely a small ADR) before
-       or with this subtask; don't silently drop the QA call's cost.
+    3. ~~**`LLMArtifactEvaluator`**~~ — done (ADR-0036, `infrastructure/llm.py`,
+       `EVALUATION_SPEC.md` §8.3, `EVALUATION_ACCEPTANCE.md` §4.3 `LAE`,
+       `ANALYTICS_RECORD_SPEC.md` / `ANALYTICS_RECORD_ACCEPTANCE.md` 1.2 `AEV`,
+       `RUN_RESTORE_SPEC.md` 1.2, `tests/test_qa_call_metrics.py`). The metrics question was put to
+       the maintainer, who chose **attribution to the Evaluation** over a QA Task (would have
+       broken the Director's positional Task matching and ADR-0035 §4) and over "return but don't
+       record" (knowingly breaks PROJECT.md §16). An `LLMError` is not swallowed: it is re-raised
+       as `QaCallError` chained `from` it, because the application layer may not import
+       infrastructure and still has to receive the failed call's measurements.
     4. **Wire it into a real entrypoint** — extend Composition Root helpers (or add a small
        analogous one) to build the QA evaluator from its catalog entry the same way
        `build_executor_map` + `client_for_role` do for Rin/Leo, then pass `qa=` into
@@ -386,7 +402,13 @@ process at the time, not a pattern to keep copying.)
        ADR-0032's rework routing fires correctly off a real `FLAGGED`/`FAILED`. Also decide here
        (ADR-0034 §6) how the Director surfaces a propagated `QaVerdictError`/`LLMError`: leave the
        Run in `WAITING_QA` with a `PENDING` Evaluation for `resume`, or route it to `FAILED` with a
-       stable reason as ADR-0033 did for an `INVALID` Output.
+       stable reason as ADR-0033 did for an `INVALID` Output. Build the evaluator with
+       `evaluator_ref=qa_agent@v1`, `prompt_ref=qa-agent@v<version>`, the Schema's
+       `required_fields` as `output_fields`, and a `client_for_role` binding for the QA role
+       (explicit pricing required). Already in place from 11.3: the Director opens the Evaluation
+       with `evaluator_ref` and commits recorded QA calls before re-raising a
+       `MeasuredEvaluatorError` (today it propagates out of `execute`/`resume`); a non-measured
+       exception still propagates without that extra commit.
     5. **Stage 8 acceptance** — a test in the shape of `test_m2_acceptance.py` proving both DoD
        lines end to end: a `PASSED` verdict lets a run complete, a risk verdict fail-closes to
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop

@@ -4,6 +4,10 @@
 - **Date:** 2026-09-15
 - **Deciders:** Lead Architect / Domain Architect
 
+> **Amended by ADR-0036 (2026-09-16).** The first "Deferred" item (QA call metrics) is decided
+> there: calls are attributed to the Evaluation. `QaVerdictError` now also carries the measurements
+> of the call whose answer it rejects; the grammar in this ADR is unchanged.
+
 ## Context
 
 ROADMAP Stage 8 puts a real QA Agent behind the existing QA port (`CLAUDE.md` queue 11). The port

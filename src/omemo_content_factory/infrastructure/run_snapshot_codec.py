@@ -49,8 +49,12 @@ from omemo_content_factory.domain.run import (
 )
 from omemo_content_factory.domain.task import TaskCompleted, TaskCreated, TaskFailed, TaskStarted
 
-FORMAT_VERSION = 1
-"""Version of the stored document layout. A document of another version is refused, not guessed."""
+FORMAT_VERSION = 2
+"""Version of the stored document layout. A document of another version is refused, not guessed.
+
+2 (ADR-0036): an Analytics Record and its event name a Task or an Evaluation; an Evaluation may name
+its evaluator.
+"""
 
 EVENT_TYPES: Mapping[str, type[Any]] = {
     event_type.__name__: event_type

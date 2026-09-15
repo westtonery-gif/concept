@@ -1,4 +1,4 @@
-"""LLM infrastructure — a real model behind the application's ``TaskExecutor`` port.
+"""LLM infrastructure — a real model behind the ``TaskExecutor`` and ``ArtifactEvaluator`` ports.
 
 Layering (ARCHITECTURE.md §9, §15): this is infrastructure. It depends on the application layer
 (``TaskExecutor`` / ``ExecutionResult``) and on an external SDK; the domain depends on **none**
@@ -37,6 +37,13 @@ from anthropic.types import (
     ToolUseBlock,
 )
 
+from omemo_content_factory.application.qa_evaluation import (
+    QA_VERDICT_FIELDS,
+    EvaluationResult,
+    QaCallError,
+    QaVerdictError,
+    decode_verdict,
+)
 from omemo_content_factory.application.task_execution import AnalyticsMeasurement, ExecutionResult
 from omemo_content_factory.domain.analytics import Cost, TimeRange, TokenUsage
 from omemo_content_factory.domain.tool import ToolDescriptor
@@ -440,6 +447,59 @@ class LLMTaskExecutor:
             payload_fields=completion.fields,
             analytics=_analytics(completion.metrics, self.prompt_ref),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class LLMArtifactEvaluator:
+    """An ``ArtifactEvaluator`` that asks a real model for a QA verdict (ADR-0036 §4).
+
+    The QA analogue of :class:`LLMTaskExecutor`: configured with the client, the role's
+    ``system_prompt`` / ``user_template``, the generation shape ``output_fields`` (it must contain
+    ``QA_VERDICT_FIELDS``), the exact ``prompt_ref``, the ``evaluator_ref`` its Evaluations are
+    opened with, and the scoped ``toolbox``. ``evaluate`` renders the candidate's content into the
+    template, calls the structured port, and turns the fields into a verdict **only** through
+    ``decode_verdict`` (ADR-0034). Unlike the executor it never turns a failure into a result
+    (ADR-0018 §6): an ``LLMError`` becomes ``QaCallError`` and a malformed answer a
+    ``QaVerdictError``, each carrying the measurements of the calls already made, so the gate stays
+    shut and the calls are still recorded.
+    """
+
+    client: LLMClient
+    system_prompt: str
+    user_template: str
+    output_fields: tuple[str, ...]
+    prompt_ref: str
+    evaluator_ref: str
+    toolbox: Toolbox = field(
+        default_factory=lambda: Toolbox(grants=(), available=()), compare=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        missing = [name for name in QA_VERDICT_FIELDS if name not in self.output_fields]
+        if missing:
+            raise ValueError(f"LLMArtifactEvaluator output_fields must contain {missing}")
+        for name, value in (("prompt_ref", self.prompt_ref), ("evaluator_ref", self.evaluator_ref)):
+            if not value.strip():
+                raise ValueError(f"LLMArtifactEvaluator requires a non-blank {name}")
+
+    def evaluate(self, content: str) -> EvaluationResult:
+        try:
+            completion = self.client.complete(
+                system=self.system_prompt,
+                user=_render(self.user_template, content),
+                fields=self.output_fields,
+                toolbox=self.toolbox,
+            )
+        except LLMError as exc:
+            raise QaCallError(
+                f"QA LLM call failed: {exc}", analytics=_analytics(exc.metrics, self.prompt_ref)
+            ) from exc
+        analytics = _analytics(completion.metrics, self.prompt_ref)
+        try:
+            decoded = decode_verdict(completion.fields)
+        except QaVerdictError as exc:
+            raise QaVerdictError(str(exc), analytics=analytics) from exc
+        return EvaluationResult(decoded.verdict, decoded.flags, analytics)
 
 
 def _analytics(

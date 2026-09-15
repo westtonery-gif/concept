@@ -75,6 +75,7 @@ class RecordingEvaluator:
 
     result: EvaluationResult
     seen: list[str] = field(default_factory=list)
+    evaluator_ref: str = "qa@v1"
 
     def evaluate(self, content: str) -> EvaluationResult:
         self.seen.append(content)
@@ -83,6 +84,8 @@ class RecordingEvaluator:
 
 class FailingEvaluator:
     """QA double whose backend is unavailable — a technical failure, not a verdict."""
+
+    evaluator_ref = "qa@v1"
 
     def evaluate(self, content: str) -> EvaluationResult:
         raise RuntimeError("QA backend unavailable")
@@ -93,6 +96,7 @@ class DecodingEvaluator:
     """QA double shaped like a structured-port evaluator: fixed fields -> ``decode_verdict``."""
 
     fields: Mapping[str, str]
+    evaluator_ref: str = "qa@v1"
 
     def evaluate(self, content: str) -> EvaluationResult:
         return decode_verdict(self.fields)

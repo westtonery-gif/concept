@@ -4,6 +4,8 @@
 > (PROJECT §17: при конфликте побеждают документы). Приёмка — `EVALUATION_ACCEPTANCE.md`.
 >
 > **Статус:** Accepted. **Дата:** 2026-09-15.
+> Дополнено `ADR-0036` (2026-09-16): `evaluator_ref`, запись метрик вызовов оценщика,
+> `LLMArtifactEvaluator` (§2, §4, §7, §8, §8.3).
 
 ---
 
@@ -30,6 +32,7 @@
 | `run_id` | `str` (владеющий Run) | неизменяем |
 | `artifact_ref` | `str` (id артефакта-кандидата) | неизменяем |
 | `kind` | `str` (вид оценки, напр. `"qa"`) | неизменяем |
+| `evaluator_ref` | `str \| None` (`agent_ref` отвечающей роли; ADR-0036) | неизменяем |
 | `status` | `EvaluationStatus` (вердикт) | один раз: `PENDING` → терминальный |
 | `flags` | `tuple[str, ...]` (замечания / флаги риска) | один раз, вместе с вердиктом |
 
@@ -50,12 +53,16 @@ PENDING ──► PASSED    (пройдено)
 
 | Операция | Кто | Предусловия | Эффект |
 |---|---|---|---|
-| `open_evaluation(artifact_id, *, kind, by)` | Content Director | артефакт `CANDIDATE` | новая `PENDING` Evaluation; событие не порождается |
+| `open_evaluation(artifact_id, *, kind, by, evaluator_ref=None)` | Content Director | артефакт `CANDIDATE`; `evaluator_ref`, если задан, непустой (иначе `InvalidEvaluationError`) | новая `PENDING` Evaluation; событие не порождается |
 | `record_evaluation(evaluation_id, verdict, *, by, flags=())` | Content Director | Evaluation `PENDING`; `verdict` ∈ {PASSED, FLAGGED, FAILED} | вердикт и флаги фиксируются; `EvaluationCompleted` |
 | `evaluations` / `evaluation(id)` | чтение | — | снимки `EvaluationView` |
 
 Вердикт выносит оценщик вне домена; Run его только **сохраняет** (Variant A, ADR-0013 §8).
 `AGENT` и `HUMAN_REVIEWER` не могут ни открыть, ни записать оценку.
+
+Метрики вызовов оценщика записываются на Evaluation через `record_evaluation_analytics`
+(`ANALYTICS_RECORD_SPEC.md` §4, ADR-0036); роль в записи выводится из `evaluator_ref`, поэтому
+записать вызов можно только для Evaluation, у которой он задан.
 
 ## 5. Гейт fail closed
 
@@ -86,6 +93,7 @@ PENDING ──► PASSED    (пройдено)
 | Ошибка | База | Когда |
 |---|---|---|
 | `InvalidEvaluationTransitionError` | `EvaluationDomainError` | повторный вердикт; `PENDING` как вердикт |
+| `InvalidEvaluationError` | `EvaluationDomainError` | пустой `evaluator_ref` при открытии (ADR-0036) |
 | `ImmutableEvaluationAttributeError` | `EvaluationDomainError` | запись в неизменяемый атрибут |
 | `ArtifactQaNotPassedError` | `ArtifactDomainError` | одобрение без последнего `PASSED` |
 | `InvalidTransitionError` (Run) | `RunDomainError` | оценка не-`CANDIDATE` артефакта |
@@ -97,13 +105,18 @@ PENDING ──► PASSED    (пройдено)
 
 `application/qa_evaluation.py`:
 
-- `EvaluationResult(verdict: EvaluationStatus, flags: tuple[str, ...] = ())`;
-- `ArtifactEvaluator` — протокол `evaluate(content: str) -> EvaluationResult`;
+- `EvaluationResult(verdict: EvaluationStatus, flags: tuple[str, ...] = (), analytics=())` —
+  `analytics`: по одному `AnalyticsMeasurement` на завершённый вызов модели, по порядку (ADR-0036);
+- `ArtifactEvaluator` — протокол: свойство `evaluator_ref: str` (роль, которая отвечает) и
+  `evaluate(content: str) -> EvaluationResult`;
 - `evaluate_artifact(run, evaluator, artifact_id, *, kind="qa") -> EvaluationId` — открывает
-  оценку, передаёт оценщику содержимое артефакта, записывает вердикт.
+  оценку с `evaluator_ref` оценщика, передаёт ему содержимое артефакта, записывает его вызовы и
+  вердикт.
 
 Исключения оценщика **не перехватываются** (PROJECT §10): Evaluation остаётся `PENDING`, гейт
-закрыт. Вердикта по умолчанию нет.
+закрыт. Вердикта по умолчанию нет. Единственный перехват — `MeasuredEvaluatorError`
+(`QaVerdictError`, `QaCallError`): сначала записываются измерения уже сделанных вызовов, затем
+пробрасывается **то же** исключение (ADR-0036 §3).
 
 ### 8.1 Контракт полей вердикта (ADR-0034)
 
@@ -122,7 +135,8 @@ PENDING ──► PASSED    (пройдено)
 - Любое нарушение → `QaVerdictError` (прикладная ошибка, не `DomainError`). Она пробрасывается как
   любая ошибка оценщика: Evaluation остаётся `PENDING`, гейт закрыт. Неверный ответ **никогда** не
   превращается в вердикт (ни в `FAILED`, ни в `FLAGGED`).
-- Порт `LLMClient`, `Schema`, `Evaluation`, `ArtifactEvaluator` и `Run` не меняются.
+- Порт `LLMClient`, `Schema`, `Evaluation`, `ArtifactEvaluator` и `Run` не меняются (позднее
+  ADR-0036 аддитивно дополнил `Evaluation`, `ArtifactEvaluator` и `Run` — §8.3).
 
 ### 8.2 Определение QA-роли (ADR-0035)
 
@@ -141,7 +155,29 @@ PENDING ──► PASSED    (пройдено)
 - Критерии v1 — базовые и ждут ревью мейнтейнера; конкретные правила приходят **новой версией**
   Prompt (PROMPT_STORE_SPEC §4), без правки текста v1.
 - Роль отвечает вердиктом, а не Output: она предназначена для порта `ArtifactEvaluator`, а не для
-  шага Workflow. Исполнитель (`LLMArtifactEvaluator`) и подключение — отдельные подзадачи Этапа 8.
+  шага Workflow. Оценщик на её основе — §8.3; подключение к точке входа — отдельная подзадача
+  Этапа 8.
+
+### 8.3 `LLMArtifactEvaluator` и метрики QA-вызова (ADR-0036)
+
+`infrastructure/llm.py` — `LLMArtifactEvaluator(client, system_prompt, user_template,
+output_fields, prompt_ref, evaluator_ref, toolbox=пустой)`:
+
+- конструирование: `output_fields` содержит `QA_VERDICT_FIELDS`; `prompt_ref`
+  (`<prompt_id>@v<version>`) и `evaluator_ref` непустые — иначе `ValueError`;
+- `evaluate(content)`: `{input}` шаблона заменяется содержимым артефакта; один вызов
+  `LLMClient.complete` с формой `output_fields`; поля превращаются в вердикт **только** через
+  `decode_verdict`; результат несёт по одному измерению на завершённый provider-turn с `prompt_ref`;
+- сбой никогда не становится вердиктом: `LLMError` → `QaCallError` (цепочка `from`), неверный
+  ответ → `QaVerdictError`; оба несут измерения уже сделанных вызовов.
+
+Запись (`record_verdict`): все измерения результата записываются через
+`Run.record_evaluation_analytics` **до** вердикта; при `MeasuredEvaluatorError` записываются
+измерения ошибки и пробрасывается то же исключение; Evaluation остаётся `PENDING`.
+`ContentDirector` открывает оценку с `evaluator_ref=qa.evaluator_ref` и при
+`MeasuredEvaluatorError` сохраняет Run в хранилище перед пробросом. Как Director в остальном
+обходится с ошибкой QA (оставить `WAITING_QA` или перевести Run в `FAILED`), решается при
+подключении (подзадача 11.4, ADR-0034 §6).
 
 ## 9. Маршрутизация в ContentDirector
 

@@ -65,6 +65,7 @@ from omemo_content_factory.domain.evaluation import (
     EvaluationId,
     EvaluationStatus,
     EvaluationView,
+    InvalidEvaluationError,
 )
 from omemo_content_factory.domain.human_review import (
     HumanReview,
@@ -858,11 +859,20 @@ class Run:
 
     # --- Evaluation child management (additive, ADR-0018) --------------------------------
 
-    def open_evaluation(self, artifact_id: ArtifactId, *, kind: str, by: Actor) -> EvaluationId:
+    def open_evaluation(
+        self,
+        artifact_id: ArtifactId,
+        *,
+        kind: str,
+        by: Actor,
+        evaluator_ref: str | None = None,
+    ) -> EvaluationId:
         """Open a ``PENDING`` Evaluation of a candidate Artifact, through the root (ADR-0018 §4).
 
         Content Director only. The target Artifact must be ``CANDIDATE`` (else
-        ``InvalidTransitionError``). Emits no event (only the verdict is an event,
+        ``InvalidTransitionError``). ``evaluator_ref`` optionally names the role that will answer;
+        the metrics of its calls are attributed to the Evaluation through it (ADR-0036 §1). A blank
+        one is refused (``InvalidEvaluationError``). Emits no event (only the verdict is an event,
         DOMAIN_MODEL.md §10). A re-evaluation is a new Evaluation. Returns the new id.
         """
         self._ensure_authorised(by)
@@ -871,10 +881,16 @@ class Run:
             raise InvalidTransitionError(
                 f"an Evaluation needs a CANDIDATE Artifact; {artifact_id} is {status}"
             )
+        if evaluator_ref is not None and not evaluator_ref.strip():
+            raise InvalidEvaluationError("evaluator_ref must not be blank when given")
         self._evaluation_seq += 1
         evaluation_id = f"{self._run_id}-evaluation-{self._evaluation_seq}"
         self._evaluations[evaluation_id] = Evaluation(
-            evaluation_id=evaluation_id, run_id=self._run_id, artifact_ref=artifact_id, kind=kind
+            evaluation_id=evaluation_id,
+            run_id=self._run_id,
+            artifact_ref=artifact_id,
+            kind=kind,
+            evaluator_ref=evaluator_ref,
         )
         return evaluation_id
 
@@ -982,14 +998,66 @@ class Run:
             retries=task.attempt_count - 1,
             prompt_ref=prompt_ref,
         )
+        return self._capture(record)
+
+    def record_evaluation_analytics(
+        self,
+        evaluation_id: EvaluationId,
+        *,
+        provider: str,
+        model: str,
+        token_usage: TokenUsage,
+        cost: Cost,
+        time_range: TimeRange,
+        by: Actor,
+        prompt_ref: str | None = None,
+    ) -> AnalyticsRecordId:
+        """Record the metrics of one call an evaluator made for an owned Evaluation (ADR-0036 §2).
+
+        The Evaluation counterpart of :meth:`record_analytics`, under the same rules: Content
+        Director only, append-only, validated before anything changes (a refusal records nothing
+        and consumes no id), and no restriction on the Run's or the Evaluation's state — a call
+        made for a decided Evaluation still happened. The Evaluation must be owned (else
+        ``KeyError``) and name its ``evaluator_ref`` (else ``InvalidAnalyticsRecordError``):
+        ``agent_ref`` is derived from it, never asserted. ``retries`` is ``None``: an Evaluation has
+        no attempt count. Emits ``AnalyticsRecordCaptured``.
+        """
+        self._ensure_authorised(by)
+        evaluator_ref = self._evaluations[evaluation_id].evaluator_ref
+        if evaluator_ref is None:
+            raise InvalidAnalyticsRecordError(
+                f"evaluation {evaluation_id} names no evaluator to attribute the call to"
+            )
+        record = AnalyticsRecord(
+            record_id=f"{self._run_id}-analytics-{self._analytics_seq + 1}",
+            run_id=self._run_id,
+            task_id=None,
+            agent_ref=evaluator_ref,
+            provider=provider,
+            model=model,
+            token_usage=token_usage,
+            cost=cost,
+            time_range=time_range,
+            retries=None,
+            prompt_ref=prompt_ref,
+            evaluation_id=evaluation_id,
+        )
+        return self._capture(record)
+
+    def _capture(self, record: AnalyticsRecord) -> AnalyticsRecordId:
+        """Append an already validated record and journal it (ADR-0020 §5, ADR-0036 §2)."""
         self._analytics_seq += 1
-        self._analytics_records[record_id] = record
+        self._analytics_records[record.record_id] = record
         self._record(
             AnalyticsRecordCaptured(
-                run_id=self._run_id, record_id=record_id, task_id=task_id, agent_ref=task.agent_ref
+                run_id=self._run_id,
+                record_id=record.record_id,
+                task_id=record.task_id,
+                agent_ref=record.agent_ref,
+                evaluation_id=record.evaluation_id,
             )
         )
-        return record_id
+        return record.record_id
 
     @property
     def analytics_records(self) -> Sequence[AnalyticsRecord]:
@@ -1136,10 +1204,19 @@ def _verify_references(snapshot: RunSnapshot) -> None:
     if not subjects <= artifacts:
         raise RunRestorationError("a child refers to an Artifact this Run does not own")
     roles = {task.task_id: task.agent_ref for task in snapshot.tasks}
+    evaluators = {view.evaluation_id: view.evaluator_ref for view in snapshot.evaluations}
     for record in snapshot.analytics_records:
-        if roles.get(record.task_id) != record.agent_ref:
+        if record.task_id is not None:
+            if roles.get(record.task_id) != record.agent_ref:
+                raise RunRestorationError(
+                    f"analytics record {record.record_id} does not match an owned Task and its role"
+                )
+        elif (
+            record.evaluation_id is None or evaluators.get(record.evaluation_id) != record.agent_ref
+        ):
             raise RunRestorationError(
-                f"analytics record {record.record_id} does not match an owned Task and its role"
+                f"analytics record {record.record_id} does not match an owned Evaluation "
+                "and its evaluator"
             )
 
 

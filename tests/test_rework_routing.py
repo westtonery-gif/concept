@@ -77,6 +77,7 @@ class SequenceEvaluator:
 
     verdicts: list[EvaluationStatus]
     calls: list[str] = field(default_factory=list)
+    evaluator_ref: str = "qa@v1"
 
     def evaluate(self, content: str) -> EvaluationResult:
         self.calls.append(content)

@@ -17,7 +17,7 @@
 > `Run.restore`) — это его предмет. Он **не** описывает хранилище, сериализацию, формат на диске,
 > атомарность или транзакции — это уровень `RunStore` (инфраструктура, ARCH §9/§10; ADR-0024).
 
-**Версия документа:** 1.1
+**Версия документа:** 1.2
 **Статус:** Принят (реализован: ADR-0024)
 **Дата:** 2026-09-15 (1.0 — 2026-07-01)
 **Владелец:** Архитектор реализации
@@ -183,7 +183,7 @@ Review / Evaluation / Output / Analytics Record переиспользуются
    - каждый `artifact.supersedes_ref` (если есть), `review.artifact_ref` и
      `evaluation.artifact_ref` ссылаются на владеемый `Artifact`;
    - каждая `AnalyticsRecord` называет владеемый Task и **его** `agent_ref` (атрибуция выводится
-     из Task, ADR-0020 §4).
+     из Task, ADR-0020 §4) — либо *(1.2, ADR-0036)* владеемую Evaluation и **её** `evaluator_ref`.
 4. **Уникальность и связи 1:1** *(инв. 7; DOMAIN_MODEL §2.11/§2.12):*
    - id каждого вида детей (Task, Output, Artifact, Human Review, Evaluation, Analytics Record)
      уникален;
@@ -248,6 +248,7 @@ Review / Evaluation / Output / Analytics Record переиспользуются
 |---|---|---|
 | 1.0 | 2026-07-01 | Первая редакция: `RunSnapshot`, `TaskSnapshot`, `Run.restore`, verify/reject |
 | 1.1 | 2026-09-15 | ADR-0024: в снимок добавлены Evaluations, Analytics Records и их счётчики (спека 1.0 старше ADR-0018/0020); наблюдение `Run.snapshot` (§3.2); verify/reject дополнен (события журнала, уникальность id, 1:1, границы политик, `COMPLETED` и Task, ссылки новых детей) и усилен для счётчиков (§4.3 п. 5); коллекции — кортежи |
+| 1.2 | 2026-09-16 | ADR-0036: `EvaluationView` несёт `evaluator_ref`; `AnalyticsRecord` называет Task **или** Evaluation — §4.3 п. 3 проверяет запись Evaluation по владеемой Evaluation и её оценщику |
 
 ---
 

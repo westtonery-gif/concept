@@ -1,10 +1,12 @@
 """Analytics Record domain model — the immutable metrics of one agent call.
 
-A child entity of the Run aggregate root, owned **through its Task** (DOMAIN_MODEL.md §2.15, §9.1):
-one append-only record per call — provider and model, input/output tokens, cost, execution time and
-the step's retry count (PROJECT.md §16) — the factual base the Analytics Agent will aggregate. It is
-created only via ``Run.record_analytics`` and never changes afterwards: there is no update or
-delete, and its single state ``Recorded`` is implicit in its existence (ADR-0020 §3).
+A child entity of the Run aggregate root, owned **through its Task** — or, for an evaluator's call,
+through its Evaluation (ADR-0036) — (DOMAIN_MODEL.md §2.15, §9.1). One append-only record per
+call — provider and model, input/output tokens, cost, execution time and the step's retry count
+(PROJECT.md §16) — the factual base the Analytics Agent will aggregate. It is created only via
+``Run.record_analytics`` / ``Run.record_evaluation_analytics`` and never changes afterwards: there
+is no update or delete, and its single state ``Recorded`` is implicit in its existence
+(ADR-0020 §3).
 
 The metric values are Value Objects (DOMAIN_MODEL.md §11) — ``TokenUsage``, ``Cost``, ``TimeRange``
 — validated on construction, so an implausible measurement never reaches the Run. The domain never
@@ -102,24 +104,28 @@ class TimeRange:
 
 @dataclass(frozen=True, slots=True)
 class AnalyticsRecord:
-    """The metrics of one agent call inside a Run (ADR-0020 §3).
+    """The metrics of one agent call inside a Run (ADR-0020 §3, ADR-0036 §2).
 
     Immutable by construction (frozen), so it is exposed directly (read-only) through the Run root,
-    like ``Output``; no snapshot view is needed. ``run_id``, ``task_id``, ``agent_ref`` and
-    ``retries`` are derived by Run from the owned Task, so a record never contradicts it (§4).
+    like ``Output``; no snapshot view is needed. A record has exactly one subject: the ``task_id``
+    of a Task's call, or the ``evaluation_id`` of an evaluator's call. Run derives ``run_id``,
+    ``agent_ref`` and ``retries`` from that subject, so a record never contradicts it (ADR-0020 §4).
+    ``retries`` is the Task's retry count, and ``None`` for an Evaluation, which has no attempt
+    count (unknown is not zero, ADR-0029 §1).
     """
 
     record_id: AnalyticsRecordId
     run_id: str
-    task_id: str
+    task_id: str | None
     agent_ref: str
     provider: str
     model: str
     token_usage: TokenUsage
     cost: Cost
     time_range: TimeRange
-    retries: int
+    retries: int | None
     prompt_ref: str | None = None
+    evaluation_id: str | None = None
 
     def __post_init__(self) -> None:
         for name, value in (("provider", self.provider), ("model", self.model)):
@@ -127,7 +133,16 @@ class AnalyticsRecord:
                 raise InvalidAnalyticsRecordError(f"{name} must not be blank")
         if self.prompt_ref is not None and not self.prompt_ref.strip():
             raise InvalidAnalyticsRecordError("prompt_ref must not be blank when given")
-        _require_count("retries", self.retries)
+        if (self.task_id is None) == (self.evaluation_id is None):
+            raise InvalidAnalyticsRecordError(
+                "a record names exactly one subject: a Task or an Evaluation"
+            )
+        if self.task_id is not None:
+            if self.retries is None:
+                raise InvalidAnalyticsRecordError("a Task's call must record its retries")
+            _require_count("retries", self.retries)
+        elif self.retries is not None:
+            raise InvalidAnalyticsRecordError("an Evaluation's call has no retry count")
 
 
 # --- Domain events -----------------------------------------------------------------------
@@ -146,11 +161,13 @@ class AnalyticsEvent:
 class AnalyticsRecordCaptured(AnalyticsEvent):
     """Emitted when a call's metrics are recorded (DOMAIN_MODEL.md §10).
 
-    Names the call's Task and role; the metrics themselves are read from the record.
+    Names the call's subject — its Task, or its Evaluation (ADR-0036) — and role; the metrics
+    themselves are read from the record.
     """
 
-    task_id: str
+    task_id: str | None
     agent_ref: str
+    evaluation_id: str | None = None
 
 
 # --- Domain errors -----------------------------------------------------------------------
@@ -167,7 +184,9 @@ class InvalidAnalyticsRecordError(AnalyticsDomainError):
 
     Raised by the Value Objects on construction (negative or ``bool`` token counts; a negative,
     ``float`` or non-finite cost; a blank currency; a naive or reversed time range), by the record
-    for a blank provider / model / prompt reference, and by Run for a Task that was never started.
+    for a blank provider / model / prompt reference or a subject that is not exactly one Task or
+    Evaluation, and by Run for a Task that was never started or an Evaluation that names no
+    evaluator (ADR-0036).
     """
 
 

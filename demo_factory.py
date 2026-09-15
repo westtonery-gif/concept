@@ -175,7 +175,8 @@ def _show_model_calls(run: Run) -> None:
         usage = record.token_usage
         span = record.time_range.finished_at - record.time_range.started_at
         safe_print(
-            f"    - {record.task_id} {record.prompt_ref} {record.provider}/{record.model} "
+            f"    - {record.task_id or record.evaluation_id} {record.prompt_ref} "
+            f"{record.provider}/{record.model} "
             f"tokens={usage.input_tokens}+{usage.output_tokens} "
             f"cost={record.cost.amount} {record.cost.currency} "
             f"latency={span.total_seconds() * 1000:.0f}ms retries={record.retries}"

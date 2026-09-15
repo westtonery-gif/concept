@@ -458,6 +458,8 @@ class _ReworkExecutor:
 
 
 class _Flagging:
+    evaluator_ref = "qa@v1"
+
     def evaluate(self, content: str) -> EvaluationResult:
         return EvaluationResult(EvaluationStatus.FLAGGED, (f"risk in {content}",))
 

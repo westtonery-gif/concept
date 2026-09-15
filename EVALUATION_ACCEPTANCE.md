@@ -2,9 +2,10 @@
 
 > Приёмка реализации `EVALUATION_SPEC.md` (по `ADR-0018`). Каждый критерий фальсифицируем: при
 > неверной реализации соответствующий тест падает. Идентификаторы используются в докстрингах
-> тестов (`tests/test_evaluation.py`, `tests/test_qa_evaluation.py`, `tests/test_qa_agent.py`).
+> тестов (`tests/test_evaluation.py`, `tests/test_qa_evaluation.py`, `tests/test_qa_agent.py`,
+> `tests/test_qa_call_metrics.py`).
 >
-> **Статус:** Accepted. **Дата:** 2026-09-15.
+> **Статус:** Accepted. **Дата:** 2026-09-15. Дополнено `ADR-0036` (2026-09-16): EFL-07, §4.3.
 
 ---
 
@@ -32,6 +33,7 @@
 | EFL-04 | Второй вердикт | `InvalidEvaluationTransitionError`; первый вердикт не изменён |
 | EFL-05 | `PENDING` как вердикт | `InvalidEvaluationTransitionError` |
 | EFL-06 | Запись в неизменяемый атрибут | `ImmutableEvaluationAttributeError` |
+| EFL-07 | Открыть оценку с пустым `evaluator_ref` | `InvalidEvaluationError`; оценка не открыта |
 
 ## 3. Гейт fail closed (EGT)
 
@@ -77,6 +79,20 @@
 | QAR-03 | Текст Prompt | System называет оба поля, три токена вердикта, `JSON` и `[]`; User template содержит `{input}` ровно один раз и оба поля |
 | QAR-04 | `build_schema_map` для роли | `SchemaBinding("qa-verdict@v1", Schema роли)`; модель не вызывается |
 | QAR-05 | Ответ `passed` с `[]` | проходит проверку наличия Schema и декодируется в `PASSED` |
+
+### 4.3 LLM-оценщик и метрики QA-вызова (LAE, ADR-0036, `EVALUATION_SPEC.md` §8.3)
+
+Модель — детерминированный фейк порта `LLMClient` (без SDK и сети).
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| LAE-01 | `LLMArtifactEvaluator.evaluate` | System и User из Prompt (`{input}` = содержимое), поля = форма; вердикт и флаги из `decode_verdict`; одно измерение на provider-turn с `prompt_ref` |
+| LAE-02 | `evaluate_artifact` с ним | Evaluation открыта с `evaluator_ref` оценщика; вызов записан на неё до вердикта (`AnalyticsRecordCaptured` раньше `EvaluationCompleted`) |
+| LAE-03 | Неверный ответ модели | `QaVerdictError` с измерениями; вызов записан; оценка `PENDING`; одобрение запрещено |
+| LAE-04 | `LLMError` после завершённых turn / без ответа провайдера | `QaCallError`, причина — та же `LLMError`; завершённые turn записаны, без ответа — записей нет; оценка `PENDING`; одобрение запрещено |
+| LAE-05 | Конструирование | форма без `verdict`/`flags`, пустые `prompt_ref`/`evaluator_ref` → `ValueError` |
+| LAE-06 | ContentDirector с хранилищем, QA падает после вызова | ошибка пробрасывается; сохранённый Run в `WAITING_QA`, оценка `PENDING` с `evaluator_ref`, запись вызова сохранена |
+| LAE-07 | ContentDirector с `LLMArtifactEvaluator`: `passed` / `flagged` | `COMPLETED` / `WAITING_HUMAN`; в обоих случаях ровно одна запись вызова QA на Evaluation с ролью и `prompt_ref` |
 
 ## 5. Маршрутизация ContentDirector (ECD)
 
