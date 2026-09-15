@@ -1,4 +1,4 @@
-# CLAUDE.md — OMEMO Content Factory
+# CLAUDE.md — concept Content Factory
 
 Industrial multi-agent content production system (carousels, AI-video, articles).
 Built bottom-up with a strict **spec-before-code** process. The architecture documents are
