@@ -21,7 +21,7 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-15)
-- **All 31 ADRs (0001–0031) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 32 ADRs (0001–0032) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -29,9 +29,21 @@ anything ahead of the queue below — see task 10.
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
   (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
-  (0029), the external versioned Prompt store (0030), and fail-fast Task sequencing with
-  authoritative Schema bindings (0031) are all implemented and tested. All gates green: ruff,
-  ruff format, mypy --strict, pytest (786 passed, 0 skipped).
+  (0029), the external versioned Prompt store (0030), fail-fast Task sequencing with authoritative
+  Schema bindings (0031), and resumable QA/human rework routing (0032) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (801 passed,
+  0 skipped).
+- **QA rework routing is real (ROADMAP Stage 7, ADR-0032).** A QA risk still fails closed into
+  `WAITING_HUMAN` with an escalation review. When the current candidate's latest decision is
+  `CHANGES_REQUESTED`, `ContentDirector.resume` re-enters `RUNNING`, re-executes only that
+  candidate's producer on canonical JSON containing the immutable content, latest QA flags and
+  human instructions, and turns its validated Output into the successor through
+  `Run.create_artifact_version`. Earlier Workflow steps are reused; each iteration appends one
+  traced Task and starts fresh QA/Human gates on the new id. The Run's rework bound fails
+  observably before a call; a failed/outputless rework never supersedes the candidate. Every new
+  storage boundary resumes without duplicating a committed Task or forking the version chain.
+  Spec/acceptance: `REWORK_ROUTING_SPEC.md` / `REWORK_ROUTING_ACCEPTANCE.md`; tests:
+  `tests/test_rework_routing.py` (`RWR`/`RWF`/`RWS`/`RWG`).
 - **The Stage 7 correctness review is closed (ADR-0031).** `ContentDirector` stops a sequential
   plan at its first non-successful Task, so no downstream Task is opened or executor called after
   a failure (including on resume). The Composition Root now preserves each Prompt's exact opaque
@@ -57,7 +69,9 @@ anything ahead of the queue below — see task 10.
   (mismatch → `RunResumptionError`, nothing changed), terminal Tasks are not re-run, a `RUNNING`
   one is retried on its stored input (re-entry into `RUNNING`; attempts exhausted → `FAILED` with
   `RESUME_LIMIT_REASON`), a `PENDING` QA Evaluation is finished rather than duplicated, a Run
-  waiting for a human or terminal is left alone. `execute` still requires a `CREATED` Run. To commit
+  waiting for a human is left alone unless its current review is `CHANGES_REQUESTED` (then the
+  ADR-0032 rework route runs), and a terminal is left alone. `execute` still requires a `CREATED`
+  Run. To commit
   between the halves, `execute_task` = `start_task` + `finish_task` and `evaluate_artifact` =
   `open_evaluation` + `record_verdict` (signatures of the old functions unchanged).
   `composition.build_run_store(environ)` → `SqliteRunStore` at `OMEMO_RUN_STORE_PATH` (default
@@ -280,8 +294,11 @@ process at the time, not a pattern to keep copying.)
       beside the exact Schema authority; `validate_and_record_output` validates with that object
       and records that reference, normalizing away any different executor self-report. Tests cover
       both regressions.
-   7. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
-      re-run that calls `Run.create_artifact_version` for the new version (ADR-0019 "Deferred").
+   7. ~~**QA rework routing**~~ — done (ADR-0032: QA risk retains the ADR-0018 fail-closed human
+      escalation; `CHANGES_REQUESTED` makes `resume` append and execute one Task for the current
+      candidate's producer, then create the successor with `Run.create_artifact_version`; canonical
+      JSON feedback input, bounded failure and crash-safe resumption are specified in
+      `REWORK_ROUTING_SPEC.md` / `REWORK_ROUTING_ACCEPTANCE.md`, tests `RWR`/`RWF`/`RWS`/`RWG`).
    8. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`
       exercising Storage + a Skill + a Tool + captured metrics + an externally-stored prompt in
       one pass; this is what actually closes Stage 7, not any subtask alone.

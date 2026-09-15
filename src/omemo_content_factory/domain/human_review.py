@@ -8,8 +8,9 @@ mutated **only via Run**: the Content Director opens it, the Human Reviewer deci
 This module depends only on stdlib; its references (``run_id``, ``artifact_ref``) are opaque
 ``str`` (ADR-0003 §3), avoiding any import cycle.
 
-Scope note (ADR-0007): an audit timestamp is deferred to an injectable clock (ADR-0003 §10);
-``CHANGES_REQUESTED`` rework routing and the QA context shown to the reviewer are deferred.
+Scope note (ADR-0007): an audit timestamp is deferred to an injectable clock (ADR-0003 §10).
+``CHANGES_REQUESTED`` is routed by the application-level Content Director (ADR-0032); this domain
+module remains only the immutable carrier of that decision.
 """
 
 from __future__ import annotations

@@ -19,14 +19,20 @@ final step's Artifact is made a ``CANDIDATE`` and evaluated (``evaluate_artifact
 Approval Gate (``WAITING_HUMAN``) with a Human Review opened for escalation, never ``COMPLETED``.
 Without an evaluator the flow is unchanged.
 
-Storage (ADR-0026): when a ``RunStore`` is injected, the Run is saved after every orchestration
-step — each commit that precedes an external call is taken before the call — so a stored Run never
-holds a half-recorded step. :meth:`ContentDirector.resume` continues a Run brought back from the
-store from its own state: committed work is reused, an uncommitted call is made again.
+Rework routing (ADR-0032): a QA risk still escalates to a Human Review. When its latest decision is
+``CHANGES_REQUESTED``, :meth:`ContentDirector.resume` re-executes only the current candidate's
+producer with the reviewed content and feedback, then creates a new Artifact version from the
+validated Output. The route is bounded by the Run's rework policy and starts fresh QA/review gates.
+
+Storage (ADR-0026/0032): when a ``RunStore`` is injected, the Run is saved after every
+orchestration step — each commit that precedes an external call is taken before the call — so a
+stored Run never holds a half-recorded step. :meth:`ContentDirector.resume` continues a Run brought
+back from the store from its own state: committed work is reused, an uncommitted call is made again.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -42,9 +48,15 @@ from omemo_content_factory.application.task_execution import (
     finish_task,
     start_task,
 )
-from omemo_content_factory.domain.artifact import ArtifactId, ArtifactStatus
+from omemo_content_factory.domain.artifact import ArtifactId, ArtifactStatus, ArtifactView
 from omemo_content_factory.domain.evaluation import EvaluationStatus, EvaluationView
-from omemo_content_factory.domain.run import Actor, Run, RunStatus
+from omemo_content_factory.domain.human_review import HumanReviewView, ReviewStatus
+from omemo_content_factory.domain.run import (
+    Actor,
+    ReworkLimitExceededError,
+    Run,
+    RunStatus,
+)
 from omemo_content_factory.domain.task import TaskRetryLimitExceededError, TaskStatus
 from omemo_content_factory.domain.workflow import Workflow
 
@@ -55,6 +67,12 @@ NO_CANDIDATE_REASON = "QA gate: no candidate artifact to evaluate"
 
 RESUME_LIMIT_REASON = "interrupted before its result was committed; no attempts left to resume it"
 """Failure reason of a Task found ``RUNNING`` on restart with no attempts left (ADR-0026 §3)."""
+
+REWORK_LIMIT_REASON = "Rework requested but the configured iteration limit is exhausted"
+"""Failure reason when a human-requested iteration exceeds ``ReworkPolicy`` (ADR-0032 §1)."""
+
+REWORK_NO_OUTPUT_REASON = "Rework task succeeded without a validated Output"
+"""Failure reason when re-execution cannot produce an Artifact version (ADR-0032 §3)."""
 
 
 class RunResumptionError(Exception):
@@ -134,9 +152,11 @@ class ContentDirector:
         request; a terminal Task is not run again (a ``SUCCEEDED`` one hands its Output on), a
         ``RUNNING`` one is retried on its stored input, a missing one is started. The QA gate
         re-uses a ``PENDING`` Evaluation and routes a recorded verdict without asking again. A Run
-        waiting for a human, or a terminal one, is left as it is. A Run whose Tasks do not match
-        ``tasks`` raises :class:`RunResumptionError` before anything changes. A freshly created
-        Run is simply executed.
+        waiting for a human is left alone unless the current candidate's latest Review is
+        ``CHANGES_REQUESTED``; that decision starts one bounded, resumable rework of the
+        candidate's producer (ADR-0032). A terminal Run is left alone. A Run whose Tasks do not
+        match ``tasks`` raises :class:`RunResumptionError` before anything changes. A freshly
+        created Run is simply executed.
         """
         if run.status is RunStatus.RUNNING:
             self._ensure_matches(run, tasks)
@@ -182,25 +202,182 @@ class ContentDirector:
 
     def _drive(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
         """Advance ``run`` from its current state as far as the Director can take it."""
+        if self._changes_requested(run):
+            self._begin_rework(run, tasks)
+            if run.status is RunStatus.FAILED:
+                return
         if run.status is RunStatus.QUEUED:
             run.transition(RunStatus.RUNNING, by=_CD)
             self._commit(run)
-        if run.status is RunStatus.RUNNING:
-            self._run_steps(run, tasks)
-            if not self._all_tasks_succeeded(run):
-                run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
-                self._commit(run)
-                return
-            run.transition(RunStatus.WAITING_QA, by=_CD)
-            self._commit(run)
+        if not self._drive_running(run, tasks):
+            return
         if run.status is RunStatus.WAITING_QA:
+            if self._qa is None and run.rework_count:
+                return
             if self._qa is not None and not self._pass_qa_gate(run, self._qa):
                 return
             run.transition(RunStatus.WAITING_HUMAN, by=_CD)
             self._commit(run)
-        if run.status is RunStatus.WAITING_HUMAN and not run.human_reviews:
+        self._route_human_gate(run)
+
+    def _drive_running(self, run: Run, tasks: Sequence[TaskRequest]) -> bool:
+        """Drive either the original plan or its current rework; whether routing may continue."""
+        if run.status is not RunStatus.RUNNING:
+            return True
+        if run.rework_count:
+            if not self._run_rework(run, tasks):
+                return False
+        else:
+            self._run_steps(run, tasks)
+        if not self._all_tasks_succeeded(run):
+            run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
+            self._commit(run)
+            return False
+        run.transition(RunStatus.WAITING_QA, by=_CD)
+        self._commit(run)
+        return True
+
+    def _route_human_gate(self, run: Run) -> None:
+        """Open the successor's fresh review, or preserve the legacy no-QA completion route."""
+        if run.status is not RunStatus.WAITING_HUMAN:
+            return
+        if run.rework_count:
+            candidate = self._final_candidate(run)
+            if candidate is not None and self._latest_review(run, candidate) is None:
+                run.open_human_review(candidate, by=_CD)
+                self._commit(run)
+            return
+        if not run.human_reviews:
             run.transition(RunStatus.COMPLETED, by=_CD)
             self._commit(run)
+
+    # --- Rework -------------------------------------------------------------------------
+
+    def _begin_rework(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
+        """Enter one human-requested rework iteration, or fail at the configured bound."""
+        self._ensure_matches(run, tasks)
+        try:
+            run.transition(RunStatus.RUNNING, by=_CD)
+        except ReworkLimitExceededError:
+            run.transition(RunStatus.FAILED, by=_CD, reason=REWORK_LIMIT_REASON)
+        self._commit(run)
+
+    def _run_rework(self, run: Run, tasks: Sequence[TaskRequest]) -> bool:
+        """Finish the current rework iteration and create/reuse its Artifact successor."""
+        self._ensure_matches(run, tasks)
+        if not tasks:
+            raise RunResumptionError(f"run {run.run_id} cannot rework an empty plan")
+        if len(run.tasks) < len(tasks):
+            raise RunResumptionError(
+                f"run {run.run_id} entered rework with only {len(run.tasks)} of "
+                f"{len(tasks)} original Tasks"
+            )
+        task_index = len(tasks) + run.rework_count - 1
+        if task_index < len(run.tasks):
+            task_id = run.tasks[task_index].task_id
+            self._continue_rework(run, task_id, tasks[-1])
+        elif task_index == len(run.tasks):
+            source, review = self._rework_source(run)
+            task_id = start_task(
+                run,
+                workflow_step_ref=tasks[-1].workflow_step_ref,
+                agent_ref=tasks[-1].agent_ref,
+                task_input=self._rework_input(run, source, review),
+            )
+            self._commit(run)
+            self._finish_rework(run, task_id, tasks[-1], source.artifact_id)
+        else:
+            raise RunResumptionError(
+                f"run {run.run_id} is missing the Task of an earlier rework iteration"
+            )
+        task = run.task(task_id)
+        if task.status is not TaskStatus.SUCCEEDED:
+            run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
+            self._commit(run)
+            return False
+        if task.output is None:
+            run.transition(RunStatus.FAILED, by=_CD, reason=REWORK_NO_OUTPUT_REASON)
+            self._commit(run)
+            return False
+        return True
+
+    def _continue_rework(self, run: Run, task_id: str, request: TaskRequest) -> None:
+        """Resume an appended rework Task without duplicating a committed successor."""
+        task = run.task(task_id)
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            try:
+                run.transition_task(task_id, TaskStatus.RUNNING, by=_CD)
+            except TaskRetryLimitExceededError:
+                run.transition_task(task_id, TaskStatus.FAILED, by=_CD, reason=RESUME_LIMIT_REASON)
+                self._commit(run)
+                return
+            self._commit(run)
+            source, _ = self._rework_source(run)
+            self._finish_rework(run, task_id, request, source.artifact_id)
+            return
+        output = task.output
+        if output is not None and self._artifact_of(run, output.output_id) is None:
+            source, _ = self._rework_source(run)
+            run.create_artifact_version(source.artifact_id, output.output_id, by=_CD)
+            self._commit(run)
+
+    def _finish_rework(
+        self, run: Run, task_id: str, request: TaskRequest, previous_artifact_id: ArtifactId
+    ) -> None:
+        """Call the producer and atomically commit its outcome with the new Artifact version."""
+        finish_task(
+            run,
+            self._resolve(request.agent_ref),
+            task_id,
+            schema_binding=self._resolve_schema(request.agent_ref),
+        )
+        output = run.task(task_id).output
+        if output is not None:
+            run.create_artifact_version(previous_artifact_id, output.output_id, by=_CD)
+        self._commit(run)
+
+    def _rework_source(self, run: Run) -> tuple[ArtifactView, HumanReviewView]:
+        """Return the live candidate and its latest ``CHANGES_REQUESTED`` Review."""
+        candidates = [view for view in run.artifacts if view.status is ArtifactStatus.CANDIDATE]
+        if not candidates:
+            raise RunResumptionError(f"run {run.run_id} has no live candidate to rework")
+        source = candidates[-1]
+        review = self._latest_review(run, source.artifact_id)
+        if review is None or review.status is not ReviewStatus.CHANGES_REQUESTED:
+            raise RunResumptionError(
+                f"run {run.run_id} has no CHANGES_REQUESTED review for {source.artifact_id}"
+            )
+        return source, review
+
+    def _rework_input(self, run: Run, source: ArtifactView, review: HumanReviewView) -> str:
+        """Build the canonical, persisted JSON context of one rework call (ADR-0032 §2)."""
+        evaluation = self._latest_qa(run, source.artifact_id)
+        return json.dumps(
+            {
+                "artifact": {
+                    "content": source.content,
+                    "ref": source.artifact_id,
+                    "version": source.version,
+                },
+                "human_instructions": review.reason,
+                "qa_flags": [] if evaluation is None else list(evaluation.flags),
+                "rework_iteration": run.rework_count,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @classmethod
+    def _changes_requested(cls, run: Run) -> bool:
+        """Whether the current candidate's latest review requests a new iteration."""
+        if run.status is not RunStatus.WAITING_HUMAN:
+            return False
+        candidate = cls._final_candidate(run)
+        if candidate is None:
+            return False
+        review = cls._latest_review(run, candidate)
+        return review is not None and review.status is ReviewStatus.CHANGES_REQUESTED
 
     def _run_steps(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
         """Run requests in order, chaining Output and stopping at the first failed Task.
@@ -321,6 +498,12 @@ class ContentDirector:
         ]
         return matching[-1] if matching else None
 
+    @staticmethod
+    def _latest_review(run: Run, candidate: ArtifactId) -> HumanReviewView | None:
+        """The latest Human Review of ``candidate`` (reviews are kept in opening order)."""
+        matching = [view for view in run.human_reviews if view.artifact_ref == candidate]
+        return matching[-1] if matching else None
+
     # --- Helpers ------------------------------------------------------------------------
 
     def _commit(self, run: Run) -> None:
@@ -347,12 +530,14 @@ class ContentDirector:
 
     @staticmethod
     def _ensure_matches(run: Run, tasks: Sequence[TaskRequest]) -> None:
-        """Refuse a Run whose Tasks were not opened for ``tasks``, position by position."""
-        if len(run.tasks) > len(tasks):
+        """Refuse a Run whose base/rework Tasks do not match the supplied plan (ADR-0032 §4)."""
+        views = run.tasks
+        if len(views) > len(tasks) + run.rework_count:
             raise RunResumptionError(
-                f"run {run.run_id} has {len(run.tasks)} tasks but the plan has {len(tasks)} steps"
+                f"run {run.run_id} has {len(views)} tasks for {len(tasks)} plan steps and "
+                f"{run.rework_count} rework iterations"
             )
-        for view, request in zip(run.tasks, tasks, strict=False):
+        for view, request in zip(views[: len(tasks)], tasks, strict=False):
             if (view.workflow_step_ref, view.agent_ref) != (
                 request.workflow_step_ref,
                 request.agent_ref,
@@ -362,6 +547,21 @@ class ContentDirector:
                     f"'{view.agent_ref}', but the plan has step '{request.workflow_step_ref}' "
                     f"of '{request.agent_ref}' there"
                 )
+        extras = views[len(tasks) :]
+        if extras and not tasks:
+            raise RunResumptionError(f"run {run.run_id} has rework Tasks for an empty plan")
+        if tasks:
+            final = tasks[-1]
+            for view in extras:
+                if (view.workflow_step_ref, view.agent_ref) != (
+                    final.workflow_step_ref,
+                    final.agent_ref,
+                ):
+                    raise RunResumptionError(
+                        f"rework task {view.task_id} is step '{view.workflow_step_ref}' of "
+                        f"'{view.agent_ref}', but the final producer is step "
+                        f"'{final.workflow_step_ref}' of '{final.agent_ref}'"
+                    )
 
     @staticmethod
     def _artifact_of(run: Run, output_id: str) -> ArtifactId | None:
