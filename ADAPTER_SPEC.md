@@ -84,6 +84,12 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 `brief_ref` становится `content_brief_ref` Run, `body` — вход первого шага
 (`execute_workflow(..., brief=...)`). Это **не** сущность Content Brief (Этап 9).
 
+**Реализация (6c, ADR-0025).** `InMemoryBriefBoard` (`infrastructure/in_memory_adapters.py`):
+брифы в памяти процесса; сторона управления (вне протокола) — `put(brief, *, ready=True)` и
+`reports(brief_ref)`. Там, где контракт молчит: статус на неизвестном брифе → `BriefBoardError`,
+ничего не записано; повтор последнего отчёта `(run_id, status)` не дублируется. Приёмка —
+`ADAPTER_ACCEPTANCE.md` §6.
+
 ## 6. `ReviewDesk` (`adapters/review_desk.py`)
 
 | Метод | Поведение |
@@ -109,6 +115,12 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 Площадка **переносит** решение, но не принимает его; одобрение по-прежнему требует `PASSED`
 последней Evaluation (ADR-0018). Публикация Artifact наружу — переход Run, не вызов адаптера.
 
+**Реализация (6c, ADR-0025).** `InMemoryReviewDesk`: место — `memory://reviews/<review_id>`;
+сторона управления — `decide(review_id, decision)` (рецензент) и `published(review_id)`. Там, где
+контракт молчит: другой пакет под уже опубликованным `review_id` → `ReviewDeskError`, остаётся
+первый; `decide` по неопубликованному → `ReviewDeskError`; первое решение окончательно — повтор
+того же безвреден, другое → `ReviewDeskError`.
+
 ## 7. `AnalyticsSink` (`adapters/analytics_sink.py`)
 
 | Метод | Поведение |
@@ -116,6 +128,11 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 | `export(records: Sequence[AnalyticsRecord], /) -> None` | доставить копии записей в аналитический сток; запись с уже доставленным `record_id` не дублируется; сбой → `AnalyticsSinkError`, повторяется позже, Run не блокирует и не меняет |
 
 Источник истины — записи Run (ADR-0020), сохраняемые `RunStore`; сток — копия.
+
+**Реализация (6c, ADR-0025).** `InMemoryAnalyticsSink`: по одной копии на `record_id`, в порядке
+первой доставки (`records`). Там, где контракт молчит: другая запись под уже доставленным (или
+повторённым в пакете) `record_id` → `AnalyticsSinkError`; пакет проверяется целиком до записи, так
+что отвергнутый экспорт не доставляет ничего.
 
 ## 8. Ошибки
 

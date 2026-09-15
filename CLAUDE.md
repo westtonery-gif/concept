@@ -15,14 +15,24 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 24 ADRs (0001–0024) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 25 ADRs (0001–0025) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
-  Adapter (0024) are all implemented and tested. All gates green: ruff, ruff format,
-  mypy --strict, pytest (682 passed, 0 skipped).
+  Adapter (0024), in-memory adapter stubs (0025) are all implemented and tested. All gates green:
+  ruff, ruff format, mypy --strict, pytest (696 passed, 0 skipped).
+- **ROADMAP Stage 6 is complete.** In-memory stubs of the other three contracts exist (Stage 6c,
+  ADR-0025, `infrastructure/in_memory_adapters.py`): `InMemoryBriefBoard`, `InMemoryReviewDesk`,
+  `InMemoryAnalyticsSink` — infrastructure like `FakeLLMClient`, not test doubles. Each has a
+  **control side outside its Protocol** playing the party beyond the wall (`put` = the editor,
+  `decide` = the human reviewer; `reports` / `published` / `records` read back what the outside
+  sees) — the core only ever holds the Protocol type. Where the contract is silent they **fail
+  loudly**: a status on an unknown brief, a different package under a published `review_id`, a
+  second different decision, a different record under a delivered `record_id` → the contract's own
+  error (a refused export delivers nothing). Tests: `tests/test_in_memory_adapters.py` (STB,
+  `ADAPTER_ACCEPTANCE.md` §6). **Not wired** — Stage 7.
 - **Run persistence exists (ROADMAP Stage 6b, ADR-0024)** but is **not wired** — nothing saves a
   Run yet (Stage 7). Domain: `Run.snapshot` (read-only `RunSnapshot`: everything incl. policies,
   the five id counters and the journal) and `Run.restore(snapshot)` (second factory, no transition,
@@ -47,8 +57,8 @@ the source of truth — code must never contradict them; on conflict, the docs w
   technical `<Contract>Error` (not a `DomainError`); adapters never mutate a Run.
   `tests/test_adapter_contract.py` enforces the boundary: outside `infrastructure/` no module
   imports a third-party package or network/storage stdlib, and only `composition.py` imports
-  `infrastructure`. `RunStore` is implemented (`SqliteRunStore`, ADR-0024); the other three get
-  stubs in 7.5. **No adapter is wired yet** (Stage 7).
+  `infrastructure`. `RunStore` is implemented (`SqliteRunStore`, ADR-0024); the other three have
+  in-memory stubs (ADR-0025). **No adapter is wired yet** (Stage 7).
 - **Tool Layer exists (ROADMAP Stage 5, ADR-0022, `TOOL_SPEC.md`)**: passive `ToolDescriptor`
   in `domain/tool.py` (unlike a Skill it carries its declared `ToolParameter`s — the model and the
   Toolbox both read them); executable `Tool` Protocol in `tools/contract.py` (`descriptor` +
@@ -147,9 +157,9 @@ process at the time, not a pattern to keep copying.)
 6. ~~Wire `client_for_role` into a real entrypoint~~ — done (`demo_factory.py`: each role
    resolves its own provider/model via `build_executor_map` called once per agent + merged;
    `demo.py` untouched, out of scope).
-7. ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer) — broken down below into
-   session-sized subtasks. Prerequisite for Stage 7 (first Agent through the full orchestrator)
-   and the Stage 12 MVP.
+7. ~~ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer)~~ — done, broken down below
+   into session-sized subtasks. Prerequisite for Stage 7 (first Agent through the full
+   orchestrator) and the Stage 12 MVP.
    1. ~~**Skills library** (Stage 4)~~ — done (ADR-0021, `domain/skill.py` + `skills/`,
       `SKILL_SPEC.md` / `SKILL_ACCEPTANCE.md`, `tests/test_skill_*.py`). Thesis extraction was
       deliberately not taken: done well it is LLM work (a role), not a deterministic Skill.
@@ -169,14 +179,19 @@ process at the time, not a pattern to keep copying.)
       `open_task` would overwrite it), and RST-03 expected a Run-level Approve guard that doesn't
       exist (the gate is on the Artifact, ADR-0007 §6) — both corrected in 1.1. Saving after each
       transition (the wiring) was deliberately left to Stage 7 (ADR-0024 "Deferred").
-   5. **Notion / Google Docs / Analytics adapter stubs** (Stage 6c) — a fake/stub implementation
-      of the existing `BriefBoard` / `ReviewDesk` / `AnalyticsSink` contracts (ADR-0023) only;
-      full integration is explicitly Stages 9-11, not here (ROADMAP Stage 6: "полноценная интеграция — Этапы 9–11; здесь — контракт и базовая
-      реализация/заглушка"). ADR + minimal code.
-
-   After 7.5, Stage 7 (first real Agent through the full orchestrator, Milestone M2) becomes
-   possible — that is the next queue item after this breakdown, not part of it.
-8. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
+   5. ~~**Notion / Google Docs / Analytics adapter stubs** (Stage 6c)~~ — done (ADR-0025,
+      `infrastructure/in_memory_adapters.py`, `ADAPTER_SPEC.md` §5–§7 "Реализация (6c)",
+      `ADAPTER_ACCEPTANCE.md` §6 STB, `tests/test_in_memory_adapters.py`). Kept in-memory and in
+      one module; the cases the contract leaves open were decided as fail-loud (ADR-0025 §3).
+      Failure injection (a stub raising on demand, to test that a failed report/export never
+      blocks the Run) was deliberately left to Stage 7 wiring — no reader before then.
+8. **ROADMAP Stage 7 — first real Agent through the full orchestrator (Milestone M2).** Next.
+   Like task 7, break it into session-sized subtasks in this file first (a `docs:` commit), then
+   take them one per session. It includes the wiring every earlier Stage deferred to it: saving
+   the Run after each transition (ADR-0024 §6), the four adapters in the Content Director and an
+   entrypoint (ADR-0023/0025), the tool-use loop + Toolbox (ADR-0022), the first Skill consumer
+   (ADR-0021), and routing a QA risk verdict / `CHANGES_REQUESTED` into rework (ADR-0019).
+9. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
    generation and TTS voiceover via paid provider subscriptions, plus automated video/photo
    editing (splicing, audio overlay) via editor APIs. Decision made 2026-09-15: deliberately
    deferred to Stage 13, not pulled forward — see ROADMAP.md Stage 13's new paragraph for the

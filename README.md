@@ -197,7 +197,7 @@ omemo-content-factory/
 │       ├── tools/              # Tool Layer: Tool contract + per-agent Toolbox + model-invoked Tools
 │       ├── adapters/           # Adapter contracts: RunStore, BriefBoard, ReviewDesk, AnalyticsSink
 │       ├── application/        # ContentDirector + task execution + QA evaluation
-│       └── infrastructure/     # LLM-backed task executor + SQLite RunStore (Run persistence)
+│       └── infrastructure/     # LLM executor + SQLite RunStore + in-memory adapter stubs
 ├── demo.py                     # End-to-end demo of the domain via ContentDirector
 ├── demo_factory.py             # Same, but through the real catalogued Rin -> Leo roles
 └── tests/                      # pytest suite

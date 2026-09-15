@@ -1,9 +1,10 @@
 """Tests for the Adapter Layer contracts and the core's boundary to the outside world (ADR-0023).
 
-Maps ADAPTER_ACCEPTANCE.md §1 (ADC) and §2 (ADB). There are no adapter implementations yet, so the
-contracts are checked by shape, by their values, and by minimal conformers that mypy --strict holds
-to the Protocols. The boundary checks read the source tree: a core module that starts importing a
-vendor SDK, or a contract that starts importing an implementation, fails here — not in review.
+Maps ADAPTER_ACCEPTANCE.md §1 (ADC) and §2 (ADB). The contracts are checked by shape, by their
+values, and by minimal conformers that mypy --strict holds to the Protocols; each implementation
+has its own tests (§5 STO, §6 STB). The boundary checks read the source tree: a core module that
+starts importing a vendor SDK, or a contract that starts importing an implementation, fails here —
+not in review.
 """
 
 from __future__ import annotations
