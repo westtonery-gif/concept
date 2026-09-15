@@ -186,11 +186,32 @@ process at the time, not a pattern to keep copying.)
       Failure injection (a stub raising on demand, to test that a failed report/export never
       blocks the Run) was deliberately left to Stage 7 wiring — no reader before then.
 8. **ROADMAP Stage 7 — first real Agent through the full orchestrator (Milestone M2).** Next.
-   Like task 7, break it into session-sized subtasks in this file first (a `docs:` commit), then
-   take them one per session. It includes the wiring every earlier Stage deferred to it: saving
-   the Run after each transition (ADR-0024 §6), the four adapters in the Content Director and an
-   entrypoint (ADR-0023/0025), the tool-use loop + Toolbox (ADR-0022), the first Skill consumer
-   (ADR-0021), and routing a QA risk verdict / `CHANGES_REQUESTED` into rework (ADR-0019).
+   Checked line-by-line against Stage 7's own DoD (ROADMAP.md): the two migrated roles (Rin/Leo)
+   already satisfy "input → reasoning → Structured Output → recorded in Run" and "invalid output
+   -> contract error", but nothing here uses a Skill or a Tool, no adapter is wired into a real
+   run, no call produces an Analytics Record, and a Prompt is a Python string literal, not
+   something "stored separately from code". Broken into subtasks:
+   1. **Storage wiring** — save `Run` via `RunStore` after each transition in a real run
+      (`ContentDirector`/Composition Root), restore via `Run.restore` (ADR-0024 §6 "Deferred").
+   2. **First Skill consumer** — pick an existing Skill (e.g. `check_required_elements@v1`) and
+      decide + document (small ADR) how a Skill is actually invoked around a Task's execution
+      (ADR-0021 "Deferred").
+   3. **Tool-use loop** — extend the LLM port (amends ADR-0014) to a real multi-turn tool-calling
+      loop, wire the existing `Toolbox`/`Tool` (ADR-0022) into it, grant an agent a real Tool
+      (`current_date@v1`) and prove it gets invoked mid-reasoning. Likely the heaviest subtask.
+   4. **Metrics capture — now, not Stage 14.** Decided 2026-09-15: Stage 7's own DoD requires
+      "prompt version and metrics (model, tokens, cost, latency, retries) are recorded" — that
+      overrides ADR-0020's "Deferred to Stage 14" framing; capture it here. LLM adapter starts
+      reporting usage/latency, `execute_task` calls `Run.record_analytics` on every real call.
+      Needs a new ADR that supersedes/amends ADR-0020 §"Deferred", not a silent contradiction.
+   5. **Prompt stored separately from code** — move Rin/Leo's system/user templates out of
+      `agents/*.py` into a separate, versioned store (files or a registry) the Composition Root
+      reads, instead of Python string literals.
+   6. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
+      re-run that calls `Run.create_artifact_version` for the new version (ADR-0019 "Deferred").
+   7. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`
+      exercising Storage + a Skill + a Tool + captured metrics + an externally-stored prompt in
+      one pass; this is what actually closes Stage 7, not any subtask alone.
 9. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
    generation and TTS voiceover via paid provider subscriptions, plus automated video/photo
    editing (splicing, audio overlay) via editor APIs. Decision made 2026-09-15: deliberately
