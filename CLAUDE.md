@@ -49,9 +49,29 @@ the source of truth — code must never contradict them; on conflict, the docs w
   and tested, but **not yet used by any entrypoint** — `demo.py` and `demo_factory.py` both
   still take one shared client for every role via `OMEMO_LLM_MODEL` (task 6 below).
 
-## Next tasks (ordered queue — one task per session; each ends Build → Test → Commit → Review)
+## Session workflow (branch, push, PR — no need to ask first)
+
+CONTRIBUTING.md requires trunk-based work: `main` is protected, no direct pushes, merge only
+via a reviewed PR with green CI. For every task in the queue below:
+
+1. Create a short-lived branch off `main` (e.g. `feat/evaluation-qa-entity`).
+2. Build → Test locally (the quality gate below) → Commit (Conventional Commits).
+3. **Push the branch to `origin` and open the PR yourself — this is pre-authorized, do not
+   stop to ask.** Wait for CI (`gh pr checks` / the PR's Checks tab) to go green.
+4. Leave the PR **open** for the human to merge, unless they have told you in this session to
+   merge automatically on green CI — merging into `main` is the one step that still needs an
+   explicit go-ahead by default.
+5. After merge, delete the feature branch (local + remote) and pull `main` before starting the
+   next queue item.
+
+Never push straight to `main` — that bypasses CI-on-PR and violates CONTRIBUTING.md, regardless
+of the fact that ADR-0016 and earlier `CLAUDE.md` updates were once pushed directly (a mistake,
+not a precedent).
+
+## Next tasks (ordered queue — one task per session; each ends Build → Test → Commit → Push/PR)
 1. ~~Actualize this file~~ — done.
-2. ~~Extract the shared `DomainError` base~~ — done (ADR-0017, `domain/errors.py`).
+2. ~~Extract the shared `DomainError` base~~ — done (ADR-0017, `domain/errors.py`, merged via
+   [PR #1](https://github.com/westtonery-gif/omemo-content-factory/pull/1)).
 3. ~~Evaluation / QA entity~~ — done (ADR-0018, `domain/evaluation.py`,
    `application/qa_evaluation.py`; wired in `ContentDirector`, where `WAITING_QA` happens).
 4. ~~Artifact versioning (`SUPERSEDED`)~~ — done (ADR-0019, `Run.create_artifact_version` +
