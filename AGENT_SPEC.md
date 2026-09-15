@@ -10,7 +10,7 @@
 > `ADR-0012` (Composition Root — dumb wiring), `ADR-0013` (Execution Topology + Authority).
 > Только предметная область: без кода, типов, исполнения и инфраструктуры.
 
-**Версия документа:** 1.1
+**Версия документа:** 1.2
 **Статус:** Принят (контракт для реализации модели Agent / Prompt)
 **Дата:** 2026-09-15
 **Владелец:** Архитектор предметной области
@@ -93,6 +93,14 @@ invocation-binding'ами происходит **ТОЛЬКО** в
 **выбор предсобранного executor** из карты (selection), а **не** разрешение Agent/Prompt. Само
 разрешение дескрипторов — только в composition root.
 
+### 5.1 Production Prompt storage
+
+Production-текст Prompt хранится вне Python role-модулей в версионируемом пакетном каталоге и
+материализуется Composition Root на build-time (`PROMPT_STORE_SPEC.md`, `ADR-0030`). Это меняет
+источник данных, но не доменный контракт: Agent по-прежнему несёт только логический `prompt_ref`, а
+Prompt после загрузки остаётся пассивным неизменяемым артефактом. Формат файла, I/O и ошибки
+загрузки не видны домену, executor или ContentDirector.
+
 ---
 
 ## 6. Anti-goals
@@ -111,7 +119,7 @@ invocation-binding'ами происходит **ТОЛЬКО** в
 | 2 Model | `DOMAIN_MODEL.md` §2.5; `ADR-0011`, `ADR-0022`, `ADR-0027` |
 | 3 Invariants | `DOMAIN_MODEL.md` §6; `ADR-0010`, `ADR-0011`, `ADR-0027` |
 | 4 Prompt contract | `DOMAIN_MODEL.md` §2.7, §6; `ADR-0011`, `ADR-0008` |
-| 5 Resolution rules | `ADR-0012`, `ADR-0013` (§8 selection vs resolution), `ADR-0027` |
+| 5 Resolution rules | `ADR-0012`, `ADR-0013` (§8 selection vs resolution), `ADR-0027`, `ADR-0030` |
 | 6 Anti-goals | `ADR-0010`, `ADR-0011` |
 
 > При расхождении исправляется **этот** документ: источник истины по домену —

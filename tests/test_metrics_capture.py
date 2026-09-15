@@ -189,7 +189,7 @@ def test_mtc_05_06_09_composition_records_fake_call_and_exact_prompt_version() -
     client = FakeLLMClient(clock=_clock(_T0, _T0 + timedelta(milliseconds=1)))
     director = build_content_director(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         client,
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,

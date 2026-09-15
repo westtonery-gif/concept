@@ -101,7 +101,7 @@ def test_sci_02_composition_refuses_skill_declaration_binding_mismatch(
     with pytest.raises(CompositionError, match="declares skill_refs"):
         build_executor_map(
             [agent],
-            rin.PROMPTS,
+            None,
             client,
             rin.SCHEMAS,
             skill_invocations=bindings,
@@ -113,7 +113,7 @@ def test_sci_04_rin_normalizes_model_input_but_task_keeps_original() -> None:
     client = RecordingClient()
     director = build_content_director(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         client,
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,
@@ -142,7 +142,7 @@ def test_sci_05_resume_reapplies_skill_to_the_stored_original_input() -> None:
     client = RecordingClient()
     director = build_content_director(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         client,
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,
@@ -176,5 +176,5 @@ def test_sci_05_resume_reapplies_skill_to_the_stored_original_input() -> None:
 
 def test_sci_06_agent_without_skills_keeps_bare_executor() -> None:
     agent = Agent(agent_id="a@v1", name="A", prompt_ref=rin.PROMPT_REF)
-    executors = build_executor_map([agent], rin.PROMPTS, RecordingClient(), rin.SCHEMAS)
+    executors = build_executor_map([agent], None, RecordingClient(), rin.SCHEMAS)
     assert not isinstance(executors[agent.agent_id], SkillPreprocessingTaskExecutor)

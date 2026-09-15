@@ -15,16 +15,26 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 29 ADRs (0001–0029) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 30 ADRs (0001–0030) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
-  (0027), the bounded LLM Tool-use loop (0028), and per-call metrics capture + explicit pricing
-  (0029) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest
-  (761 passed, 0 skipped).
+  (0027), the bounded LLM Tool-use loop (0028), per-call metrics capture + explicit pricing
+  (0029), and the external versioned Prompt store (0030) are all implemented and tested. All gates
+  green: ruff, ruff format, mypy --strict, pytest (785 passed, 0 skipped).
+- **Production Prompts are stored outside Python code (ROADMAP Stage 7.5, ADR-0030).** Rin and
+  Leo's exact v1 System/User text lives in the bundled `prompts/catalogue.toml`; their role modules
+  own only Agent/Schema/Skill/Tool declarations. `composition.load_prompt_catalogue()` strictly,
+  atomically materializes `Prompt` descriptors through `importlib.resources`; malformed TOML,
+  wrong/blank fields, invalid versions and duplicate ids fail at build-time with
+  `CompositionError`. Passing `prompts=None` to the existing Root build functions selects the
+  bundled store, while an explicit mapping remains available for tests/embedding. A top-level
+  build reads one snapshot and shares it across executor/schema wiring. The wheel includes the
+  TOML resource. Spec/acceptance: `PROMPT_STORE_SPEC.md` / `PROMPT_STORE_ACCEPTANCE.md`; tests:
+  `tests/test_prompt_store.py` (`PST`).
 - **Storage is wired (ROADMAP Stage 7.1, ADR-0026).** `ContentDirector(..., store=RunStore)` saves
   the Run after every **orchestration step**, not every aggregate call: a Task start is committed
   *before* its executor is called, the executor's answer together with its Output + Artifact, the
@@ -245,9 +255,12 @@ process at the time, not a pattern to keep copying.)
       the Root injects `<prompt_id>@v<version>`; `finish_task` records through Run before Task
       finalization. `ANALYTICS_RECORD_SPEC` / acceptance and `PROVIDER_MODEL_SPEC` / acceptance are
       1.1; tests `MTC`).
-   5. **Prompt stored separately from code** — move Rin/Leo's system/user templates out of
-      `agents/*.py` into a separate, versioned store (files or a registry) the Composition Root
-      reads, instead of Python string literals.
+   5. ~~**Prompt stored separately from code**~~ — done (ADR-0030,
+      `PROMPT_STORE_SPEC.md` / `PROMPT_STORE_ACCEPTANCE.md`: Rin/Leo's exact v1 System/User text
+      moved from `agents/*.py` to the bundled, versioned `prompts/catalogue.toml`; the Composition
+      Root loads and strictly validates it fail-closed when `prompts=None`, once per top-level build;
+      explicit Prompt mappings remain supported and the built wheel contains the TOML resource;
+      tests `PST`).
    6. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
       re-run that calls `Run.create_artifact_version` for the new version (ADR-0019 "Deferred").
    7. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`

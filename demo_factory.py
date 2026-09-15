@@ -60,7 +60,6 @@ BRIEF = (
 )
 
 AGENTS = (*rin.AGENTS, *leo.AGENTS)
-PROMPTS = {**rin.PROMPTS, **leo.PROMPTS}
 SCHEMAS = {**rin.SCHEMAS, **leo.SCHEMAS}
 SKILL_INVOCATIONS = {**rin.SKILL_INVOCATIONS}
 
@@ -118,7 +117,7 @@ def _build_executors() -> dict[str, TaskExecutor]:
         executors.update(
             build_executor_map(
                 [agent],
-                PROMPTS,
+                None,
                 role_client,
                 SCHEMAS,
                 skill_invocations=SKILL_INVOCATIONS,
@@ -146,7 +145,7 @@ def main() -> None:
 
     validate_workflow_executors(WORKFLOW, executors)
     store = build_run_store(os.environ)
-    director = ContentDirector(executors, build_schema_map(AGENTS, PROMPTS, SCHEMAS), store=store)
+    director = ContentDirector(executors, build_schema_map(AGENTS, None, SCHEMAS), store=store)
 
     safe_print("=" * 78)
     safe_print("Rin -> Leo, the real catalogued roles, each on its own configured provider/model")

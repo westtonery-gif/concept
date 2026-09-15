@@ -22,7 +22,6 @@ from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
 from omemo_content_factory.infrastructure.fake_llm import FakeLLMClient
 
 AGENTS = (*rin.AGENTS, *leo.AGENTS)
-PROMPTS = {**rin.PROMPTS, **leo.PROMPTS}
 SCHEMAS = {**rin.SCHEMAS, **leo.SCHEMAS}
 SKILL_INVOCATIONS = {**rin.SKILL_INVOCATIONS}
 
@@ -49,7 +48,7 @@ WORKFLOW = Workflow.create(
 def test_compile_runtime_resolves_both_migrated_roles() -> None:
     director = compile_runtime(
         AGENTS,
-        PROMPTS,
+        None,
         FakeLLMClient(),
         WORKFLOW,
         SCHEMAS,
@@ -66,7 +65,7 @@ def test_compile_runtime_resolves_both_migrated_roles() -> None:
 def test_rins_output_becomes_leos_input() -> None:
     director = compile_runtime(
         AGENTS,
-        PROMPTS,
+        None,
         FakeLLMClient(),
         WORKFLOW,
         SCHEMAS,
@@ -85,7 +84,7 @@ def test_rins_output_becomes_leos_input() -> None:
 def test_both_outputs_were_recorded_as_schema_valid() -> None:
     director = compile_runtime(
         AGENTS,
-        PROMPTS,
+        None,
         FakeLLMClient(),
         WORKFLOW,
         SCHEMAS,

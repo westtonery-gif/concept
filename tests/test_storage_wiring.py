@@ -497,7 +497,7 @@ def test_swr_11_a_configured_store_is_built_and_the_compiled_director_commits_to
     )
     director = compile_runtime(
         (*rin.AGENTS, *leo.AGENTS),
-        {**rin.PROMPTS, **leo.PROMPTS},
+        None,
         FakeLLMClient(),
         workflow,
         {**rin.SCHEMAS, **leo.SCHEMAS},

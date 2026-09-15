@@ -5,6 +5,7 @@ prompt_ref → Prompt` and assembles the runtime graph. It is a **dumb, determin
 compiler:
 
 - **constructs** the `agent_ref → TaskExecutor` mapping,
+- **loads** the bundled versioned Prompt store when no explicit Prompt mapping is supplied,
 - **injects** a Prompt into its executor **at construction time** (`Prompt.system → system_prompt`,
   `Prompt.user_template → user_template`, `Prompt.schema_ref → schema_ref`, and the exact
   `<prompt_id>@v<version>` used for analytics),
@@ -25,8 +26,10 @@ point inward, `PROJECT.md` §7).
 
 from __future__ import annotations
 
+import tomllib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import datetime
+from importlib import resources
 from pathlib import Path
 from typing import TypeAlias
 
@@ -38,7 +41,7 @@ from omemo_content_factory.application.skill_execution import (
 )
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.domain.agent import Agent
-from omemo_content_factory.domain.prompt import Prompt, PromptId
+from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
 from omemo_content_factory.infrastructure.llm import LLMClient, LLMTaskExecutor
@@ -57,9 +60,91 @@ DEFAULT_RUN_STORE_PATH = Path(".omemo") / "runs.sqlite3"
 AgentSkillInvocations: TypeAlias = Mapping[str, Sequence[TaskInputSkillInvocation]]
 """Static ``agent_ref -> ordered Skill invocations`` supplied by role catalogues (ADR-0027)."""
 
+PromptCatalogueInput: TypeAlias = Mapping[PromptId, Prompt] | None
+"""Explicit Prompt data, or ``None`` to read the bundled versioned store (ADR-0030)."""
+
+PROMPT_CATALOGUE_PACKAGE = "omemo_content_factory.prompts"
+PROMPT_CATALOGUE_RESOURCE = "catalogue.toml"
+_PROMPT_FIELDS = frozenset({"prompt_id", "version", "schema_ref", "system", "user_template"})
+
 
 class CompositionError(Exception):
     """A build-time composition-invariant violation (never raised at runtime)."""
+
+
+def _required_text(record: Mapping[object, object], field: str, index: int) -> str:
+    value = record.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise CompositionError(
+            f"prompt catalogue record {index} field '{field}' must be a non-blank string"
+        )
+    return value
+
+
+def _prompt_from_record(raw: object, index: int) -> Prompt:
+    if not isinstance(raw, dict):
+        raise CompositionError(f"prompt catalogue record {index} must be a table")
+    record: Mapping[object, object] = raw
+    fields = set(record)
+    if fields != _PROMPT_FIELDS:
+        missing = sorted(_PROMPT_FIELDS - fields)
+        extra = sorted(str(field) for field in fields - _PROMPT_FIELDS)
+        raise CompositionError(
+            f"prompt catalogue record {index} has invalid fields; missing={missing}, extra={extra}"
+        )
+    version = record.get("version")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise CompositionError(
+            f"prompt catalogue record {index} field 'version' must be an int >= 1"
+        )
+    return Prompt(
+        prompt_id=_required_text(record, "prompt_id", index),
+        version=PromptVersion(version),
+        schema_ref=_required_text(record, "schema_ref", index),
+        system=_required_text(record, "system", index),
+        user_template=_required_text(record, "user_template", index),
+    )
+
+
+def load_prompt_catalogue(path: Path | None = None) -> dict[PromptId, Prompt]:
+    """Materialize the versioned Prompt store as immutable domain descriptors (ADR-0030).
+
+    ``path`` is an explicit filesystem source for embedding/tests. When omitted, the bundled
+    package resource is read through :mod:`importlib.resources`, so installed wheels work without
+    assuming an unpacked source tree. Parsing is strict and atomic: malformed data raises
+    :class:`CompositionError` before any partial mapping is returned.
+    """
+    try:
+        text = (
+            resources.files(PROMPT_CATALOGUE_PACKAGE)
+            .joinpath(PROMPT_CATALOGUE_RESOURCE)
+            .read_text(encoding="utf-8")
+            if path is None
+            else path.read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, ModuleNotFoundError) as exc:
+        raise CompositionError("cannot read prompt catalogue") from exc
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise CompositionError("prompt catalogue is not valid TOML") from exc
+    if set(document) != {"prompts"}:
+        raise CompositionError("prompt catalogue root must contain only 'prompts'")
+    raw_prompts = document.get("prompts")
+    if not isinstance(raw_prompts, list) or not raw_prompts:
+        raise CompositionError("prompt catalogue 'prompts' must be a non-empty array of tables")
+
+    catalogue: dict[PromptId, Prompt] = {}
+    for index, raw in enumerate(raw_prompts, start=1):
+        prompt = _prompt_from_record(raw, index)
+        if prompt.prompt_id in catalogue:
+            raise CompositionError(f"duplicate prompt_id '{prompt.prompt_id}' in prompt catalogue")
+        catalogue[prompt.prompt_id] = prompt
+    return catalogue
+
+
+def _resolve_prompts(prompts: PromptCatalogueInput) -> Mapping[PromptId, Prompt]:
+    return load_prompt_catalogue() if prompts is None else prompts
 
 
 def _aware_local_now() -> datetime:
@@ -91,7 +176,7 @@ def build_run_store(environ: Mapping[str, str]) -> RunStore:
 
 def build_executor_map(
     agents: Iterable[Agent],
-    prompts: Mapping[PromptId, Prompt],
+    prompts: PromptCatalogueInput,
     client: LLMClient,
     schemas: Mapping[str, Schema],
     *,
@@ -116,14 +201,16 @@ def build_executor_map(
     not judge configuration correctness. ``available_tools`` defaults to the complete built-in
     library, with an aware local clock injected into ``current_date@v1``. Each executor gets a
     Toolbox scoped by its Agent's ``tool_refs``; an impossible grant fails before execution
-    (`ADR-0028`).
+    (`ADR-0028`). ``prompts=None`` reads the bundled, versioned store exactly once for this build;
+    an explicit mapping is used as-is (`ADR-0030`).
     """
+    resolved_prompts = _resolve_prompts(prompts)
     tools = tuple(build_available_tools() if available_tools is None else available_tools)
     executors: dict[str, TaskExecutor] = {}
     for agent in agents:
         if agent.agent_id in executors:
             raise CompositionError(f"duplicate agent_ref '{agent.agent_id}'")
-        prompt = prompts.get(agent.prompt_ref)
+        prompt = resolved_prompts.get(agent.prompt_ref)
         if prompt is None:
             raise CompositionError(
                 f"agent '{agent.agent_id}' references unknown prompt '{agent.prompt_ref}'"
@@ -161,7 +248,7 @@ def build_executor_map(
 
 def build_schema_map(
     agents: Iterable[Agent],
-    prompts: Mapping[PromptId, Prompt],
+    prompts: PromptCatalogueInput,
     schemas: Mapping[str, Schema],
 ) -> dict[str, Schema]:
     """Compile the `agent_ref → Schema` map from the catalogues (build-time, structural only).
@@ -171,12 +258,14 @@ def build_schema_map(
     It does **not** validate anything, run a Task, or interpret Schema/Workflow semantics — and this
     map is **not** yet used by execution (wiring is a later sub-slice). Composition-Root scope only
     (`ADR-0012`): structural existence check, no policy.
+    ``prompts=None`` reads the bundled Prompt store (`ADR-0030`).
     """
+    resolved_prompts = _resolve_prompts(prompts)
     result: dict[str, Schema] = {}
     for agent in agents:
         if agent.agent_id in result:
             raise CompositionError(f"duplicate agent_ref '{agent.agent_id}'")
-        prompt = prompts.get(agent.prompt_ref)
+        prompt = resolved_prompts.get(agent.prompt_ref)
         if prompt is None:
             raise CompositionError(
                 f"agent '{agent.agent_id}' references unknown prompt '{agent.prompt_ref}'"
@@ -192,7 +281,7 @@ def build_schema_map(
 
 def build_content_director(
     agents: Iterable[Agent],
-    prompts: Mapping[PromptId, Prompt],
+    prompts: PromptCatalogueInput,
     client: LLMClient,
     schemas: Mapping[str, Schema],
     *,
@@ -210,16 +299,21 @@ def build_content_director(
     ``available_tools`` supplies dependency-injected Tool instances; when omitted the Root builds
     the standard library and scopes it independently for every Agent (`ADR-0028`).
     ``store``, when given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
+    ``prompts=None`` reads one bundled Prompt catalogue snapshot and shares it across both maps
+    (`ADR-0030`).
     """
+    resolved_prompts = _resolve_prompts(prompts)
     executors = build_executor_map(
         agents,
-        prompts,
+        resolved_prompts,
         client,
         schemas,
         skill_invocations=skill_invocations,
         available_tools=available_tools,
     )
-    return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)
+    return ContentDirector(
+        executors, build_schema_map(agents, resolved_prompts, schemas), store=store
+    )
 
 
 def validate_workflow_executors(workflow: Workflow, executors: Mapping[str, TaskExecutor]) -> None:
@@ -240,7 +334,7 @@ def validate_workflow_executors(workflow: Workflow, executors: Mapping[str, Task
 
 def compile_runtime(
     agents: Iterable[Agent],
-    prompts: Mapping[PromptId, Prompt],
+    prompts: PromptCatalogueInput,
     client: LLMClient,
     workflow: Workflow,
     schemas: Mapping[str, Schema],
@@ -259,14 +353,18 @@ def compile_runtime(
     and wired according to ``Agent.skill_refs`` (`ADR-0027`). ``available_tools`` is the
     dependency-injected library scoped by each ``Agent.tool_refs`` (`ADR-0028`). ``store``, when
     given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
+    ``prompts=None`` reads one bundled Prompt catalogue snapshot for the whole graph (`ADR-0030`).
     """
+    resolved_prompts = _resolve_prompts(prompts)
     executors = build_executor_map(
         agents,
-        prompts,
+        resolved_prompts,
         client,
         schemas,
         skill_invocations=skill_invocations,
         available_tools=available_tools,
     )
     validate_workflow_executors(workflow, executors)
-    return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)
+    return ContentDirector(
+        executors, build_schema_map(agents, resolved_prompts, schemas), store=store
+    )

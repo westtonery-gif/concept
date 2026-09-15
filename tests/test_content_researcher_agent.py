@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from omemo_content_factory.agents import content_researcher as rin
 from omemo_content_factory.application.skill_execution import SkillPreprocessingTaskExecutor
-from omemo_content_factory.composition import build_content_director, build_executor_map
+from omemo_content_factory.composition import (
+    build_content_director,
+    build_executor_map,
+    load_prompt_catalogue,
+)
 from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import SchemaStatus
 from omemo_content_factory.domain.task import TaskStatus
@@ -25,16 +29,16 @@ def test_assets_are_valid_and_self_consistent() -> None:
     assert view.required_fields == ("audience", "angle")
     assert rin.CONTENT_RESEARCHER_AGENT.agent_id == "content_researcher@v1"
     assert rin.CONTENT_RESEARCHER_AGENT.skill_refs == ("normalize_terminology@v1",)
-    # agent -> prompt -> schema references chain together through the exposed catalogues.
-    assert rin.PROMPTS[rin.CONTENT_RESEARCHER_AGENT.prompt_ref] is rin.CONTENT_RESEARCHER_PROMPT
-    assert rin.SCHEMAS[rin.CONTENT_RESEARCHER_PROMPT.schema_ref] is rin.CONTENT_RESEARCH_SCHEMA
-    assert rin.CONTENT_RESEARCHER_PROMPT.schema_ref == "content-research-report"
+    # agent -> external Prompt -> schema references chain together through the Root.
+    prompt = load_prompt_catalogue()[rin.CONTENT_RESEARCHER_AGENT.prompt_ref]
+    assert rin.SCHEMAS[prompt.schema_ref] is rin.CONTENT_RESEARCH_SCHEMA
+    assert prompt.schema_ref == "content-research-report"
 
 
 def test_composition_resolves_rin_with_generation_shape_and_skill() -> None:
     executors = build_executor_map(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         FakeLLMClient(),
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,
@@ -49,7 +53,7 @@ def test_composition_resolves_rin_with_generation_shape_and_skill() -> None:
 def test_keyless_run_produces_valid_content_research() -> None:
     director = build_content_director(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         FakeLLMClient(),
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,

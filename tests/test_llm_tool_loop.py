@@ -256,7 +256,7 @@ def test_ltl_08_composition_builds_each_agent_scoped_toolbox_and_rejects_bad_gra
     tools = build_available_tools(clock=lambda: datetime(2026, 9, 15, tzinfo=UTC))
     rin_executor = build_executor_map(
         rin.AGENTS,
-        rin.PROMPTS,
+        None,
         FakeLLMClient(),
         rin.SCHEMAS,
         skill_invocations=rin.SKILL_INVOCATIONS,
@@ -267,7 +267,7 @@ def test_ltl_08_composition_builds_each_agent_scoped_toolbox_and_rejects_bad_gra
     assert [d.ref for d in rin_executor.delegate.toolbox.descriptors] == ["current_date@v1"]
 
     leo_executor = build_executor_map(
-        leo.AGENTS, leo.PROMPTS, FakeLLMClient(), leo.SCHEMAS, available_tools=tools
+        leo.AGENTS, None, FakeLLMClient(), leo.SCHEMAS, available_tools=tools
     )[leo.AGENT_REF]
     assert isinstance(leo_executor, LLMTaskExecutor)
     assert leo_executor.toolbox.descriptors == ()
@@ -276,9 +276,7 @@ def test_ltl_08_composition_builds_each_agent_scoped_toolbox_and_rejects_bad_gra
         agent_id="bad@v1", name="bad", prompt_ref=leo.PROMPT_REF, tool_refs=("missing@v1",)
     )
     with pytest.raises(ToolGrantError, match="not among"):
-        build_executor_map(
-            [bad_agent], leo.PROMPTS, FakeLLMClient(), leo.SCHEMAS, available_tools=tools
-        )
+        build_executor_map([bad_agent], None, FakeLLMClient(), leo.SCHEMAS, available_tools=tools)
 
 
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, "2"])
