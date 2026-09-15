@@ -29,6 +29,7 @@ from omemo_content_factory.domain.run import (
     RunStatus,
 )
 from omemo_content_factory.domain.schema import SchemaDomainError
+from omemo_content_factory.domain.skill import SkillDomainError
 from omemo_content_factory.domain.task import TaskDomainError
 from omemo_content_factory.domain.workflow import (
     EmptyWorkflowError,
@@ -65,6 +66,7 @@ def test_domain_error_is_a_plain_exception() -> None:
         HumanReviewDomainError,
         EvaluationDomainError,  # EDE-01 (ADR-0018)
         AnalyticsDomainError,  # ADE-01 (ADR-0020)
+        SkillDomainError,  # SDE-01 (ADR-0021)
         SchemaDomainError,
         WorkflowDomainError,
     ],

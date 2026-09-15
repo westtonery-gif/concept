@@ -15,13 +15,21 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 20 ADRs (0001–0020) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 21 ADRs (0001–0021) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
-  (0020) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict,
-  pytest (357 passed, 0 skipped).
+  (0020), Skills library (0021) are all implemented and tested. All gates green: ruff, ruff
+  format, mypy --strict, pytest (481 passed, 0 skipped).
+- **Skills library exists (ROADMAP Stage 4, ADR-0021, `SKILL_SPEC.md`)**: passive
+  `SkillDescriptor` in `domain/skill.py` (like `Agent`), executable `Skill[In, Out]` Protocol in
+  `skills/contract.py` (`descriptor` + pure `apply(input, /)`), three deterministic Skills —
+  `segment_text@v1`, `normalize_terminology@v1`, `check_required_elements@v1` — and
+  `skills/catalogue.py`. `tests/test_skill_contract.py` scans `skills/` imports: only pure stdlib,
+  `domain.skill` and `skills.*` — a Skill importing an agent/Run/application/clock fails the
+  gate. **No agent uses a Skill yet**; `Agent.skill_refs` and the `Deprecated` status arrive with
+  the first consumer (Stage 7, ADR-0021 "Deferred").
 - **Analytics Record exists as a domain entity only** (ADR-0020, `domain/analytics.py`,
   `ANALYTICS_RECORD_SPEC.md`): `Run.record_analytics(task_id, …)` appends an immutable per-call
   record (provider/model, `TokenUsage`, `Cost` as `Decimal`, timezone-aware `TimeRange`);
@@ -103,9 +111,9 @@ process at the time, not a pattern to keep copying.)
 7. ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer) — broken down below into
    session-sized subtasks. Prerequisite for Stage 7 (first Agent through the full orchestrator)
    and the Stage 12 MVP.
-   1. **Skills library** (Stage 4) — contract `Skill` (typed input/output, agent-agnostic, no
-      `Run` access) + 2-3 first Skills (e.g. thesis extraction from a brief, terminology
-      normalization, text segmentation — ROADMAP's own examples). ADR + code + tests.
+   1. ~~**Skills library** (Stage 4)~~ — done (ADR-0021, `domain/skill.py` + `skills/`,
+      `SKILL_SPEC.md` / `SKILL_ACCEPTANCE.md`, `tests/test_skill_*.py`). Thesis extraction was
+      deliberately not taken: done well it is LLM work (a role), not a deterministic Skill.
    2. **Tool Layer** (Stage 5) — contract `Tool` (≠ Skill: invoked by an agent mid-reasoning,
       never manages the pipeline), a mechanism that scopes an agent to only its configured
       Tools, a couple of Tools needing no external service. ADR + code + tests.
