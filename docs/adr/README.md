@@ -41,3 +41,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0015](0015-execution-state-recoverability.md) | Execution-State Recoverability and the Admission of Restored Runs | Accepted |
 | [0016](0016-provider-model-selection-ownership.md) | Provider / Model Selection Ownership | Accepted |
 | [0017](0017-shared-domain-error-base.md) | Shared `DomainError` base for the per-aggregate error hierarchies | Accepted |
+| [0018](0018-evaluation-qa-entity-and-fail-closed-gate.md) | Evaluation (QA) entity + the fail-closed QA gate on Artifact approval | Accepted |

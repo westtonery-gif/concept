@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from omemo_content_factory.domain.artifact import ArtifactNotApprovedError, ArtifactStatus
+from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import (
     HumanReviewApproved,
     HumanReviewRejected,
@@ -150,9 +151,11 @@ def test_artifact_cannot_be_approved_without_an_approving_review() -> None:
 
 
 def test_approved_review_lets_the_artifact_be_approved_then_published() -> None:
-    """With an Approve, the Artifact may go CANDIDATE -> APPROVED -> PUBLISHED."""
+    """With an Approve (and a passed QA, ADR-0018 §5), CANDIDATE -> APPROVED -> PUBLISHED."""
     run = make_run()
     artifact_id = candidate_artifact(run)
+    evaluation_id = run.open_evaluation(artifact_id, kind="qa", by=CD)
+    run.record_evaluation(evaluation_id, EvaluationStatus.PASSED, by=CD)
     review_id = run.open_human_review(artifact_id, by=CD)
     run.submit_review(review_id, ReviewStatus.APPROVED, by=REVIEWER)
     run.transition_artifact(artifact_id, ArtifactStatus.APPROVED, by=CD)
