@@ -50,6 +50,10 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C90", "RUF"]
+# RUF001-003 flag Cyrillic letters as "ambiguous" look-alikes of Latin ones. Agent prompts are
+# written in Russian by design (PROJECT.md — the factory's content language), so every prompt
+# string trips this check; it protects against confusable identifiers, not prose.
+ignore = ["RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

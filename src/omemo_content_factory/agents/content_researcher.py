@@ -1,11 +1,11 @@
 """``content_researcher@v1`` (Rin) — the content-research role definition.
 
 The concrete, static assets of one production role, owned by the factory (migrated from Main Core
-by Pattern Application over Slice A / ADR-0016 — same shape as ``script_writer``): the :class:`Agent`
-descriptor, its versioned :class:`Prompt` (System + User template + ``schema_ref``; PROJECT.md §15,
-ADR-0011) and the ``content-research`` :class:`Schema` its Output conforms to (ADR-0008). They are
-**passive data** in existing domain types — no new entity, no execution logic — assembled into an
-executor by the Composition Root, never here.
+by Pattern Application over Slice A / ADR-0016 — same shape as ``script_writer``): the
+:class:`Agent` descriptor, its versioned :class:`Prompt` (System + User template + ``schema_ref``;
+PROJECT.md §15, ADR-0011) and the ``content-research`` :class:`Schema` its Output conforms to
+(ADR-0008). They are **passive data** in existing domain types — no new entity, no execution
+logic — assembled into an executor by the Composition Root, never here.
 
 Scope note: the Schema is **intentionally minimal** — only what the ownership migration needs, not
 the final content-research document model. It fixes no future research structure; expanding it is a
