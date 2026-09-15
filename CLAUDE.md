@@ -100,9 +100,29 @@ process at the time, not a pattern to keep copying.)
 6. ~~Wire `client_for_role` into a real entrypoint~~ — done (`demo_factory.py`: each role
    resolves its own provider/model via `build_executor_map` called once per agent + merged;
    `demo.py` untouched, out of scope).
-7. ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer) — each needs its own ADR
-   first; likely several sessions each. Prerequisite for Stage 7 (first Agent through the full
-   orchestrator) and the Stage 12 MVP.
+7. ROADMAP Stage 4–6 (Skills library / Tool Layer / Adapter Layer) — broken down below into
+   session-sized subtasks. Prerequisite for Stage 7 (first Agent through the full orchestrator)
+   and the Stage 12 MVP.
+   1. **Skills library** (Stage 4) — contract `Skill` (typed input/output, agent-agnostic, no
+      `Run` access) + 2-3 first Skills (e.g. thesis extraction from a brief, terminology
+      normalization, text segmentation — ROADMAP's own examples). ADR + code + tests.
+   2. **Tool Layer** (Stage 5) — contract `Tool` (≠ Skill: invoked by an agent mid-reasoning,
+      never manages the pipeline), a mechanism that scopes an agent to only its configured
+      Tools, a couple of Tools needing no external service. ADR + code + tests.
+   3. **Adapter contracts** (Stage 6a) — record that the **LLM Adapter is already done**
+      (`LLMClient`/`AnthropicLLMClient`/`client_for_role`, ADR-0014/0016 — it already satisfies
+      Stage 6's LLM Adapter DoD, just not labeled as such) and design the internal contracts for
+      the remaining four: Storage, Notion, Google Docs, Analytics adapters. ADR + contracts only,
+      no implementation yet.
+   4. **Storage Adapter** (Stage 6b) — real persistence for `Run` and its children (everything
+      is in-memory today). Likely the heaviest subtask here. ADR + code + tests.
+   5. **Notion / Google Docs / Analytics adapter stubs** (Stage 6c) — contract + a
+      fake/stub implementation only; full integration is explicitly Stages 9-11, not here
+      (ROADMAP Stage 6: "полноценная интеграция — Этапы 9–11; здесь — контракт и базовая
+      реализация/заглушка"). ADR + minimal code.
+
+   After 7.5, Stage 7 (first real Agent through the full orchestrator, Milestone M2) becomes
+   possible — that is the next queue item after this breakdown, not part of it.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
