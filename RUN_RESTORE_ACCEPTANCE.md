@@ -4,15 +4,16 @@
 > `PROJECT.md` → `ARCHITECTURE.md` → `ROADMAP.md` → `DOMAIN_MODEL.md` → `RUN_SPEC.md` §4a →
 > `ADR-0015` → `RUN_RESTORE_SPEC.md` → **`RUN_RESTORE_ACCEPTANCE.md`** → `Implementation (Code)`.
 >
-> Документ отвечает: **«Как мы поймём, что `RunSnapshot` + `Run.restore` соответствуют
-> `RUN_RESTORE_SPEC.md`, RUN_SPEC §4a и ADR-0015?»** Набор **проверяемых сценариев** на языке
-> предметной области; прямая основа для `tests/` (один сценарий → один тест/группа).
+> Документ отвечает: **«Как мы поймём, что `RunSnapshot` + `Run.snapshot` + `Run.restore`
+> соответствуют `RUN_RESTORE_SPEC.md`, RUN_SPEC §4a и ADR-0015?»** Набор **проверяемых сценариев**
+> на языке предметной области; прямая основа для `tests/test_run_restore.py` (один сценарий → один
+> тест/группа; идентификатор — в имени теста).
 >
 > **Источник истины:** `RUN_RESTORE_SPEC.md` → `RUN_SPEC.md` §4a/§5 → `ADR-0015` → `PROJECT.md`.
 
-**Версия документа:** 1.0
-**Статус:** Черновик (контракт приёмки для фабрики восстановления)
-**Дата:** 2026-07-01
+**Версия документа:** 1.1
+**Статус:** Принят (реализован: ADR-0024)
+**Дата:** 2026-09-15 (1.0 — 2026-07-01)
 **Владелец:** Архитектор реализации
 
 ---
@@ -22,29 +23,33 @@
 - Формат — **Дано / Когда / Тогда**.
 - Уникальный префикс блока: `RST` — восстановление Run.
 - «Наблюдаемая истина Run» = его скаляры (`run_id`, `content_brief_ref`, `workflow_version_ref`,
-  `status`, `rework_count`, `failure_reason`), снимки детей (`tasks`/`artifacts`/`human_reviews`
-  через View) и упорядоченный `events`.
+  `status`, `rework_count`, `failure_reason`), снимки детей (`tasks`/`artifacts`/`human_reviews`/
+  `evaluations`/`analytics_records`) и упорядоченный `events`.
 - «Отвергается» = `Run.restore` **не возвращает** Run и фиксирует доменную ошибку
-  `RunRestorationError`; никакого частично-установленного агрегата наружу не выходит.
-- Снимок в сценариях получается наблюдением реального Run (как это сделает `RunStore.save`);
-  формат/хранилище — вне этих критериев.
+  `RunRestorationError`; никакого частично-установленного агрегата наружу не выходит. Тест
+  проверяет, что отказ дало **именно нарушенное правило** (по сообщению ошибки).
+- Снимок в сценариях получается наблюдением реального Run через `Run.snapshot` (как это сделает
+  `RunStore.save`); испорченный снимок — заменой ровно одного поля. Формат/хранилище — вне этих
+  критериев (см. `ADAPTER_ACCEPTANCE.md` §5).
 
 ---
 
 ## 1. Round-trip fidelity (точность цикла наблюдение→восстановление)
 
 **RST-01 — полная эквивалентность наблюдаемой истины.**
-*Дано:* Run, проведённый через нетривиальный путь (несколько Task с `Output`, созданный
-`Artifact`, открытый и одобренный `Human Review`, хотя бы одна доработка → `rework_count > 0`),
-в нетерминальном состоянии.
+*Дано:* Run, проведённый через нетривиальный путь (несколько Task с `Output`, пропущенный и
+упавший Task, повтор Task, `Artifact` v1 с QA-риском и `CHANGES_REQUESTED`, одна доработка →
+`rework_count > 0`, `Artifact` v2, заменяющий v1, с `PASSED`-оценкой и одобренным `Human Review`,
+записи аналитики), в нетерминальном состоянии.
 *Когда:* делается снимок и вызывается `Run.restore(snapshot)`.
 *Тогда:* восстановленный Run имеет **ту же** наблюдаемую истину — совпадают все скаляры, состав и
-поля `tasks`/`artifacts`/`human_reviews` (включая `attempt_count`, `failure_reason`, `output`), и
-**порядок и содержимое** `events`.
+поля всех детей (включая `attempt_count`, `failure_reason`, `output`, `version`, `supersedes_ref`,
+`flags`, решения ревью), **порядок и содержимое** `events`; снимок восстановленного Run равен
+исходному.
 
 **RST-10 — политики переживают цикл.**
-*Дано:* Run с нестандартными `rework_policy` (напр. `max_rework_iterations=1`) и Task с
-нестандартной `retry_policy` (напр. `max_attempts=1`).
+*Дано:* Run с нестандартными `rework_policy` (напр. `max_rework_iterations=1`, уже исчерпанной) и
+Task с нестандартной `retry_policy` (напр. `max_attempts=1`, уже исчерпанной).
 *Когда:* снимок → `restore`.
 *Тогда:* после восстановления границы ведут себя идентично оригиналу — превышение доработки даёт
 `ReworkLimitExceededError`, превышение попыток Task — `TaskRetryLimitExceededError` (границы **не**
@@ -56,26 +61,45 @@
 *Тогда:* `events` восстановленного Run **точно равны** `snapshot.events` (N событий, тот же
 порядок); `RunCreated`/`RunStarted`/прочие повторно **не** порождаются.
 
+**RST-15 — QA-вердикты и аналитика переживают цикл** *(1.1)*.
+*Дано:* `CANDIDATE`-артефакт с одобренным ревью и двумя оценками — сначала `PASSED`, затем
+`FLAGGED`; Run с записями аналитики.
+*Когда:* снимок → `restore`, затем попытка одобрить артефакт.
+*Тогда:* отвергается `ArtifactQaNotPassedError` — «последняя» оценка по-прежнему `FLAGGED`
+(порядок оценок сохранён, ворота fail-closed не открылись); записи аналитики равны исходным
+(точная `Decimal`-стоимость, время с часовым поясом).
+
+**RST-16 — наблюдение — неизменяемый снимок момента** *(1.1)*.
+*Дано:* живой Run.
+*Когда:* берётся `run.snapshot`, затем Run продолжает работу (`open_task`).
+*Тогда:* два снимка подряд равны; взятие снимка не меняет журнал; ранее взятый снимок не видит
+нового Task; присвоение полю снимка даёт `FrozenInstanceError`.
+
 ---
 
 ## 2. Продолжение (идемпотентность, ADR-0015 I3)
 
 **RST-02 — продолжение без коллизии id.**
-*Дано:* восстановленный Run с N Task (`…-task-1..N`), M Artifact, K Human Review.
-*Когда:* Content Director вызывает `open_task` (и аналогично `create_artifact` при наличии
-`Output`, `open_human_review` при `CANDIDATE`-артефакте).
-*Тогда:* новые сущности получают **следующие** id (`…-task-(N+1)` и т. д.), **ничего не
-перезаписывая**; число детей растёт на 1.
+*Дано:* восстановленный Run с N Task, M Artifact, K Human Review, E Evaluation, A Analytics Record.
+*Когда:* Content Director вызывает `open_task`, `create_artifact` (при наличии `Output`),
+`open_human_review` и `open_evaluation` (при `CANDIDATE`-артефакте), `record_analytics`.
+*Тогда:* новые сущности получают **следующие** id (`…-task-(N+1)`, `…-artifact-(M+1)`,
+`…-review-(K+1)`, `…-evaluation-(E+1)`, `…-analytics-(A+1)`), **ничего не перезаписывая**; прежние
+дети не изменились, число детей каждого вида растёт на 1.
 
 **RST-03 — восстановленный Run продвигается неизменным контрактом переходов.**
-*Дано:* Run, восстановленный в `WAITING_HUMAN` с `CANDIDATE`-артефактом.
-*Когда:* Human Reviewer одобряет ревью, затем Content Director делает `WAITING_HUMAN → COMPLETED`.
-*Тогда:* переход проходит, эмитится `RunCompleted`; запрещённые рёбра (напр. `WAITING_HUMAN →
-COMPLETED` без Approve, или прямой `RUNNING → COMPLETED`) по-прежнему дают
-`InvalidTransitionError`.
+*Дано:* Run, восстановленный в `WAITING_HUMAN` с `CANDIDATE`-артефактом, прошедшим QA, и
+ожидающим ревью.
+*Когда:* сначала — попытка одобрить артефакт до решения человека и запрещённый переход
+(`WAITING_HUMAN → QUEUED`); затем Human Reviewer одобряет ревью, Content Director одобряет
+артефакт и делает `WAITING_HUMAN → COMPLETED`.
+*Тогда:* одобрение без Approve отвергается `ArtifactNotApprovedError`, запрещённое ребро —
+`InvalidTransitionError`; после Approve всё проходит, эмитится `RunCompleted`.
+*(1.1: в 1.0 ожидался отказ `WAITING_HUMAN → COMPLETED` «без Approve» самим переходом Run. Такого
+сторожа нет — ворота Approve стоят на артефакте, ADR-0007 §6; сценарий приведён к контракту.)*
 
 **RST-12 — межсущностный сторож сохраняется.**
-*Дано:* Run, восстановленный в нетерминальном состоянии с незавершённым Task.
+*Дано:* Run, восстановленный в `WAITING_HUMAN` с незавершённым Task.
 *Когда:* попытка достичь `COMPLETED`.
 *Тогда:* отвергается `InvalidTransitionError` («COMPLETED при незавершённом Task») — существующий
 инвариант держится и после восстановления.
@@ -94,9 +118,9 @@ COMPLETED` без Approve, или прямой `RUNNING → COMPLETED`) по-п�
 
 ## 4. verify/reject (RUN_SPEC §4a; RUN_RESTORE_SPEC §4.3)
 
-**RST-05 — чужой ребёнок в агрегате.**
-*Дано:* снимок, где у одного `TaskSnapshot`/`ArtifactView`/`HumanReviewView` `run_id` **не** равен
-`snapshot.run_id`.
+**RST-05 — чужой ребёнок или чужое событие в агрегате.**
+*Дано:* снимок, где у одного `TaskSnapshot`/`ArtifactView`/`HumanReviewView`/`EvaluationView`/
+`AnalyticsRecord` или одного события журнала `run_id` **не** равен `snapshot.run_id`.
 *Когда:* `restore`.
 *Тогда:* отвергается `RunRestorationError`.
 
@@ -111,17 +135,49 @@ COMPLETED` без Approve, или прямой `RUNNING → COMPLETED`) по-п�
 *Тогда:* отвергается `RunRestorationError`.
 
 **RST-08 — счётчик меньше числа детей (риск коллизии).**
-*Дано:* снимок с 3 Task, но `task_seq = 2`.
+*Дано:* снимок, где любой из пяти `*_seq` на единицу меньше числа детей своего вида (напр. 5 Task,
+`task_seq = 4`).
 *Когда:* `restore`.
 *Тогда:* отвергается `RunRestorationError` (следующий id мог бы совпасть с существующим).
 
 **RST-09 — отсутствует неизменяемый вход.**
-*Дано:* снимок с пустым `run_id` (и отдельно — пустым `content_brief_ref` / `workflow_version_ref`).
+*Дано:* снимок с пустым или пробельным `run_id` (и отдельно — `content_brief_ref` /
+`workflow_version_ref`).
 *Когда:* `restore`.
 *Тогда:* отвергается `RunRestorationError`.
 
 **RST-13 — Output принадлежит не своему Task.**
 *Дано:* снимок, где `output.task_id` не совпадает с `task_id` владеющего его `TaskSnapshot`.
+*Когда:* `restore`.
+*Тогда:* отвергается `RunRestorationError`.
+
+**RST-17 — ссылки новых детей на невладеемое** *(1.1)*.
+*Дано:* снимок, где `evaluation.artifact_ref` или `artifact.supersedes_ref` не соответствует
+владеемому `Artifact`; либо `AnalyticsRecord.task_id` не соответствует владеемому Task; либо
+`AnalyticsRecord.agent_ref` отличается от `agent_ref` своего Task.
+*Когда:* `restore`.
+*Тогда:* отвергается `RunRestorationError`.
+
+**RST-18 — уникальность и 1:1** *(1.1)*.
+*Дано:* снимок, где id ребёнка встречается дважды; либо два Artifact происходят из одного
+`Output`; либо `Output` есть у Task не в `SUCCEEDED`.
+*Когда:* `restore`.
+*Тогда:* отвергается `RunRestorationError`.
+
+**RST-19 — счётчик ниже уже использованного номера** *(1.1)*.
+*Дано:* снимок с единственным Task `…-task-3` и `task_seq = 2` (число детей счётчик не превышает).
+*Когда:* `restore`.
+*Тогда:* отвергается `RunRestorationError`. Тот же снимок с `task_seq = 3` допускается, и
+следующий `open_task` выдаёт `…-task-4`.
+
+**RST-20 — выход за границы** *(1.1)*.
+*Дано:* снимок с `rework_count` больше `max_rework_iterations` (или отрицательным); либо Task с
+`attempt_count` больше `max_attempts`; либо `status`, не являющийся `RunStatus`.
+*Когда:* `restore`.
+*Тогда:* отвергается `RunRestorationError`.
+
+**RST-21 — `COMPLETED` с незавершённым Task** *(1.1)*.
+*Дано:* снимок в `COMPLETED`, владеющий Task в `PENDING`.
 *Когда:* `restore`.
 *Тогда:* отвергается `RunRestorationError`.
 
@@ -144,9 +200,9 @@ COMPLETED` без Approve, или прямой `RUNNING → COMPLETED`) по-п�
 
 | Сценарий | Опора |
 |---|---|
-| RST-01, RST-10, RST-11 | RUN_RESTORE_SPEC §3, §4.4; RUN_SPEC §4a («неотличим») |
+| RST-01, RST-10, RST-11, RST-15, RST-16 | RUN_RESTORE_SPEC §3, §3.2, §4.4; RUN_SPEC §4a («неотличим»); ADR-0018 §5 |
 | RST-02, RST-12 | RUN_RESTORE_SPEC §4.4; ADR-0015 I3; ADR-0004 §9 |
-| RST-03 | RUN_SPEC §4; ADR-0015 §3 (неизменный контракт переходов) |
+| RST-03 | RUN_SPEC §4; ADR-0015 §3 (неизменный контракт переходов); ADR-0007 §6 |
 | RST-04 | RUN_SPEC §4a (терминал остаётся терминалом) |
-| RST-05…RST-09, RST-13 | RUN_RESTORE_SPEC §4.3; RUN_SPEC §4a/§5 |
+| RST-05…RST-09, RST-13, RST-17…RST-21 | RUN_RESTORE_SPEC §4.3; RUN_SPEC §4a/§5 |
 | RST-14 | RUN_RESTORE_SPEC §4.1, §5; ADR-0015 §Rationale |

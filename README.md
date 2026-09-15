@@ -195,8 +195,9 @@ omemo-content-factory/
 │       ├── domain/             # Domain core: Run, Task, Output, Artifact, Human Review, Evaluation
 │       ├── skills/             # Skills library: Skill contract + deterministic one-task Skills
 │       ├── tools/              # Tool Layer: Tool contract + per-agent Toolbox + model-invoked Tools
+│       ├── adapters/           # Adapter contracts: RunStore, BriefBoard, ReviewDesk, AnalyticsSink
 │       ├── application/        # ContentDirector + task execution + QA evaluation
-│       └── infrastructure/     # LLM-backed task executor
+│       └── infrastructure/     # LLM-backed task executor + SQLite RunStore (Run persistence)
 ├── demo.py                     # End-to-end demo of the domain via ContentDirector
 ├── demo_factory.py             # Same, but through the real catalogued Rin -> Leo roles
 └── tests/                      # pytest suite

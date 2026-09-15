@@ -171,6 +171,19 @@ class HumanReview:
             raise ImmutableReviewAttributeError(f"'{name}' is immutable after creation")
         super().__setattr__(name, value)
 
+    @classmethod
+    def restore(cls, view: HumanReviewView) -> HumanReview:
+        """Bring a Human Review back with its preserved decision (called only by ``Run.restore``).
+
+        The view holds every field of the entity (RUN_RESTORE_SPEC §2). The decision is not taken
+        again, only put back (ADR-0024).
+        """
+        review = cls(review_id=view.review_id, run_id=view.run_id, artifact_ref=view.artifact_ref)
+        review._status = view.status
+        review._decided_by = view.decided_by
+        review._reason = view.reason
+        return review
+
     @property
     def artifact_ref(self) -> str:
         """The candidate Artifact under review (used by Run's approval gate)."""

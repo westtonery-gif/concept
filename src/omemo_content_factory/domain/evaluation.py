@@ -167,6 +167,23 @@ class Evaluation:
             raise ImmutableEvaluationAttributeError(f"'{name}' is immutable after creation")
         super().__setattr__(name, value)
 
+    @classmethod
+    def restore(cls, view: EvaluationView) -> Evaluation:
+        """Bring an Evaluation back with its preserved verdict (called only by ``Run.restore``).
+
+        The view holds every field of the entity (RUN_RESTORE_SPEC §2). The verdict is not
+        decided again, only put back (ADR-0024).
+        """
+        evaluation = cls(
+            evaluation_id=view.evaluation_id,
+            run_id=view.run_id,
+            artifact_ref=view.artifact_ref,
+            kind=view.kind,
+        )
+        evaluation._status = view.status
+        evaluation._flags = view.flags
+        return evaluation
+
     @property
     def artifact_ref(self) -> str:
         """The candidate Artifact under evaluation (used by Run's approval gate)."""

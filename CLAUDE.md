@@ -15,14 +15,27 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 23 ADRs (0001–0023) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 24 ADRs (0001–0024) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
-  (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023) are all
-  implemented and tested (0015's `Run.restore`/`RunSnapshot` is still only specified — it lands
-  with task 7.4). All gates green: ruff, ruff format, mypy --strict, pytest (614 passed, 0 skipped).
+  (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
+  Adapter (0024) are all implemented and tested. All gates green: ruff, ruff format,
+  mypy --strict, pytest (682 passed, 0 skipped).
+- **Run persistence exists (ROADMAP Stage 6b, ADR-0024)** but is **not wired** — nothing saves a
+  Run yet (Stage 7). Domain: `Run.snapshot` (read-only `RunSnapshot`: everything incl. policies,
+  the five id counters and the journal) and `Run.restore(snapshot)` (second factory, no transition,
+  no event; verify/reject → `RunRestorationError`), per `RUN_RESTORE_SPEC.md` **1.1** (amended:
+  evaluations/analytics + their counters, events' `run_id`, id uniqueness, 1:1, policy bounds,
+  counter ≥ every used id number). Children got internal `restore` classmethods only.
+  Infrastructure: `SqliteRunStore` (`infrastructure/sqlite_run_store.py`, stdlib `sqlite3`, one row
+  per Run = one JSON document) + the type-hint-driven codec `infrastructure/run_snapshot_codec.py`
+  (`FORMAT_VERSION = 1`, `EVENT_TYPES` registry pinned by a test to every journal event class — a
+  **new event class must be registered there**, and a new snapshot field makes old stored documents
+  unreadable → bump `FORMAT_VERSION`; migrations deferred). Malformed storage → `RunStoreError`;
+  domain refusals pass through unmasked. Tests: `tests/test_run_restore.py` (RST),
+  `tests/test_sqlite_run_store.py` (STO), shared builders in `tests/restorable_runs.py`.
 - **Adapter Layer contracts exist (ROADMAP Stage 6a, ADR-0023, `ADAPTER_SPEC.md`)**: the LLM
   Adapter is recognised as already done (`LLMClient`/`AnthropicLLMClient`/`FakeLLMClient`/
   `client_for_role`, unchanged, stays in `infrastructure/llm.py`). The other four are `Protocol`s in
@@ -34,7 +47,8 @@ the source of truth — code must never contradict them; on conflict, the docs w
   technical `<Contract>Error` (not a `DomainError`); adapters never mutate a Run.
   `tests/test_adapter_contract.py` enforces the boundary: outside `infrastructure/` no module
   imports a third-party package or network/storage stdlib, and only `composition.py` imports
-  `infrastructure`. **No adapter is implemented or wired yet** (7.4 / 7.5).
+  `infrastructure`. `RunStore` is implemented (`SqliteRunStore`, ADR-0024); the other three get
+  stubs in 7.5. **No adapter is wired yet** (Stage 7).
 - **Tool Layer exists (ROADMAP Stage 5, ADR-0022, `TOOL_SPEC.md`)**: passive `ToolDescriptor`
   in `domain/tool.py` (unlike a Skill it carries its declared `ToolParameter`s — the model and the
   Toolbox both read them); executable `Tool` Protocol in `tools/contract.py` (`descriptor` +
@@ -148,12 +162,13 @@ process at the time, not a pattern to keep copying.)
       `tests/test_adapter_contract.py`). The LLM Adapter was recognised as done, not moved. The
       reviewer's identity was deliberately left off `ReviewDecision`: `Run.submit_review` records
       only the actor role, so the field would have no reader (ADR-0023 "Deferred", Stage 10).
-   4. **Storage Adapter** (Stage 6b) — real persistence for `Run` and its children (everything
-      is in-memory today). Likely the heaviest subtask here. ADR + code + tests. Implements the
-      `RunStore` contract (ADR-0023 §5). **Prerequisite inside this task:** `Run.restore` /
-      `RunSnapshot` (ADR-0015, `RUN_RESTORE_SPEC.md`) are not implemented, and the spec's snapshot
-      composition (§3) predates ADR-0018/0020 — it lacks evaluations, analytics records and their
-      id counters. Amend the spec first, then restoration, then the store.
+   4. ~~**Storage Adapter** (Stage 6b)~~ — done (ADR-0024: `RUN_RESTORE_SPEC.md` /
+      `RUN_RESTORE_ACCEPTANCE.md` amended to 1.1 first, then `Run.snapshot` / `Run.restore`, then
+      `SqliteRunStore` + codec; `ADAPTER_ACCEPTANCE.md` §5 STO). Found while amending: spec 1.0's
+      counter check (`seq ≥ |children|`) let a lone `…-task-3` with `task_seq = 2` through (next
+      `open_task` would overwrite it), and RST-03 expected a Run-level Approve guard that doesn't
+      exist (the gate is on the Artifact, ADR-0007 §6) — both corrected in 1.1. Saving after each
+      transition (the wiring) was deliberately left to Stage 7 (ADR-0024 "Deferred").
    5. **Notion / Google Docs / Analytics adapter stubs** (Stage 6c) — a fake/stub implementation
       of the existing `BriefBoard` / `ReviewDesk` / `AnalyticsSink` contracts (ADR-0023) only;
       full integration is explicitly Stages 9-11, not here (ROADMAP Stage 6: "полноценная интеграция — Этапы 9–11; здесь — контракт и базовая

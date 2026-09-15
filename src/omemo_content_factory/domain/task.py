@@ -160,6 +160,27 @@ class TaskView:
     output: Output | None
 
 
+@dataclass(frozen=True, slots=True)
+class TaskSnapshot:
+    """Immutable, complete observation of a Task: its view plus its retry policy (ADR-0024).
+
+    ``TaskView`` leaves out ``retry_policy``, so a Task brought back from a view alone would reset
+    its attempt bound to the default (RUN_RESTORE_SPEC §2, §3.1). The snapshot carries it. It leaves
+    the aggregate only inside a ``RunSnapshot`` and comes back only through ``Run.restore``.
+    """
+
+    task_id: TaskId
+    run_id: str
+    workflow_step_ref: str
+    agent_ref: str
+    task_input: str
+    status: TaskStatus
+    attempt_count: int
+    failure_reason: str | None
+    output: Output | None
+    retry_policy: TaskRetryPolicy
+
+
 # --- Allowed transitions -----------------------------------------------------------------
 
 # Allowed Task state transitions (TASK_SPEC.md §4; ADR-0004 §5). ``RUNNING -> RUNNING`` is a
@@ -263,6 +284,27 @@ class Task:
             raise ImmutableTaskAttributeError(f"'{name}' is immutable after creation")
         super().__setattr__(name, value)
 
+    @classmethod
+    def restore(cls, snapshot: TaskSnapshot) -> Task:
+        """Bring a Task back at its preserved state (called only by ``Run.restore``, ADR-0024).
+
+        No transition is applied and no event is returned. The original Task reached this state
+        legally, and the owning Run has already verified the snapshot (RUN_RESTORE_SPEC §4.2).
+        """
+        task = cls(
+            task_id=snapshot.task_id,
+            run_id=snapshot.run_id,
+            workflow_step_ref=snapshot.workflow_step_ref,
+            agent_ref=snapshot.agent_ref,
+            task_input=snapshot.task_input,
+            retry_policy=snapshot.retry_policy,
+        )
+        task._status = snapshot.status
+        task._attempt_count = snapshot.attempt_count
+        task._failure_reason = snapshot.failure_reason
+        task._output = snapshot.output
+        return task
+
     @property
     def is_terminal(self) -> bool:
         """Whether the Task has reached a terminal state (used by Run's completion guard)."""
@@ -286,6 +328,22 @@ class Task:
             attempt_count=self._attempt_count,
             failure_reason=self._failure_reason,
             output=self._output,
+        )
+
+    @property
+    def snapshot(self) -> TaskSnapshot:
+        """A complete point-in-time observation, for ``Run.snapshot`` (ADR-0024)."""
+        return TaskSnapshot(
+            task_id=self._task_id,
+            run_id=self._run_id,
+            workflow_step_ref=self._workflow_step_ref,
+            agent_ref=self._agent_ref,
+            task_input=self._task_input,
+            status=self._status,
+            attempt_count=self._attempt_count,
+            failure_reason=self._failure_reason,
+            output=self._output,
+            retry_policy=self._retry_policy,
         )
 
     def attach_output(self, output: Output) -> None:

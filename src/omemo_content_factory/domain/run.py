@@ -15,8 +15,11 @@ existing behaviour, signatures and tests are unchanged; only new operations are 
 
 Later ADRs add the remaining children the same additive way: Output (ADR-0005), Artifact
 (ADR-0006, versioned by ADR-0019), Human Review (ADR-0007), Evaluation (ADR-0018) and Analytics
-Record (ADR-0020). It contains no infrastructure, persistence, serialization, async/threading or
-integrations.
+Record (ADR-0020). **ADR-0024** adds the second way a Run comes to exist (ADR-0015 §3): the
+read-only ``snapshot`` observation and the ``restore`` factory, which admits a preserved state only
+after verifying it (RUN_RESTORE_SPEC.md). It contains no infrastructure, persistence,
+serialization, async/threading or integrations: ``RunSnapshot`` is a plain domain value, and how it
+is stored is the Storage Adapter's business.
 
 Scenario identifiers in docstrings (e.g. ``HP-01``, ``FL-03``, ``THP-01``) refer to
 `RUN_ACCEPTANCE.md` and `TASK_ACCEPTANCE.md`.
@@ -86,6 +89,7 @@ from omemo_content_factory.domain.task import (
     TaskEvent,
     TaskId,
     TaskRetryPolicy,
+    TaskSnapshot,
     TaskStatus,
     TaskView,
 )
@@ -235,6 +239,49 @@ class AggregateBoundaryError(RunDomainError):
     Covers `AGG-01`..`AGG-06` (invariant `INV-07`). Child entity types are out of scope at
     this stage (ADR-0003 §9), so this error exists in the contract ahead of those entities.
     """
+
+
+class RunRestorationError(RunDomainError):
+    """A snapshot does not describe a Run that could legally exist, so it is not restored.
+
+    Raised by ``Run.restore`` when the preserved state breaks an invariant of RUN_SPEC.md §5. No
+    Run is returned, not even a partial one (RUN_SPEC.md §4a verify/reject; RUN_RESTORE_SPEC §4.3).
+    """
+
+
+# --- Snapshot (additive, ADR-0024) --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RunSnapshot:
+    """The complete observable truth of one Run at a point in time (RUN_RESTORE_SPEC §3).
+
+    Taken with :attr:`Run.snapshot` and turned back into the same Run by :meth:`Run.restore`. A
+    plain, persistence-ignorant domain value with no behaviour (RUN_SPEC.md §9). Beyond what the
+    read-only views show, it carries the two policies and the five id counters. Without them a
+    restored Run would reset its bounds or hand out an id that is already taken (ADR-0015 I3).
+    Children appear as their complete views (``TaskSnapshot`` adds the retry policy). The journal
+    is taken verbatim.
+    """
+
+    run_id: str
+    content_brief_ref: str
+    workflow_version_ref: str
+    status: RunStatus
+    rework_count: int
+    failure_reason: str | None
+    rework_policy: ReworkPolicy
+    task_seq: int
+    artifact_seq: int
+    review_seq: int
+    evaluation_seq: int
+    analytics_seq: int
+    tasks: tuple[TaskSnapshot, ...]
+    artifacts: tuple[ArtifactView, ...]
+    human_reviews: tuple[HumanReviewView, ...]
+    evaluations: tuple[EvaluationView, ...]
+    analytics_records: tuple[AnalyticsRecord, ...]
+    events: tuple[RunLogEvent, ...]
 
 
 # --- Run aggregate -----------------------------------------------------------------------
@@ -387,6 +434,77 @@ class Run:
             )
         )
         return run
+
+    @classmethod
+    def restore(cls, snapshot: RunSnapshot) -> Run:
+        """Bring a Run back at its preserved state, the second way a Run comes to exist.
+
+        Additive to :meth:`create` (ADR-0015 §3; RUN_RESTORE_SPEC §4). No transition is made and no
+        event is emitted: the original Run reached this state legally, and the journal is taken
+        verbatim, so nothing is replayed or recorded twice (ADR-0015 I2, I3). Legality is checked,
+        not assumed. A snapshot that breaks an invariant of RUN_SPEC.md §5 raises
+        ``RunRestorationError`` and no Run is returned (RUN_SPEC.md §4a). From here the Run advances
+        under the unchanged transition contract, and its id counters continue where they stopped.
+        """
+        _verify_snapshot(snapshot)
+        run = cls(
+            run_id=snapshot.run_id,
+            content_brief_ref=snapshot.content_brief_ref,
+            workflow_version_ref=snapshot.workflow_version_ref,
+            rework_policy=snapshot.rework_policy,
+        )
+        run._status = snapshot.status
+        run._rework_count = snapshot.rework_count
+        run._failure_reason = snapshot.failure_reason
+        run._events = list(snapshot.events)
+        run._tasks = {task.task_id: Task.restore(task) for task in snapshot.tasks}
+        run._task_seq = snapshot.task_seq
+        run._artifacts = {view.artifact_id: Artifact.restore(view) for view in snapshot.artifacts}
+        run._artifact_seq = snapshot.artifact_seq
+        run._human_reviews = {
+            view.review_id: HumanReview.restore(view) for view in snapshot.human_reviews
+        }
+        run._review_seq = snapshot.review_seq
+        run._evaluations = {
+            view.evaluation_id: Evaluation.restore(view) for view in snapshot.evaluations
+        }
+        run._evaluation_seq = snapshot.evaluation_seq
+        run._analytics_records = {record.record_id: record for record in snapshot.analytics_records}
+        run._analytics_seq = snapshot.analytics_seq
+        if run._status is RunStatus.COMPLETED and not all(
+            task.is_terminal for task in run._tasks.values()
+        ):
+            raise RunRestorationError("a COMPLETED Run cannot own a non-terminal Task")
+        return run
+
+    @property
+    def snapshot(self) -> RunSnapshot:
+        """The complete observable truth of this Run, at this point in time (ADR-0024).
+
+        A read-only observation, like the views: taking it changes nothing, and it does not follow
+        later changes. ``Run.restore(run.snapshot)`` gives back a Run indistinguishable from this
+        one (RUN_RESTORE_SPEC §3.2, §4.4).
+        """
+        return RunSnapshot(
+            run_id=self._run_id,
+            content_brief_ref=self._content_brief_ref,
+            workflow_version_ref=self._workflow_version_ref,
+            status=self._status,
+            rework_count=self._rework_count,
+            failure_reason=self._failure_reason,
+            rework_policy=self._rework_policy,
+            task_seq=self._task_seq,
+            artifact_seq=self._artifact_seq,
+            review_seq=self._review_seq,
+            evaluation_seq=self._evaluation_seq,
+            analytics_seq=self._analytics_seq,
+            tasks=tuple(task.snapshot for task in self._tasks.values()),
+            artifacts=tuple(self.artifacts),
+            human_reviews=tuple(self.human_reviews),
+            evaluations=tuple(self.evaluations),
+            analytics_records=tuple(self.analytics_records),
+            events=tuple(self._events),
+        )
 
     @property
     def run_id(self) -> str:
@@ -934,3 +1052,128 @@ class Run:
     def _record(self, event: RunLogEvent) -> None:
         """Append an emitted event (Run or any child entity's) to the single Run log."""
         self._events.append(event)
+
+
+# --- Restoration verify/reject (RUN_RESTORE_SPEC §4.3) ------------------------------------
+# Structural checks of a snapshot against the invariants of RUN_SPEC.md §5. Nothing is replayed:
+# the checks read the preserved state as it is (ADR-0015 §Rationale).
+
+
+def _verify_snapshot(snapshot: RunSnapshot) -> None:
+    """Admit ``snapshot`` only if a Run could legally hold it, else ``RunRestorationError``."""
+    _verify_run_state(snapshot)
+    _verify_ownership(snapshot)
+    _verify_task_states(snapshot)
+    _verify_references(snapshot)
+    _verify_counters(snapshot)
+
+
+def _verify_run_state(snapshot: RunSnapshot) -> None:
+    """Exactly one status, the fixed input in place, rework within its bound (INV-01/02/08)."""
+    if not isinstance(snapshot.status, RunStatus):
+        raise RunRestorationError(f"status must be a RunStatus, got {snapshot.status!r}")
+    fixed_input = (
+        ("run_id", snapshot.run_id),
+        ("content_brief_ref", snapshot.content_brief_ref),
+        ("workflow_version_ref", snapshot.workflow_version_ref),
+    )
+    for name, value in fixed_input:
+        if not isinstance(value, str) or not value.strip():
+            raise RunRestorationError(f"{name} must be a non-blank reference")
+    if not 0 <= snapshot.rework_count <= snapshot.rework_policy.max_rework_iterations:
+        raise RunRestorationError(
+            f"rework_count {snapshot.rework_count} is outside the bound of {snapshot.rework_policy}"
+        )
+
+
+def _verify_ownership(snapshot: RunSnapshot) -> None:
+    """Every child and journal entry belongs to this Run, and no id is used twice (INV-07)."""
+    owned = (
+        *snapshot.tasks,
+        *snapshot.artifacts,
+        *snapshot.human_reviews,
+        *snapshot.evaluations,
+        *snapshot.analytics_records,
+        *snapshot.events,
+    )
+    for item in owned:
+        if item.run_id != snapshot.run_id:
+            raise RunRestorationError(f"{item!r} belongs to another Run than {snapshot.run_id}")
+    outputs = [task.output.output_id for task in snapshot.tasks if task.output is not None]
+    for kind, ids in {**_child_ids(snapshot), "output": outputs}.items():
+        if len(set(ids)) != len(ids):
+            raise RunRestorationError(f"a {kind} id appears twice in the snapshot")
+
+
+def _verify_task_states(snapshot: RunSnapshot) -> None:
+    """Attempts within each Task's bound; an Output only on its own SUCCEEDED Task (INV-07/08)."""
+    for task in snapshot.tasks:
+        if not 0 <= task.attempt_count <= task.retry_policy.max_attempts:
+            raise RunRestorationError(
+                f"task {task.task_id} has {task.attempt_count} attempts, "
+                f"outside the bound of {task.retry_policy}"
+            )
+        if task.output is not None and task.output.task_id != task.task_id:
+            raise RunRestorationError(f"task {task.task_id} holds another Task's Output")
+        if task.output is not None and task.status is not TaskStatus.SUCCEEDED:
+            raise RunRestorationError(f"task {task.task_id} has an Output but did not succeed")
+
+
+def _verify_references(snapshot: RunSnapshot) -> None:
+    """Every reference between children points at a child this Run owns (INV-07)."""
+    outputs = {task.output.output_id for task in snapshot.tasks if task.output is not None}
+    derived_from = [artifact.output_ref for artifact in snapshot.artifacts]
+    if not set(derived_from) <= outputs:
+        raise RunRestorationError("an Artifact derives from an Output this Run does not own")
+    if len(set(derived_from)) != len(derived_from):
+        raise RunRestorationError("two Artifacts derive from one Output (Output->Artifact is 1:1)")
+    artifacts = {artifact.artifact_id for artifact in snapshot.artifacts}
+    subjects = {
+        *(view.supersedes_ref for view in snapshot.artifacts if view.supersedes_ref is not None),
+        *(review.artifact_ref for review in snapshot.human_reviews),
+        *(evaluation.artifact_ref for evaluation in snapshot.evaluations),
+    }
+    if not subjects <= artifacts:
+        raise RunRestorationError("a child refers to an Artifact this Run does not own")
+    roles = {task.task_id: task.agent_ref for task in snapshot.tasks}
+    for record in snapshot.analytics_records:
+        if roles.get(record.task_id) != record.agent_ref:
+            raise RunRestorationError(
+                f"analytics record {record.record_id} does not match an owned Task and its role"
+            )
+
+
+def _verify_counters(snapshot: RunSnapshot) -> None:
+    """Each id counter is past every id already used, so continuing reuses none (ADR-0015 I3)."""
+    counters = {
+        "task": snapshot.task_seq,
+        "artifact": snapshot.artifact_seq,
+        "review": snapshot.review_seq,
+        "evaluation": snapshot.evaluation_seq,
+        "analytics": snapshot.analytics_seq,
+    }
+    for kind, ids in _child_ids(snapshot).items():
+        used = [_sequence_number(snapshot.run_id, kind, child_id) for child_id in ids]
+        if counters[kind] < max([len(ids), *used]):
+            raise RunRestorationError(
+                f"the {kind} counter {counters[kind]} would hand out an id that is already taken"
+            )
+
+
+def _child_ids(snapshot: RunSnapshot) -> dict[str, list[str]]:
+    """The ids of each counted kind of child, keyed by the word the Run puts in those ids."""
+    return {
+        "task": [task.task_id for task in snapshot.tasks],
+        "artifact": [artifact.artifact_id for artifact in snapshot.artifacts],
+        "review": [review.review_id for review in snapshot.human_reviews],
+        "evaluation": [evaluation.evaluation_id for evaluation in snapshot.evaluations],
+        "analytics": [record.record_id for record in snapshot.analytics_records],
+    }
+
+
+def _sequence_number(run_id: str, kind: str, child_id: str) -> int:
+    """The counter value that generated ``child_id``, or 0 if the Run never generates that id."""
+    number = child_id.removeprefix(f"{run_id}-{kind}-")
+    if number == child_id or not (number.isascii() and number.isdigit()):
+        return 0
+    return int(number)

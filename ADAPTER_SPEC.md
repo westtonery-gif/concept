@@ -67,8 +67,11 @@ Composition Root.
 Artifact/Human Review/Evaluation/Analytics Record/журнал сохраняются вместе со своим Run.
 Определения (Workflow, Schema, Agent, Prompt) здесь не хранятся (ADR-0015 §2).
 
-**Предусловие 6b.** Состав `RunSnapshot` (RUN_RESTORE_SPEC §3) старше ADR-0018/0020 и не содержит
-Evaluation, Analytics Record и их счётчиков id — спека дополняется до реализации.
+**Реализация (6b, ADR-0024).** `SqliteRunStore` (`infrastructure/sqlite_run_store.py`):
+встраиваемая SQLite, одна строка на Run, вся истина — JSON-документ его `RunSnapshot`
+(`infrastructure/run_snapshot_codec.py`). Предусловие выполнено: состав снимка дополнен
+Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1). Приёмка —
+`ADAPTER_ACCEPTANCE.md` §5.
 
 ## 5. `BriefBoard` (`adapters/brief_board.py`)
 

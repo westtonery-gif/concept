@@ -253,6 +253,25 @@ class Artifact:
             raise ImmutableArtifactAttributeError(f"'{name}' is immutable after creation")
         super().__setattr__(name, value)
 
+    @classmethod
+    def restore(cls, view: ArtifactView) -> Artifact:
+        """Bring an Artifact back at its preserved status (called only by ``Run.restore``).
+
+        The view holds every field of the entity, so no separate snapshot type is needed
+        (RUN_RESTORE_SPEC §2). No transition is applied (ADR-0024).
+        """
+        artifact = cls(
+            artifact_id=view.artifact_id,
+            run_id=view.run_id,
+            output_ref=view.output_ref,
+            kind=view.kind,
+            content=view.content,
+            version=view.version,
+            supersedes_ref=view.supersedes_ref,
+        )
+        artifact._status = view.status
+        return artifact
+
     @property
     def output_ref(self) -> str:
         """Provenance: the id of the Output this Artifact was produced from."""
