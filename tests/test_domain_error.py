@@ -15,6 +15,7 @@ import pytest
 
 import omemo_content_factory.domain as domain_pkg
 from omemo_content_factory.composition import CompositionError
+from omemo_content_factory.domain.analytics import AnalyticsDomainError
 from omemo_content_factory.domain.artifact import ArtifactDomainError
 from omemo_content_factory.domain.errors import DomainError
 from omemo_content_factory.domain.evaluation import EvaluationDomainError
@@ -63,6 +64,7 @@ def test_domain_error_is_a_plain_exception() -> None:
         ArtifactDomainError,
         HumanReviewDomainError,
         EvaluationDomainError,  # EDE-01 (ADR-0018)
+        AnalyticsDomainError,  # ADE-01 (ADR-0020)
         SchemaDomainError,
         WorkflowDomainError,
     ],

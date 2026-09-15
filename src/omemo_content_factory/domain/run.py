@@ -13,9 +13,10 @@ read-only ``tasks`` / ``task``). This is an Open/Closed extension (PROJECT.md §
 existing behaviour, signatures and tests are unchanged; only new operations are added. The
 ``Task`` entity itself lives in ``omemo_content_factory.domain.task``.
 
-It contains no infrastructure, persistence, serialization, async/threading or integrations,
-and no child entities beyond ``Task`` (the others — Artifact, Evaluation, Human Review,
-Analytics Record — remain out of scope; see the accompanying acceptance docs).
+Later ADRs add the remaining children the same additive way: Output (ADR-0005), Artifact
+(ADR-0006, versioned by ADR-0019), Human Review (ADR-0007), Evaluation (ADR-0018) and Analytics
+Record (ADR-0020). It contains no infrastructure, persistence, serialization, async/threading or
+integrations.
 
 Scenario identifiers in docstrings (e.g. ``HP-01``, ``FL-03``, ``THP-01``) refer to
 `RUN_ACCEPTANCE.md` and `TASK_ACCEPTANCE.md`.
@@ -31,6 +32,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypeAlias
 
+from omemo_content_factory.domain.analytics import (
+    AnalyticsEvent,
+    AnalyticsRecord,
+    AnalyticsRecordCaptured,
+    AnalyticsRecordId,
+    Cost,
+    InvalidAnalyticsRecordError,
+    TimeRange,
+    TokenUsage,
+)
 from omemo_content_factory.domain.artifact import (
     Artifact,
     ArtifactCreated,
@@ -168,7 +179,13 @@ class RunFailed(RunEvent):
 
 
 RunLogEvent: TypeAlias = (
-    RunEvent | TaskEvent | OutputEvent | ArtifactEvent | HumanReviewEvent | EvaluationEvent
+    RunEvent
+    | TaskEvent
+    | OutputEvent
+    | ArtifactEvent
+    | HumanReviewEvent
+    | EvaluationEvent
+    | AnalyticsEvent
 )
 """Any event recorded in a Run's single log: the Run's own and those of its child entities."""
 
@@ -264,6 +281,8 @@ class Run:
     """
 
     __slots__ = (
+        "_analytics_records",
+        "_analytics_seq",
         "_artifact_seq",
         "_artifacts",
         "_content_brief_ref",
@@ -298,6 +317,8 @@ class Run:
     _review_seq: int
     _evaluations: dict[EvaluationId, Evaluation]
     _evaluation_seq: int
+    _analytics_records: dict[AnalyticsRecordId, AnalyticsRecord]
+    _analytics_seq: int
 
     def __init__(
         self,
@@ -324,6 +345,8 @@ class Run:
         self._review_seq = 0
         self._evaluations = {}
         self._evaluation_seq = 0
+        self._analytics_records = {}
+        self._analytics_seq = 0
 
     def __setattr__(self, name: str, value: object) -> None:
         """Reject reassignment of immutable attributes and their backing fields.
@@ -401,8 +424,9 @@ class Run:
 
         Holds Run events (`EV-01`..`EV-05`), Task events (`TEV-01`..`TEV-06`, ADR-0004 §7),
         Output events (`OutputValidated`, ADR-0005 §7), Artifact events (`ArtifactCreated`,
-        ADR-0006 §8), Human Review events (ADR-0007 §7) and Evaluation events
-        (`EvaluationCompleted`, ADR-0018 §8), in one Run log.
+        ADR-0006 §8), Human Review events (ADR-0007 §7), Evaluation events
+        (`EvaluationCompleted`, ADR-0018 §8) and Analytics Record events
+        (`AnalyticsRecordCaptured`, ADR-0020 §6), in one Run log.
         """
         return tuple(self._events)
 
@@ -791,6 +815,72 @@ class Run:
             review.artifact_ref == artifact_id and review.status is ReviewStatus.APPROVED
             for review in self._human_reviews.values()
         )
+
+    # --- Analytics Record child management (additive, ADR-0020) --------------------------
+
+    def record_analytics(
+        self,
+        task_id: TaskId,
+        *,
+        provider: str,
+        model: str,
+        token_usage: TokenUsage,
+        cost: Cost,
+        time_range: TimeRange,
+        by: Actor,
+        prompt_ref: str | None = None,
+    ) -> AnalyticsRecordId:
+        """Record the metrics of one agent call made for an owned Task (ADR-0020 §5).
+
+        Append-only (DOMAIN_MODEL.md §2.15): the record is immutable and there is no update or
+        delete. Content Director only. The Task must be owned by this Run (else ``KeyError``) and
+        must have been started — a Task that never entered ``RUNNING`` made no call (else
+        ``InvalidAnalyticsRecordError``). Nothing else about the Run's or the Task's state is
+        checked: a failed call, or one recorded after the Task or the Run ended, still happened and
+        cost money (PROJECT.md §16).
+
+        Attribution is derived, never asserted (ADR-0020 §4): ``run_id``, ``task_id`` and
+        ``agent_ref`` come from the Task, and ``retries`` is its ``attempt_count - 1`` at capture.
+        The record is validated before anything changes, so a refused call records nothing and
+        consumes no id. Emits ``AnalyticsRecordCaptured``.
+        """
+        self._ensure_authorised(by)
+        task = self._tasks[task_id].view
+        if task.attempt_count < 1:
+            raise InvalidAnalyticsRecordError(
+                f"task {task_id} was never started, so it made no call to record"
+            )
+        record_id = f"{self._run_id}-analytics-{self._analytics_seq + 1}"
+        record = AnalyticsRecord(
+            record_id=record_id,
+            run_id=self._run_id,
+            task_id=task_id,
+            agent_ref=task.agent_ref,
+            provider=provider,
+            model=model,
+            token_usage=token_usage,
+            cost=cost,
+            time_range=time_range,
+            retries=task.attempt_count - 1,
+            prompt_ref=prompt_ref,
+        )
+        self._analytics_seq += 1
+        self._analytics_records[record_id] = record
+        self._record(
+            AnalyticsRecordCaptured(
+                run_id=self._run_id, record_id=record_id, task_id=task_id, agent_ref=task.agent_ref
+            )
+        )
+        return record_id
+
+    @property
+    def analytics_records(self) -> Sequence[AnalyticsRecord]:
+        """The Analytics Records owned by this Run, in capture order (immutable, ADR-0020 §5)."""
+        return tuple(self._analytics_records.values())
+
+    def analytics_record(self, record_id: AnalyticsRecordId) -> AnalyticsRecord:
+        """One owned Analytics Record (immutable, ADR-0020 §5)."""
+        return self._analytics_records[record_id]
 
     def _ensure_reviewer(self, by: Actor) -> None:
         """Only the Human Reviewer may submit a review decision (ADR-0007 §2)."""

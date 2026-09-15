@@ -12,8 +12,15 @@ independently of the implementation's private tables.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
+from decimal import Decimal
+
 import pytest
 
+from omemo_content_factory.domain.analytics import Cost, TimeRange, TokenUsage
+from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.run import (
     Actor,
     ImmutableAttributeError,
@@ -30,11 +37,15 @@ from omemo_content_factory.domain.run import (
     RunStatus,
     UnauthorizedActorError,
 )
+from omemo_content_factory.domain.task import TaskStatus
 
 RUN_ID = "run-0001"
 BRIEF_REF = "brief-0001"
 WORKFLOW_REF = "workflow@v1"
 CONTENT_DIRECTOR = Actor.CONTENT_DIRECTOR
+_T0 = datetime(2026, 9, 15, 12, 0, tzinfo=UTC)
+# Every child snapshot names its owning Run in this field (used by the INV-07 check).
+_OWNER_FIELD = "run_id"
 
 # Canonical happy-path sub-paths (sequences of transitions driven by the Content Director).
 _TO_WAITING_QA: tuple[RunStatus, ...] = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_QA)
@@ -243,11 +254,71 @@ def test_event_history_is_append_only(run: Run) -> None:
 
 
 def test_aggregate_integrity_with_children() -> None:
-    """INV-07: children belong to exactly one Run and change only through it."""
-    pytest.skip(
-        "Requires child entities (Task/Artifact/Evaluation/Human Review/Analytics Record), "
-        "not yet implemented (ADR-0003 §9)."
+    """INV-07 / AGG-01..AGG-06: children belong to exactly one Run and change only through it.
+
+    Builds one of every child entity (DOMAIN_MODEL.md §9.1) through the root, then checks that each
+    names its Run, that another Run can neither see nor reach them, and that they leave the root
+    only as immutable values (no bypass of the root is possible).
+    """
+    run = make_run()
+    other = Run.create(
+        run_id="run-0002", content_brief_ref=BRIEF_REF, workflow_version_ref=WORKFLOW_REF
     )
+    task_id = run.open_task(
+        workflow_step_ref="step-1", agent_ref="writer@v1", task_input="brief", by=CONTENT_DIRECTOR
+    )
+    run.transition_task(task_id, TaskStatus.RUNNING, by=CONTENT_DIRECTOR)
+    record_id = run.record_analytics(
+        task_id,
+        provider="fake",
+        model="fake-model",
+        token_usage=TokenUsage(input_tokens=1, output_tokens=1),
+        cost=Cost(amount=Decimal("0"), currency="USD"),
+        time_range=TimeRange(started_at=_T0, finished_at=_T0),
+        by=CONTENT_DIRECTOR,
+    )
+    run.transition_task(task_id, TaskStatus.SUCCEEDED, by=CONTENT_DIRECTOR)
+    output_id = run.record_output(
+        task_id, payload="content", schema_ref="s@v1", by=CONTENT_DIRECTOR
+    )
+    artifact_id = run.create_artifact(output_id, kind="script", by=CONTENT_DIRECTOR)
+    run.transition_artifact(artifact_id, ArtifactStatus.CANDIDATE, by=CONTENT_DIRECTOR)
+    evaluation_id = run.open_evaluation(artifact_id, kind="qa", by=CONTENT_DIRECTOR)
+    review_id = run.open_human_review(artifact_id, by=CONTENT_DIRECTOR)
+
+    task = run.task(task_id)
+    children: tuple[object, ...] = (
+        task,
+        task.output,
+        run.artifact(artifact_id),
+        run.evaluation(evaluation_id),
+        run.human_review(review_id),
+        run.analytics_record(record_id),
+    )
+    assert {task.run_id, run.artifact(artifact_id).run_id} == {RUN_ID}
+    assert {run.evaluation(evaluation_id).run_id, run.human_review(review_id).run_id} == {RUN_ID}
+    assert run.analytics_record(record_id).run_id == RUN_ID
+    assert task.output is not None
+    assert task.output.task_id == task_id
+
+    assert (other.tasks, other.artifacts, other.evaluations) == ((), (), ())
+    assert (other.human_reviews, other.analytics_records) == ((), ())
+    lookups: tuple[Callable[[], object], ...] = (
+        lambda: other.task(task_id),
+        lambda: other.artifact(artifact_id),
+        lambda: other.evaluation(evaluation_id),
+        lambda: other.human_review(review_id),
+        lambda: other.analytics_record(record_id),
+    )
+    for lookup in lookups:
+        with pytest.raises(KeyError):
+            lookup()
+
+    for child in children:
+        # Output is owned through its Task, so it names the Task rather than the Run.
+        field = _OWNER_FIELD if hasattr(child, _OWNER_FIELD) else "task_id"
+        with pytest.raises(FrozenInstanceError):
+            setattr(child, field, other.run_id)
 
 
 # --- Identity ----------------------------------------------------------------------------

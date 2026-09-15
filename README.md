@@ -6,7 +6,8 @@ managed, reproducible, human-in-the-loop pipeline for producing content.
 > **Status:** ROADMAP **Stage 2 — domain models & contracts**.
 > The domain core is implemented: the **Run** aggregate and its child entities
 > **Task, Output, Artifact**, **Human Review** (ADR-0003…0007), the fail-closed QA
-> **Evaluation** (ADR-0018) and **Artifact versioning** for rework (ADR-0019), with a minimal
+> **Evaluation** (ADR-0018), **Artifact versioning** for rework (ADR-0019) and the append-only
+> per-call **Analytics Record** (ADR-0020), with a minimal
 > `ContentDirector` and an LLM-backed task executor. Full agents, skills, tools,
 > adapters and workflows arrive in later stages.
 

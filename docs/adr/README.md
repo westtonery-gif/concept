@@ -43,3 +43,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0017](0017-shared-domain-error-base.md) | Shared `DomainError` base for the per-aggregate error hierarchies | Accepted |
 | [0018](0018-evaluation-qa-entity-and-fail-closed-gate.md) | Evaluation (QA) entity + the fail-closed QA gate on Artifact approval | Accepted |
 | [0019](0019-artifact-versioning-and-the-rework-path.md) | Artifact versioning (`SUPERSEDED`) — the rework path | Accepted |
+| [0020](0020-analytics-record-entity.md) | Analytics Record entity — append-only per-call metrics owned by Run | Accepted |

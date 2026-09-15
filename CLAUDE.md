@@ -15,12 +15,20 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 19 ADRs (0001–0019) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 20 ADRs (0001–0020) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
-  (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019) are all implemented
-  and tested. All gates green: ruff, ruff format, mypy --strict, pytest (328 passed, 1 skipped).
+  (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
+  (0020) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict,
+  pytest (357 passed, 0 skipped).
+- **Analytics Record exists as a domain entity only** (ADR-0020, `domain/analytics.py`,
+  `ANALYTICS_RECORD_SPEC.md`): `Run.record_analytics(task_id, …)` appends an immutable per-call
+  record (provider/model, `TokenUsage`, `Cost` as `Decimal`, timezone-aware `TimeRange`);
+  `run_id`/`task_id`/`agent_ref`/`retries` are derived from the Task, never passed in. **Nothing
+  produces records yet** — the LLM port reports no usage/latency, so "no call without a record"
+  (PROJECT §16) is documented but not enforced until ROADMAP Stage 14 (port change + pricing
+  config + `execute_task` wiring, ADR-0020 "Deferred").
 - **QA gate is fail closed** (ADR-0018, `domain/evaluation.py`, `EVALUATION_SPEC.md`): an
   Artifact reaches `APPROVED` only with an approving Human Review **and** a `PASSED` *latest*
   Evaluation — no/pending/`FLAGGED`/`FAILED` QA blocks it even after a human Approve.
@@ -82,11 +90,13 @@ process at the time, not a pattern to keep copying.)
    docstring fixed in the same change). The domain rework path exists now; **routing** a QA risk
    verdict / `CHANGES_REQUESTED` into a re-run that produces the new version is still open
    (ADR-0019 "Deferred", ROADMAP Stage 7/8).
-5. **Analytics Record** entity — new ADR + domain code. Needed for ROADMAP Stage 14
-   (metrics), not before — lowest urgency of the domain gaps. Note: this is genuinely Stage-14
-   work (needs Stages 4-13 first) — CONTRIBUTING.md's scope-discipline rule says not to build
-   domain models ahead of their ROADMAP stage, unlike tasks 2-4 which closed gaps already
-   deferred *within* the active Stage 2 aggregates. Worth double-checking before starting it.
+5. ~~Analytics Record entity~~ — done (ADR-0020, `domain/analytics.py`, `Run.record_analytics`,
+   `tests/test_analytics_record.py`; the long-skipped INV-07 integrity test in `tests/test_run.py`
+   now runs). Scope check (the Stage-14 / scope-discipline concern raised here): ROADMAP Stage 2
+   doesn't list it, but RUN_SPEC / RUN_ACCEPTANCE (AGG-05, INV-09) already make it part of the Run
+   aggregate contract and ARCHITECTURE_FREEZE §3 asks for exactly ADR → SPEC → tests; it was kept
+   domain-only (no capture, aggregation, adapter or agent) and the maintainer confirmed landing
+   it. Capturing a record on every real call stays Stage 14 (ADR-0020 "Deferred").
 6. ~~Wire `client_for_role` into a real entrypoint~~ — done (`demo_factory.py`: each role
    resolves its own provider/model via `build_executor_map` called once per agent + merged;
    `demo.py` untouched, out of scope).
