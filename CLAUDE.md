@@ -14,6 +14,12 @@ the source of truth — code must never contradict them; on conflict, the docs w
 6. `docs/adr/` — Architecture Decision Records (technical decisions)
 7. Code in `src/`, tests in `tests/`
 
+`CONTENT_FACTORY_THOUGHTS.md` sits **outside** this hierarchy — explicitly non-normative
+(says so in its own header), a product/architecture exploration of the full video-factory vision
+reconciled against the repo as of commit `063cfde`. Read it for context and the proposed sequence
+(§16), but it does not override anything above 6 and it does not itself authorize starting
+anything ahead of the queue below — see task 10.
+
 ## Current state (2026-09-15)
 - **All 30 ADRs (0001–0030) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
@@ -261,9 +267,21 @@ process at the time, not a pattern to keep copying.)
       Root loads and strictly validates it fail-closed when `prompts=None`, once per top-level build;
       explicit Prompt mappings remain supported and the built wheel contains the TOML resource;
       tests `PST`).
-   6. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
+   6. **Two correctness bugs found in code review** (`CONTENT_FACTORY_THOUGHTS.md` §15.4,
+      confirmed against current code 2026-09-15) — fix before building more on top:
+      - `ContentDirector._run_steps` has no fail-fast: after a Task fails, the loop still runs
+        every later step (with whatever `task_input` it started with, since `chained_input`
+        never advances past a failure). Harmless for cheap text calls; will trigger pointless
+        paid generations once a step is expensive (media). Decide and implement the policy —
+        stop the remaining steps, or an explicit configurable skip — as its own small change.
+      - `finish_task` → `validate_and_record_output` persists `schema_ref=result.schema_ref`
+        (whatever the executor self-reports) without checking it against the `schema` object
+        actually used for `schema.validate(...)`. An Output can end up validated by one Schema
+        but tagged as conforming to a different one. Add the cross-check (raise or normalize to
+        the schema actually used) plus a regression test.
+   7. **QA rework routing** — route a QA risk verdict / Human `CHANGES_REQUESTED` into an actual
       re-run that calls `Run.create_artifact_version` for the new version (ADR-0019 "Deferred").
-   7. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`
+   8. **Bring it together (Milestone M2 acceptance)** — one real run through `ContentDirector`
       exercising Storage + a Skill + a Tool + captured metrics + an externally-stored prompt in
       one pass; this is what actually closes Stage 7, not any subtask alone.
 9. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
@@ -274,6 +292,17 @@ process at the time, not a pattern to keep copying.)
    agent needs to invoke one mid-reasoning, editing/overlay likely a deterministic `Workflow`
    step rather than an agent decision). Don't start this before Stage 12 without asking first —
    it was an explicit, deliberate call, not an oversight.
+10. **(Not yet — read `CONTENT_FACTORY_THOUGHTS.md` in full before touching this.)** Once task 8
+    (Stage 7, M2) is closed, the maintainer has a detailed exploratory design for the eventual
+    video vertical slice — a full product vision (multi-tenant faceless-reel factory: idea
+    generation/ranking, script/storyboard/production-plan roles, image/video/TTS generation,
+    deterministic assembly, a multi-stage QA cascade with targeted repair routing, cost control,
+    multi-tenancy) reconciled against this exact codebase. It is explicitly a working note, not
+    an accepted plan (see the doc's own header) — §16 proposes: close Stage 7 → Stage 8 (real QA
+    Agent + rework routing) → then explicitly decide, via ADR, whether to keep Stage 9-12 (text
+    MVP) before Stage 13, or carve out an earlier narrow video slice. §19 has the doc's own
+    suggested opening question for whichever session picks this up. Do not start any of §16's
+    "video vertical slice" work, or reorder Stage 8-13, without that explicit ADR decision first.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
