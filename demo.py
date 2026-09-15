@@ -8,9 +8,10 @@ the infrastructure layer.
 It shows, for the run: the Run status, each Task's status, each Task's Output, the Artifacts (with
 provenance ``Task -> Output -> Artifact``), the domain-event journal, and the final article.
 
-Run with: ``python demo.py``. A real model call needs ``ANTHROPIC_API_KEY`` in the environment
-(optionally ``OMEMO_LLM_MODEL`` to choose the model); without a key the demo explains how to set
-it and exits cleanly. No QA, Human Review, publication or external integrations are involved.
+Run with: ``python demo.py``. A real model call needs ``ANTHROPIC_API_KEY`` plus explicit input /
+output token prices and currency in the environment (`ADR-0029`; optionally ``OMEMO_LLM_MODEL``
+to choose the model). Missing configuration is explained and the demo exits cleanly. No QA,
+Human Review, publication or external integrations are involved.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import json
 import os
 import sys
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 
 from omemo_content_factory.application.content_director import ContentDirector, TaskRequest
 from omemo_content_factory.application.task_execution import TaskExecutor
@@ -27,7 +29,11 @@ from omemo_content_factory.domain.output import OutputEvent
 from omemo_content_factory.domain.run import Run, RunEvent, RunFailed
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskEvent, TaskFailed
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, LLMTaskExecutor
+from omemo_content_factory.infrastructure.llm import (
+    AnthropicLLMClient,
+    LLMTaskExecutor,
+    TokenPricing,
+)
 
 DEFAULT_MODEL = "claude-sonnet-4-6"
 
@@ -165,7 +171,18 @@ def main() -> None:
         return
 
     model = os.environ.get("OMEMO_LLM_MODEL", DEFAULT_MODEL)
-    client = AnthropicLLMClient(model=model)
+    try:
+        pricing = TokenPricing(
+            Decimal(os.environ["OMEMO_LLM_INPUT_PRICE_PER_MILLION"]),
+            Decimal(os.environ["OMEMO_LLM_OUTPUT_PRICE_PER_MILLION"]),
+            os.environ["OMEMO_LLM_PRICE_CURRENCY"],
+        )
+    except (KeyError, InvalidOperation, ValueError) as exc:
+        safe_print(f"Explicit token pricing is missing or invalid: {exc}")
+        safe_print("Set OMEMO_LLM_INPUT_PRICE_PER_MILLION, ")
+        safe_print("OMEMO_LLM_OUTPUT_PRICE_PER_MILLION and OMEMO_LLM_PRICE_CURRENCY.")
+        return
+    client = AnthropicLLMClient(model=model, pricing=pricing)
     executors: Mapping[str, TaskExecutor] = {
         "researcher@v1": LLMTaskExecutor(
             client=client,
@@ -173,6 +190,7 @@ def main() -> None:
             user_template="{input}",
             schema_ref="research-notes@v1",
             output_fields=("notes",),
+            prompt_ref="demo-research@v1",
         ),
         "writer@v1": LLMTaskExecutor(
             client=client,
@@ -180,6 +198,7 @@ def main() -> None:
             user_template="{input}",
             schema_ref="article-draft@v1",
             output_fields=("draft",),
+            prompt_ref="demo-writer@v1",
         ),
         "editor@v1": LLMTaskExecutor(
             client=client,
@@ -187,6 +206,7 @@ def main() -> None:
             user_template="{input}",
             schema_ref="final-article@v1",
             output_fields=("article",),
+            prompt_ref="demo-editor@v1",
         ),
     }
     # Per-role ACTIVE Schemas (the generation shape + the validated-Output authority, ADR-0014).

@@ -14,7 +14,9 @@ A successful execution records the Task's domain ``Output`` **only via the unifi
 ``Schema.validate`` (Schema = authority) and the pure sink ``Run.record_output`` persists the
 VALID/INVALID verdict. There is no legacy always-VALID path. Skill preprocessing is an executor
 decorator outside this slice (`ADR-0027`), so this module remains unaware of it. Still deliberately
-**out of scope**: QA / Human Approval; providers; adapters; queues; Tools; and infrastructure.
+LLM call measurements cross this boundary as application data (`ADR-0029`): ``finish_task`` records
+every reported call through ``Run.record_analytics`` before finalising the Task. Still deliberately
+**out of scope**: QA / Human Approval; provider wire formats; queues; and Tool payload tracing.
 """
 
 from __future__ import annotations
@@ -24,9 +26,22 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from omemo_content_factory.application.schema_validation import validate_and_record_output
+from omemo_content_factory.domain.analytics import Cost, TimeRange, TokenUsage
 from omemo_content_factory.domain.run import Actor, Run
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.task import TaskId, TaskStatus
+
+
+@dataclass(frozen=True, slots=True)
+class AnalyticsMeasurement:
+    """Provider-neutral facts used to create one Run-owned Analytics Record (ADR-0029 §3)."""
+
+    provider: str
+    model: str
+    token_usage: TokenUsage
+    cost: Cost
+    time_range: TimeRange
+    prompt_ref: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +53,9 @@ class ExecutionResult:
     recorded as the Task's domain ``Output``; ``failure_reason`` explains a failure and is
     routed to the Task's FAILED reason. ``payload_fields`` optionally carries the **structured**
     fields of the result for later Schema validation (Slice 3); it is **not consumed by execution
-    here** — it is data only until the validated path is wired (3C/3D).
+    here** — it is data only until the validated path is wired (3C/3D). ``analytics`` carries one
+    immutable measurement per completed model call, in call order; non-LLM executors keep the empty
+    default.
     """
 
     succeeded: bool
@@ -46,6 +63,7 @@ class ExecutionResult:
     schema_ref: str | None = None
     failure_reason: str | None = None
     payload_fields: Mapping[str, str] | None = None
+    analytics: tuple[AnalyticsMeasurement, ...] = ()
 
 
 class TaskExecutor(Protocol):
@@ -114,10 +132,23 @@ def finish_task(
     """Run a ``RUNNING`` Task's executor on the Task's own input and record the outcome.
 
     Everything after :func:`start_task`: the executor is handed the input stored on the Task (so a
-    resumed Task gets exactly what it was opened with, ADR-0026 §3), then the Task ends in
-    ``SUCCEEDED`` (with its Output, via the validated path) or ``FAILED`` with the reason.
+    resumed Task gets exactly what it was opened with, ADR-0026 §3). Every completed LLM call the
+    result reports is recorded first through the Run root, including calls preceding a managed
+    failure; then the Task ends in ``SUCCEEDED`` (with its Output, via the validated path) or
+    ``FAILED`` with the reason.
     """
     result = executor.execute(run.task(task_id).task_input)
+    for measurement in result.analytics:
+        run.record_analytics(
+            task_id,
+            provider=measurement.provider,
+            model=measurement.model,
+            token_usage=measurement.token_usage,
+            cost=measurement.cost,
+            time_range=measurement.time_range,
+            prompt_ref=measurement.prompt_ref,
+            by=Actor.CONTENT_DIRECTOR,
+        )
     if not result.succeeded:
         run.transition_task(
             task_id,

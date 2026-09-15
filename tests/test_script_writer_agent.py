@@ -63,4 +63,4 @@ def test_fake_output_satisfies_the_schema() -> None:
     # The keyless provider's output for the required fields is schema-valid (title/hook/script).
     fields = leo.SCRIPT_DRAFT_SCHEMA.view.required_fields
     payload = FakeLLMClient().complete(system="s", user="brief", fields=fields)
-    assert leo.SCRIPT_DRAFT_SCHEMA.validate(payload).is_valid
+    assert leo.SCRIPT_DRAFT_SCHEMA.validate(payload.fields).is_valid

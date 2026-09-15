@@ -8,6 +8,8 @@ normalization/omission (parsing logic worth testing directly).
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from omemo_content_factory.infrastructure import provider_model
@@ -21,13 +23,19 @@ from omemo_content_factory.infrastructure.provider_model import (
 _ROLE = "script_writer@v1"
 
 
-def _env(provider: str | None = None, model: str | None = None) -> dict[str, str]:
+def _env(
+    provider: str | None = None, model: str | None = None, *, pricing: bool = True
+) -> dict[str, str]:
     """Environment for role `_ROLE` (token SCRIPT_WRITER_V1)."""
     env: dict[str, str] = {}
     if provider is not None:
         env["OMEMO_PROVIDER__SCRIPT_WRITER_V1"] = provider
     if model is not None:
         env["OMEMO_MODEL__SCRIPT_WRITER_V1"] = model
+    if provider == "anthropic" and pricing:
+        env["OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1"] = "3"
+        env["OMEMO_OUTPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1"] = "15"
+        env["OMEMO_PRICE_CURRENCY__SCRIPT_WRITER_V1"] = "USD"
     return env
 
 
@@ -39,6 +47,7 @@ def test_ownership_anthropic_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     client = client_for_role(_ROLE, _env(provider="anthropic", model="claude-x"))
     assert isinstance(client, AnthropicLLMClient)
     assert client._model == "claude-x"  # model taken from config, not from any input
+    assert client._pricing.input_per_million == Decimal("3")
 
 
 def test_ownership_fake_from_env() -> None:
@@ -64,7 +73,7 @@ def test_keyless_fake_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     client = client_for_role(_ROLE, _env(provider="fake"))
     assert isinstance(client, FakeLLMClient)
-    assert set(client.complete(system="s", user="u", fields=["title"])) == {"title"}
+    assert set(client.complete(system="s", user="u", fields=["title"]).fields) == {"title"}
 
 
 # --- §4 Fail-closed: missing / invalid binding -> explicit error, no silent default -------
@@ -78,6 +87,19 @@ def test_fail_closed_missing_binding() -> None:
 def test_fail_closed_anthropic_without_model() -> None:
     with pytest.raises(ProviderModelSelectionError):
         client_for_role(_ROLE, _env(provider="anthropic"))
+
+
+def test_fail_closed_anthropic_without_complete_pricing() -> None:
+    with pytest.raises(ProviderModelSelectionError, match="without input price"):
+        client_for_role(_ROLE, _env(provider="anthropic", model="claude-x", pricing=False))
+
+
+@pytest.mark.parametrize("rate", ["not-a-number", "-1", "NaN"])
+def test_fail_closed_anthropic_with_invalid_pricing(rate: str) -> None:
+    env = _env(provider="anthropic", model="claude-x")
+    env["OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1"] = rate
+    with pytest.raises(ProviderModelSelectionError, match="invalid Anthropic pricing"):
+        client_for_role(_ROLE, env)
 
 
 def test_fail_closed_unknown_provider() -> None:

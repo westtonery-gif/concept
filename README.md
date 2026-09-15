@@ -139,10 +139,11 @@ by a live Anthropic model behind the application's `TaskExecutor` port:
 python demo.py
 ```
 
-A real model call needs `ANTHROPIC_API_KEY` in the environment (optionally
-`OMEMO_LLM_MODEL` to choose the model); without a key the demo explains how to
-set it and exits cleanly. No QA, Human Review, publication or external
-integrations are involved.
+A real model call needs `ANTHROPIC_API_KEY` plus explicit
+`OMEMO_LLM_INPUT_PRICE_PER_MILLION`, `OMEMO_LLM_OUTPUT_PRICE_PER_MILLION` and
+`OMEMO_LLM_PRICE_CURRENCY` values in the environment (optionally `OMEMO_LLM_MODEL` to choose the
+model); missing configuration is explained and the demo exits cleanly. No QA, Human Review,
+publication or external integrations are involved.
 
 ## Running the factory-role demo
 
@@ -156,10 +157,20 @@ one-off prompts. Unlike `demo.py`, each role resolves **its own** provider/model
 export ANTHROPIC_API_KEY=sk-ant-...
 export OMEMO_PROVIDER__CONTENT_RESEARCHER_V1=anthropic
 export OMEMO_MODEL__CONTENT_RESEARCHER_V1=claude-sonnet-4-6
+export OMEMO_INPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_OUTPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_PRICE_CURRENCY__CONTENT_RESEARCHER_V1=USD
 export OMEMO_PROVIDER__SCRIPT_WRITER_V1=anthropic
 export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
+export OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_OUTPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_PRICE_CURRENCY__SCRIPT_WRITER_V1=USD
 python demo_factory.py
 ```
+
+Replace the rate placeholders with the provider's current per-million-token prices. Pricing is
+explicit and per role; an Anthropic binding without both rates and a currency fails closed rather
+than recording a guessed cost (ADR-0029).
 
 The Run is saved after every step to `OMEMO_RUN_STORE_PATH` (default `.omemo/runs.sqlite3`,
 git-ignored; ADR-0026). Running the demo again **resumes** that Run instead of starting over: an

@@ -4,12 +4,13 @@ Realizes `ADR-0016` / `PROVIDER_MODEL_SPEC`. The **single public contract** is
 :func:`client_for_role` — ``role + environment -> ready LLMClient`` (SPEC §4.1) — behind the
 existing port (`ADR-0014`). Keyless is the **fake** provider; a missing or invalid binding **fails
 closed** — never a silent hardcoded model default (PROJECT §5, §10). Reuses ``AnthropicLLMClient`` /
-``FakeLLMClient``; the Composition Root and the ``LLMClient`` port are unchanged (the Root still
-*receives* the resolved client and gains no selection logic).
+``FakeLLMClient``; the Composition Root still *receives* the resolved client and gains no selection
+logic. ADR-0029's measured port result does not change selection ownership.
 
-The ``role -> (provider, model)`` binding, its env format, and the two-step load/resolve are
-**implementation details** (SPEC §1.2): provider granularity is per-role, values come from the
+The ``role -> (provider, model, pricing)`` binding, its env format, and the two-step load/resolve
+are **implementation details** (SPEC §1.2): provider granularity is per-role, values come from the
 environment, and API keys are never read here (the adapter's SDK obtains them; PROJECT §5, §6).
+Real-provider pricing is explicit and fail-closed (`ADR-0029`); no rate is hardcoded.
 Callers depend only on :func:`client_for_role` and :class:`ProviderModelSelectionError`.
 """
 
@@ -17,9 +18,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 
 from omemo_content_factory.infrastructure.fake_llm import FakeLLMClient
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, LLMClient
+from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, LLMClient, TokenPricing
 
 __all__ = ["ProviderModelSelectionError", "client_for_role"]
 
@@ -27,6 +29,9 @@ _PROVIDER_ANTHROPIC = "anthropic"
 _PROVIDER_FAKE = "fake"
 _ENV_PROVIDER_PREFIX = "OMEMO_PROVIDER__"
 _ENV_MODEL_PREFIX = "OMEMO_MODEL__"
+_ENV_INPUT_PRICE_PREFIX = "OMEMO_INPUT_PRICE_PER_MILLION__"
+_ENV_OUTPUT_PRICE_PREFIX = "OMEMO_OUTPUT_PRICE_PER_MILLION__"
+_ENV_PRICE_CURRENCY_PREFIX = "OMEMO_PRICE_CURRENCY__"
 
 
 class ProviderModelSelectionError(Exception):
@@ -50,10 +55,13 @@ def client_for_role(agent_ref: str, environ: Mapping[str, str]) -> LLMClient:
 
 @dataclass(frozen=True, slots=True)
 class _RoleBinding:
-    """Internal: the provider and model selected for one role (SPEC §3)."""
+    """Internal: provider/model and explicit pricing selected for one role (ADR-0029 §2)."""
 
     provider: str
     model: str = ""
+    input_price_per_million: str = ""
+    output_price_per_million: str = ""
+    price_currency: str = ""
 
 
 def _resolve_client(agent_ref: str, config: Mapping[str, _RoleBinding]) -> LLMClient:
@@ -68,7 +76,30 @@ def _resolve_client(agent_ref: str, config: Mapping[str, _RoleBinding]) -> LLMCl
             raise ProviderModelSelectionError(
                 f"role '{agent_ref}' selects provider 'anthropic' without a model"
             )
-        return AnthropicLLMClient(model=binding.model)
+        missing = [
+            name
+            for name, value in (
+                ("input price", binding.input_price_per_million),
+                ("output price", binding.output_price_per_million),
+                ("price currency", binding.price_currency),
+            )
+            if not value
+        ]
+        if missing:
+            raise ProviderModelSelectionError(
+                f"role '{agent_ref}' selects provider 'anthropic' without " + ", ".join(missing)
+            )
+        try:
+            pricing = TokenPricing(
+                input_per_million=Decimal(binding.input_price_per_million),
+                output_per_million=Decimal(binding.output_price_per_million),
+                currency=binding.price_currency,
+            )
+        except (InvalidOperation, ValueError) as exc:
+            raise ProviderModelSelectionError(
+                f"role '{agent_ref}' has invalid Anthropic pricing: {exc}"
+            ) from exc
+        return AnthropicLLMClient(model=binding.model, pricing=pricing)
     raise ProviderModelSelectionError(
         f"role '{agent_ref}' selects unknown provider '{binding.provider}'"
     )
@@ -95,5 +126,14 @@ def _load_config_from_env(
         if provider is None:
             continue
         model = environ.get(f"{_ENV_MODEL_PREFIX}{token}", "")
-        config[role] = _RoleBinding(provider=provider.strip().lower(), model=model.strip())
+        input_price = environ.get(f"{_ENV_INPUT_PRICE_PREFIX}{token}", "")
+        output_price = environ.get(f"{_ENV_OUTPUT_PRICE_PREFIX}{token}", "")
+        currency = environ.get(f"{_ENV_PRICE_CURRENCY_PREFIX}{token}", "")
+        config[role] = _RoleBinding(
+            provider=provider.strip().lower(),
+            model=model.strip(),
+            input_price_per_million=input_price.strip(),
+            output_price_per_million=output_price.strip(),
+            price_currency=currency.strip(),
+        )
     return config

@@ -6,7 +6,8 @@ compiler:
 
 - **constructs** the `agent_ref → TaskExecutor` mapping,
 - **injects** a Prompt into its executor **at construction time** (`Prompt.system → system_prompt`,
-  `Prompt.user_template → user_template`, `Prompt.schema_ref → schema_ref`),
+  `Prompt.user_template → user_template`, `Prompt.schema_ref → schema_ref`, and the exact
+  `<prompt_id>@v<version>` used for analytics),
 - **wraps** that executor with the role's statically configured input Skill invocations when
   ``Agent.skill_refs`` declares them (`ADR-0027`),
 - **builds** one scoped ``Toolbox`` from ``Agent.tool_refs`` and Tool instances whose outside
@@ -138,6 +139,7 @@ def build_executor_map(
             user_template=prompt.user_template,
             schema_ref=prompt.schema_ref,
             output_fields=schema.view.required_fields,
+            prompt_ref=f"{prompt.prompt_id}@v{prompt.version.value}",
             toolbox=Toolbox(grants=agent.tool_refs, available=tools),
         )
         configured = tuple(

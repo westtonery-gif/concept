@@ -6,6 +6,7 @@ import copy
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import cast
 
 import anthropic
@@ -19,11 +20,18 @@ from omemo_content_factory.composition import build_available_tools, build_execu
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.tool import ToolGrantError
 from omemo_content_factory.infrastructure.fake_llm import FakeLLMClient
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, LLMError, LLMTaskExecutor
+from omemo_content_factory.infrastructure.llm import (
+    AnthropicLLMClient,
+    LLMError,
+    LLMTaskExecutor,
+    TokenPricing,
+)
 from omemo_content_factory.tools.contract import Tool
 from omemo_content_factory.tools.current_date import CurrentDate
 from omemo_content_factory.tools.text_metrics import TextMetrics
 from omemo_content_factory.tools.toolbox import Toolbox
+
+_PRICING = TokenPricing(Decimal("3"), Decimal("15"), "USD")
 
 
 class _ScriptedMessages:
@@ -73,6 +81,7 @@ def _client(
     scripted = _ScriptedAnthropic(responses)
     client = AnthropicLLMClient(
         model="configured-model",
+        pricing=_PRICING,
         max_tool_calls=max_tool_calls,
         client=cast(anthropic.Anthropic, scripted),
     )
@@ -113,7 +122,7 @@ def test_ltl_01_current_date_runs_mid_reasoning_and_result_reaches_next_turn() -
         toolbox=_current_date_toolbox(clock),
     )
 
-    assert result == {"audience": "A", "angle": "B"}
+    assert result.fields == {"audience": "A", "angle": "B"}
     assert clock_calls == [None]
     assert len(endpoint.calls) == 2
     payload, is_error = _tool_result_payload(endpoint)
@@ -161,7 +170,7 @@ def test_ltl_03_unknown_call_is_refused_and_returned_to_model() -> None:
     )
 
     payload, is_error = _tool_result_payload(endpoint)
-    assert result == {"text": "recovered"}
+    assert result.fields == {"text": "recovered"}
     assert payload["status"] == "refused"
     assert "not granted" in cast(str, payload["error"])
     assert is_error is True
@@ -182,7 +191,7 @@ def test_ltl_04_tool_failure_is_returned_and_model_can_finish() -> None:
     )
 
     payload, is_error = _tool_result_payload(endpoint)
-    assert result == {"text": "fallback"}
+    assert result.fields == {"text": "fallback"}
     assert payload["status"] == "failed"
     assert "naive datetime" in cast(str, payload["error"])
     assert is_error is True
@@ -205,6 +214,7 @@ def test_ltl_05_over_budget_batch_runs_no_tool_and_executor_fails_managed() -> N
         user_template="{input}",
         schema_ref="x@1",
         output_fields=("text",),
+        prompt_ref="test@v1",
         toolbox=_current_date_toolbox(clock),
     )
 
@@ -237,7 +247,7 @@ def test_ltl_07_empty_toolbox_keeps_single_forced_structured_call() -> None:
         system="s", user="u", fields=("x",), toolbox=Toolbox(grants=(), available=())
     )
 
-    assert result == {"x": "y"}
+    assert result.fields == {"x": "y"}
     assert len(endpoint.calls) == 1
     assert endpoint.calls[0]["tool_choice"] == {"type": "tool", "name": "emit_fields"}
 
@@ -274,4 +284,4 @@ def test_ltl_08_composition_builds_each_agent_scoped_toolbox_and_rejects_bad_gra
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, "2"])
 def test_ltl_call_budget_must_be_a_positive_integer(value: object) -> None:
     with pytest.raises(ValueError, match="max_tool_calls"):
-        AnthropicLLMClient(model="configured", max_tool_calls=cast(int, value))
+        AnthropicLLMClient(model="configured", pricing=_PRICING, max_tool_calls=cast(int, value))

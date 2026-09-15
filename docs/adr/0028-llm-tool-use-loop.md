@@ -6,6 +6,10 @@
 - **Amends:** ADR-0014 (`LLMClient` is no longer a single provider round-trip)
 - **Realises:** ADR-0022 §Deferred (reasoning loop and Composition Root Toolbox wiring)
 
+> **Amended by ADR-0029 (2026-09-15).** `complete` now returns structured fields together with one
+> measurement for every completed provider turn. The Tool authorization, loop and budget decisions
+> in this ADR are unchanged.
+
 ## Context
 
 ADR-0014 made `LLMClient.complete(system, user, fields)` a uniformly structured, single-call port.
@@ -82,8 +86,9 @@ model decides whether the brief needs the date. Leo keeps an empty grant. A dete
 test proves the sequence `provider asks for current_date → clock-backed Tool runs through Toolbox →
 provider receives the result → emit_fields produces the final structured mapping`.
 
-Tool calls are not yet persisted in Run analytics or trace. That remains the metrics-capture
-subtask immediately following this one; this slice changes no Run, Task, Output or Artifact API.
+Tool-call payloads are not persisted in the Run trace. ADR-0029, the metrics-capture subtask that
+followed this one, records each completed provider turn around the loop without storing Tool
+arguments/results; this slice itself changed no Run, Task, Output or Artifact API.
 
 ## Consequences
 

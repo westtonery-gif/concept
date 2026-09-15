@@ -4,7 +4,8 @@
 > при неверной реализации соответствующий тест падает. Идентификаторы используются в докстрингах
 > тестов (`tests/test_analytics_record.py`).
 >
-> **Статус:** Accepted. **Дата:** 2026-09-15.
+> **Версия:** 1.1. **Статус:** Accepted. **Дата:** 2026-09-15.
+> Версия 1.1 добавляет приёмку сбора по `ADR-0029`.
 
 ---
 
@@ -49,7 +50,21 @@
 |---|---|---|
 | ADE-01 | `AnalyticsDomainError` | прямой наследник `DomainError` (`tests/test_domain_error.py`) |
 
-## 5. Что приёмка НЕ проверяет
+## 5. Сбор метрик (MTC, версия 1.1)
 
-Сбор метрик при каждом реальном вызове (инвариант «вызов без записи не сделан» — Этап 14);
-агрегаты, хранилище и Analytics Agent; повторы на стороне поставщика; исход вызова.
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| MTC-01 | Одно успешное обращение к Anthropic | результат содержит поля и одно измерение с `provider=anthropic`, фактической `Message.model`, usage ответа, exact cost и aware time range |
+| MTC-02 | Tool-use loop из нескольких provider-turn | usage не схлопывается: одно измерение на каждый ответ, в исходном порядке |
+| MTC-03 | Явный тариф | стоимость каждого turn равна формуле из двух `Decimal`-ставок за миллион; отрицательный/float/пустая валюта отвергаются |
+| MTC-04 | Provider/model binding Anthropic без полного тарифа | `ProviderModelSelectionError` до возврата клиента; хардкода/нулевого fallback нет |
+| MTC-05 | Composition Root собирает executor | инъецирует `prompt_ref=<prompt_id>@v<version>` без lookup в runtime |
+| MTC-06 | Успешный `finish_task` | каждое измерение записано через Run до `SUCCEEDED`; Output/Artifact-путь не меняется |
+| MTC-07 | Управляемая ошибка после завершённого provider-turn | измерения завершённых turn записаны, Task становится `FAILED`; turn без provider-response не фабрикуется |
+| MTC-08 | Повтор Task | запись нового вызова получает `retries == attempt_count - 1`; предыдущие записи неизменны |
+| MTC-09 | Fake provider | один результат с собственным provider/model, 0/0 tokens, exact zero cost и измеренным aware time range |
+
+## 6. Что приёмка НЕ проверяет
+
+Агрегаты/отчёты, экспорт в Analytics Sink и Analytics Agent; повторы на стороне поставщика;
+исход вызова; метрика запроса без provider-response; провайдерские категории биллинга кэша.

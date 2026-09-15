@@ -19,6 +19,7 @@ from omemo_content_factory.composition import (
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.task import TaskStatus
+from omemo_content_factory.infrastructure.llm import LLMCompletion
 from omemo_content_factory.tools.toolbox import Toolbox
 
 
@@ -55,9 +56,9 @@ class RecordingClient:
 
     def complete(
         self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
-    ) -> dict[str, str]:
+    ) -> LLMCompletion:
         self.calls.append((system, user, tuple(fields)))
-        return {name: "ok" for name in fields}
+        return LLMCompletion({name: "ok" for name in fields}, ())
 
 
 def test_sci_03_invocations_run_in_order_and_delegate_result_is_unchanged() -> None:

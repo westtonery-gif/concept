@@ -14,6 +14,8 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -21,8 +23,33 @@ from omemo_content_factory.application.content_director import ContentDirector, 
 from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskStatus
-from omemo_content_factory.infrastructure.llm import LLMError, LLMTaskExecutor
+from omemo_content_factory.infrastructure.llm import (
+    LLMCallMetrics,
+    LLMCompletion,
+    LLMError,
+    LLMTaskExecutor,
+)
 from omemo_content_factory.tools.toolbox import Toolbox
+
+_NOW = datetime(2026, 9, 15, tzinfo=UTC)
+
+
+def _completion(fields: dict[str, str]) -> LLMCompletion:
+    return LLMCompletion(
+        fields,
+        (
+            LLMCallMetrics(
+                provider="test",
+                model="test-model",
+                input_tokens=1,
+                output_tokens=2,
+                cost_amount=Decimal("0.000003"),
+                cost_currency="USD",
+                started_at=_NOW,
+                finished_at=_NOW,
+            ),
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +60,8 @@ class EchoLLMClient:
 
     def complete(
         self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
-    ) -> dict[str, str]:
-        return {name: f"{self.tag}:{user}" for name in fields}
+    ) -> LLMCompletion:
+        return _completion({name: f"{self.tag}:{user}" for name in fields})
 
 
 @dataclass
@@ -46,9 +73,9 @@ class RecordingLLMClient:
 
     def complete(
         self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
-    ) -> dict[str, str]:
+    ) -> LLMCompletion:
         self.calls.append((system, user, tuple(fields)))
-        return {name: self.reply for name in fields}
+        return _completion({name: self.reply for name in fields})
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +84,7 @@ class FailingLLMClient:
 
     def complete(
         self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
-    ) -> dict[str, str]:
+    ) -> LLMCompletion:
         raise LLMError("rate limited")
 
 
@@ -78,6 +105,7 @@ def test_successful_completion_becomes_a_structured_execution_result() -> None:
         user_template="{input}",
         schema_ref="draft@v1",
         output_fields=("facts",),
+        prompt_ref="writer@v1",
     )
     result = executor.execute("the brief")
     assert result.succeeded is True
@@ -97,6 +125,7 @@ def test_executor_renders_template_and_forwards_system_and_shape() -> None:
         user_template="brief: {input}",
         schema_ref="draft@v1",
         output_fields=("facts", "sources"),
+        prompt_ref="writer@v1",
     )
     result = executor.execute("research notes")
     assert client.calls == [("you are a writer", "brief: research notes", ("facts", "sources"))]
@@ -111,6 +140,7 @@ def test_model_failure_becomes_a_managed_failed_result() -> None:
         user_template="{input}",
         schema_ref="draft@v1",
         output_fields=("facts",),
+        prompt_ref="writer@v1",
     )
     result = executor.execute("the brief")
     assert result.succeeded is False
@@ -129,6 +159,7 @@ def test_executor_requires_a_non_empty_generation_shape() -> None:
             user_template="{input}",
             schema_ref="draft@v1",
             output_fields=(),
+            prompt_ref="writer@v1",
         )
 
 
@@ -146,6 +177,7 @@ def test_three_role_pipeline_records_validated_output_through_the_root() -> None
             user_template="{input}",
             schema_ref="notes@v1",
             output_fields=("text",),
+            prompt_ref="research@v1",
         ),
         "writer@v1": LLMTaskExecutor(
             client=EchoLLMClient("write"),
@@ -153,6 +185,7 @@ def test_three_role_pipeline_records_validated_output_through_the_root() -> None
             user_template="{input}",
             schema_ref="draft@v1",
             output_fields=("text",),
+            prompt_ref="writer@v1",
         ),
         "editor@v1": LLMTaskExecutor(
             client=EchoLLMClient("edit"),
@@ -160,6 +193,7 @@ def test_three_role_pipeline_records_validated_output_through_the_root() -> None
             user_template="{input}",
             schema_ref="final@v1",
             output_fields=("text",),
+            prompt_ref="editor@v1",
         ),
     }
     schemas = {

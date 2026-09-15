@@ -17,10 +17,10 @@ There is no shared/default model here: a role with no ``OMEMO_PROVIDER__<ROLE>``
 closed (`ProviderModelSelectionError`), matching this repo's earlier ad-hoc demos never having a
 silent hardcoded fallback either.
 
-Run with: ``python demo_factory.py``. Needs ``ANTHROPIC_API_KEY`` plus a per-role
-``OMEMO_PROVIDER__<ROLE>`` / ``OMEMO_MODEL__<ROLE>`` binding for each of Rin and Leo (see the
-printed instructions, or README.md); missing either, the demo explains what to set and exits
-cleanly. No QA, Human Review, publication or external integrations are involved.
+Run with: ``python demo_factory.py``. Needs ``ANTHROPIC_API_KEY`` plus a per-role provider/model
+binding and exact input/output token prices + currency for each of Rin and Leo (see the printed
+instructions, or README.md); missing values make the demo explain what to set and exit cleanly.
+No QA, Human Review, publication or external integrations are involved.
 
 The Run is saved after every step to the Run store (`ADR-0026`; ``OMEMO_RUN_STORE_PATH``, default
 ``.omemo/runs.sqlite3``). Running the demo again resumes the stored Run instead of starting over:
@@ -90,11 +90,18 @@ def _env_token(agent_ref: str) -> str:
 
 
 def _print_binding_instructions() -> None:
-    """Print the exact ``OMEMO_PROVIDER__*`` / ``OMEMO_MODEL__*`` exports each role still needs."""
+    """Print every per-role provider/model/pricing variable needed for a real client."""
     for agent in AGENTS:
         token = _env_token(agent.agent_id)
         safe_print(f"  export OMEMO_PROVIDER__{token}=anthropic")
         safe_print(f"  export OMEMO_MODEL__{token}=claude-sonnet-4-6")
+        safe_print(
+            f"  export OMEMO_INPUT_PRICE_PER_MILLION__{token}=REPLACE_WITH_CURRENT_DECIMAL_RATE"
+        )
+        safe_print(
+            f"  export OMEMO_OUTPUT_PRICE_PER_MILLION__{token}=REPLACE_WITH_CURRENT_DECIMAL_RATE"
+        )
+        safe_print(f"  export OMEMO_PRICE_CURRENCY__{token}=USD")
 
 
 def _build_executors() -> dict[str, TaskExecutor]:
@@ -133,7 +140,7 @@ def main() -> None:
         executors = _build_executors()
     except ProviderModelSelectionError as exc:
         safe_print(f"Provider/model selection failed: {exc}")
-        safe_print("Each role needs its own binding (ADR-0016) — no shared/default model. Set:")
+        safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")
         _print_binding_instructions()
         return
 

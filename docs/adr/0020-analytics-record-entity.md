@@ -4,6 +4,10 @@
 - **Date:** 2026-09-15
 - **Deciders:** Lead Architect / Domain Architect
 
+> **Amended by ADR-0029 (2026-09-15).** ROADMAP Stage 7's explicit metrics Definition of Done
+> brings the deferred port change, explicit pricing and `finish_task` capture forward from Stage
+> 14. The domain entity and its invariants in this ADR are unchanged.
+
 ## Context
 
 `Analytics Record` is the immutable record of the metrics of **one agent call** — model, input and

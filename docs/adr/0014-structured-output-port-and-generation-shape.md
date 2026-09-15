@@ -7,6 +7,9 @@
 > **Amended by ADR-0028 (2026-09-15).** The port still returns the same opaque structured mapping,
 > but one `complete` call may now contain a bounded multi-turn Tool loop and receives a scoped
 > `Toolbox`. The Schema/field invariants in this ADR are unchanged.
+>
+> **Amended by ADR-0029 (2026-09-15).** The mapping now travels inside `LLMCompletion` together
+> with provider-neutral per-turn measurements. Structure opacity and Schema authority are unchanged.
 
 ## Context
 

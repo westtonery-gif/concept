@@ -25,7 +25,7 @@ from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
-from omemo_content_factory.infrastructure.llm import LLMTaskExecutor
+from omemo_content_factory.infrastructure.llm import LLMCompletion, LLMTaskExecutor
 from omemo_content_factory.tools.toolbox import Toolbox
 
 
@@ -37,9 +37,9 @@ class _FakeClient:
 
     def complete(
         self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
-    ) -> dict[str, str]:
+    ) -> LLMCompletion:
         self.calls += 1
-        return {name: f"out:{user}" for name in fields}
+        return LLMCompletion({name: f"out:{user}" for name in fields}, ())
 
 
 def _prompt(prompt_id: str = "p1", version: int = 1) -> Prompt:
@@ -78,6 +78,7 @@ def test_build_maps_agent_ref_to_executor_with_injected_prompt_and_shape() -> No
     assert executor.user_template == "Brief: {input}"  # Prompt.user_template injected (ADR-0014)
     assert executor.schema_ref == "p1@1"  # Prompt.schema_ref injected at construction
     assert executor.output_fields == ("facts",)  # generation shape projected from Schema
+    assert executor.prompt_ref == "p1@v1"  # exact Prompt version injected for analytics
 
 
 def test_build_does_not_execute_or_call_model() -> None:

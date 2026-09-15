@@ -15,15 +15,16 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 28 ADRs (0001–0028) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 29 ADRs (0001–0029) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
   Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
-  (0027), and the bounded LLM Tool-use loop (0028) are all implemented and tested. All gates green:
-  ruff, ruff format, mypy --strict, pytest (745 passed, 0 skipped).
+  (0027), the bounded LLM Tool-use loop (0028), and per-call metrics capture + explicit pricing
+  (0029) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest
+  (761 passed, 0 skipped).
 - **Storage is wired (ROADMAP Stage 7.1, ADR-0026).** `ContentDirector(..., store=RunStore)` saves
   the Run after every **orchestration step**, not every aggregate call: a Task start is committed
   *before* its executor is called, the executor's answer together with its Output + Artifact, the
@@ -65,7 +66,7 @@ the source of truth — code must never contradict them; on conflict, the docs w
   `tests/test_sqlite_run_store.py` (STO), shared builders in `tests/restorable_runs.py`.
 - **Adapter Layer contracts exist (ROADMAP Stage 6a, ADR-0023, `ADAPTER_SPEC.md`)**: the LLM
   Adapter is recognised as already done (`LLMClient`/`AnthropicLLMClient`/`FakeLLMClient`/
-  `client_for_role`, unchanged, stays in `infrastructure/llm.py`). The other four are `Protocol`s in
+  `client_for_role`, still in `infrastructure/`). The other four are `Protocol`s in
   the new contracts-only package **`adapters/`** (imports: pure stdlib + `domain.*`), named by role,
   not vendor: `RunStore` (Storage: `save(run)`/`load(run_id) -> Run | None`), `BriefBoard` (Notion:
   `fetch_brief -> IncomingBrief | None`, `report_status`), `ReviewDesk` (Google Docs:
@@ -92,7 +93,8 @@ the source of truth — code must never contradict them; on conflict, the docs w
   `ToolResult` back, and finishes through its private structured-output Tool. The Root builds one
   Toolbox per Agent and injects the date Tool's aware local clock. The default limit is 8
   operational calls per Task step; an over-budget batch runs nothing and becomes a managed LLM
-  failure. Tool-call trace/analytics remain deferred to the metrics slice.
+  failure. ADR-0029 now records every completed provider turn around the loop; Tool arguments and
+  results themselves remain transient.
 - **Skills library exists and has its first consumer (ROADMAP Stage 4 + Stage 7.2, ADR-0021/0027,
   `SKILL_SPEC.md`)**: passive
   `SkillDescriptor` in `domain/skill.py` (like `Agent`), executable `Skill[In, Out]` Protocol in
@@ -105,13 +107,16 @@ the source of truth — code must never contradict them; on conflict, the docs w
   `SkillPreprocessingTaskExecutor`. The Task retains the original input, retry re-applies the pure
   Skill, and the Composition Root requires invocation refs to exactly match the Agent declaration
   before execution. The `Deprecated` status and a persisted per-invocation trace remain deferred.
-- **Analytics Record exists as a domain entity only** (ADR-0020, `domain/analytics.py`,
-  `ANALYTICS_RECORD_SPEC.md`): `Run.record_analytics(task_id, …)` appends an immutable per-call
-  record (provider/model, `TokenUsage`, `Cost` as `Decimal`, timezone-aware `TimeRange`);
-  `run_id`/`task_id`/`agent_ref`/`retries` are derived from the Task, never passed in. **Nothing
-  produces records yet** — the LLM port reports no usage/latency, so "no call without a record"
-  (PROJECT §16) is documented but not enforced until ROADMAP Stage 14 (port change + pricing
-  config + `execute_task` wiring, ADR-0020 "Deferred").
+- **LLM metrics capture is wired** (ROADMAP Stage 7.4, ADR-0029; amends ADR-0020's deferral).
+  `LLMClient.complete` returns opaque fields plus one provider-neutral measurement per completed
+  provider turn; Anthropic uses response-reported actual model/tokens, an injected aware clock and
+  explicit per-role `Decimal` rates, while Fake truthfully reports zero inference tokens/cost.
+  Tool loops retain every turn in order and managed failures retain already completed turns.
+  `LLMTaskExecutor` attaches `<prompt_id>@v<version>` and `finish_task` records each measurement via
+  `Run.record_analytics` before Task finalization, so Run derives `run_id`/`task_id`/`agent_ref` and
+  retries. An Anthropic binding without valid input/output prices + currency fails closed; no tariff
+  is hardcoded or guessed. Aggregation/export, provider-side retries, failed requests without a
+  provider response, and Tool payload tracing remain deferred.
 - **QA gate is fail closed** (ADR-0018, `domain/evaluation.py`, `EVALUATION_SPEC.md`): an
   Artifact reaches `APPROVED` only with an approving Human Review **and** a `PASSED` *latest*
   Evaluation — no/pending/`FLAGGED`/`FAILED` QA blocks it even after a human Approve.
@@ -137,11 +142,11 @@ the source of truth — code must never contradict them; on conflict, the docs w
   Orchestrating rework (ContentDirector routing a risk verdict into a re-run) is still open —
   ADR-0019 "Deferred", ROADMAP Stage 7/8.
 - **`client_for_role` is wired into `demo_factory.py`** (ADR-0016 realization,
-  `infrastructure/provider_model.py`): each role resolves its own provider/model via
-  `OMEMO_PROVIDER__<ROLE>` / `OMEMO_MODEL__<ROLE>`, no shared/default client — a role with no
-  binding fails closed (`ProviderModelSelectionError`), and the demo prints the exact exports
-  still needed. `demo.py` predates the Rin/Leo migration and is untouched (out of scope, no
-  catalogued Agent/Prompt/Schema to key a binding on).
+  `infrastructure/provider_model.py`): each role resolves its own provider/model plus explicit token
+  prices/currency, with no shared/default client — an incomplete binding fails closed
+  (`ProviderModelSelectionError`), and the demo prints the exact variables still needed.
+  `demo.py` remains the older non-catalogued entrypoint but now also requires explicit global
+  pricing so it cannot record a guessed cost.
 
 ## Session workflow (push straight to main — no branch/PR ceremony needed)
 
@@ -234,11 +239,12 @@ process at the time, not a pattern to keep copying.)
       loop: `LLMClient.complete(..., toolbox=)`, bounded Anthropic multi-turn translation,
       `ToolCall → Toolbox → ToolResult` round-trip, private `emit_fields` finalization, Root-built
       per-Agent Toolboxes; Rin is granted `current_date@v1`, proven mid-reasoning by `LTL`).
-   4. **Metrics capture — now, not Stage 14.** Decided 2026-09-15: Stage 7's own DoD requires
-      "prompt version and metrics (model, tokens, cost, latency, retries) are recorded" — that
-      overrides ADR-0020's "Deferred to Stage 14" framing; capture it here. LLM adapter starts
-      reporting usage/latency, `execute_task` calls `Run.record_analytics` on every real call.
-      Needs a new ADR that supersedes/amends ADR-0020 §"Deferred", not a silent contradiction.
+   4. ~~**Metrics capture — now, not Stage 14**~~ — done (ADR-0029 amends ADR-0020/0014/0028:
+      `LLMCompletion` carries one measured record per completed provider turn; Tool loops and
+      managed failures retain all observed turns; `TokenPricing` uses explicit exact per-role rates;
+      the Root injects `<prompt_id>@v<version>`; `finish_task` records through Run before Task
+      finalization. `ANALYTICS_RECORD_SPEC` / acceptance and `PROVIDER_MODEL_SPEC` / acceptance are
+      1.1; tests `MTC`).
    5. **Prompt stored separately from code** — move Rin/Leo's system/user templates out of
       `agents/*.py` into a separate, versioned store (files or a registry) the Composition Root
       reads, instead of Python string literals.

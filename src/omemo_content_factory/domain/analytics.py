@@ -13,8 +13,9 @@ reads the clock or computes a price: both are measured outside and passed in (AD
 This module depends only on stdlib and ``domain.errors``; its references (``run_id``, ``task_id``,
 ``agent_ref``) are opaque ``str`` (ADR-0003 §3), avoiding any import cycle.
 
-Scope note (ADR-0020): capturing a record on every real call (the LLM port does not report usage
-yet), aggregation, the Analytics Adapter/Agent, the call outcome and retention are deferred.
+Scope note: ADR-0029 now captures every completed LLM provider turn through this entity.
+Aggregation, Analytics Adapter/Agent export, provider-side retries, call outcome and retention
+remain deferred.
 """
 
 from __future__ import annotations

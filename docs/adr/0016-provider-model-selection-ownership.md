@@ -3,6 +3,9 @@
 - **Status:** Accepted (lightweight additive realization; no new entity, no new contract, no new principle)
 - **Date:** 2026-07-12
 - **Deciders:** Lead Architect / Domain Architect
+
+> **Amended by ADR-0029 (2026-09-15).** A ready real-provider client now also requires explicit
+> per-role token pricing. Provider/model selection ownership remains unchanged.
 - **Type:** Light Capability — first realization of an already-mandated principle. No architecture change.
 
 > Governance basis: this decision realizes a capability that `config.py` and the ROADMAP
