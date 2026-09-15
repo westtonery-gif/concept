@@ -194,6 +194,7 @@ omemo-content-factory/
 │       ├── py.typed            # PEP 561 typed marker
 │       ├── domain/             # Domain core: Run, Task, Output, Artifact, Human Review, Evaluation
 │       ├── skills/             # Skills library: Skill contract + deterministic one-task Skills
+│       ├── tools/              # Tool Layer: Tool contract + per-agent Toolbox + model-invoked Tools
 │       ├── application/        # ContentDirector + task execution + QA evaluation
 │       └── infrastructure/     # LLM-backed task executor
 ├── demo.py                     # End-to-end demo of the domain via ContentDirector

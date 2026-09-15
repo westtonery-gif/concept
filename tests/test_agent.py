@@ -39,9 +39,16 @@ def test_agent_links_agent_ref_to_prompt_ref() -> None:
     assert agent.description == ""  # optional, non-execution metadata
 
 
+def test_agt_t1_agent_is_granted_no_tools_by_default() -> None:
+    # ADR-0022 §4: the grant fails closed — a role reaches no Tool unless it lists it.
+    assert _agent().tool_refs == ()
+    granted = Agent(agent_id="w@v1", name="W", prompt_ref="p", tool_refs=("text_metrics@v1",))
+    assert granted.tool_refs == ("text_metrics@v1",)
+
+
 def test_agent_is_immutable() -> None:
     agent = _agent()
-    for field in ("agent_id", "name", "prompt_ref", "description"):
+    for field in ("agent_id", "name", "prompt_ref", "description", "tool_refs"):
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(agent, field, "x")
 

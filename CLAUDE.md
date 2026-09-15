@@ -15,13 +15,25 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 21 ADRs (0001–0021) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 22 ADRs (0001–0022) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
-  (0020), Skills library (0021) are all implemented and tested. All gates green: ruff, ruff
-  format, mypy --strict, pytest (481 passed, 0 skipped).
+  (0020), Skills library (0021), Tool Layer (0022) are all implemented and tested. All gates
+  green: ruff, ruff format, mypy --strict, pytest (578 passed, 0 skipped).
+- **Tool Layer exists (ROADMAP Stage 5, ADR-0022, `TOOL_SPEC.md`)**: passive `ToolDescriptor`
+  in `domain/tool.py` (unlike a Skill it carries its declared `ToolParameter`s — the model and the
+  Toolbox both read them); executable `Tool` Protocol in `tools/contract.py` (`descriptor` +
+  `invoke(arguments, /)`), `ToolCall`/`ToolResult` (`OK`/`REFUSED`/`FAILED`); **`tools/toolbox.py`**
+  scopes one agent to its grant — `Toolbox(grants=agent.tool_refs, available=…)`: an ungranted
+  name or ill-formed arguments → `REFUSED` and the Tool never runs, `ToolExecutionError` →
+  `FAILED`, a bad grant → `ToolGrantError` at construction. Two Tools: `current_date@v1` (clock
+  **injected**, never read from the system) and `text_metrics@v1`. `Agent.tool_refs` (default `()`
+  = no Tools) is the grant. `tests/test_tool_contract.py` scans `tools/` imports: pure stdlib +
+  `domain.tool` only (no `skills` — Skills may depend on Tools — no SDK/clock/agents/Run).
+  **No agent has a grant yet and there is no tool-use loop**: the LLM port is still single-shot
+  structured output; the loop + Toolbox wiring arrive with Stage 7 (ADR-0022 "Deferred").
 - **Skills library exists (ROADMAP Stage 4, ADR-0021, `SKILL_SPEC.md`)**: passive
   `SkillDescriptor` in `domain/skill.py` (like `Agent`), executable `Skill[In, Out]` Protocol in
   `skills/contract.py` (`descriptor` + pure `apply(input, /)`), three deterministic Skills —
@@ -114,9 +126,10 @@ process at the time, not a pattern to keep copying.)
    1. ~~**Skills library** (Stage 4)~~ — done (ADR-0021, `domain/skill.py` + `skills/`,
       `SKILL_SPEC.md` / `SKILL_ACCEPTANCE.md`, `tests/test_skill_*.py`). Thesis extraction was
       deliberately not taken: done well it is LLM work (a role), not a deterministic Skill.
-   2. **Tool Layer** (Stage 5) — contract `Tool` (≠ Skill: invoked by an agent mid-reasoning,
-      never manages the pipeline), a mechanism that scopes an agent to only its configured
-      Tools, a couple of Tools needing no external service. ADR + code + tests.
+   2. ~~**Tool Layer** (Stage 5)~~ — done (ADR-0022, `domain/tool.py` + `tools/` incl.
+      `toolbox.py`, `Agent.tool_refs`, `TOOL_SPEC.md` / `TOOL_ACCEPTANCE.md`,
+      `tests/test_tool*.py` + `tests/test_toolbox.py`). The tool-use loop in the LLM adapter was
+      deliberately not built: it changes the ADR-0014 port and has no consumer before Stage 7.
    3. **Adapter contracts** (Stage 6a) — record that the **LLM Adapter is already done**
       (`LLMClient`/`AnthropicLLMClient`/`client_for_role`, ADR-0014/0016 — it already satisfies
       Stage 6's LLM Adapter DoD, just not labeled as such) and design the internal contracts for

@@ -31,6 +31,7 @@ from omemo_content_factory.domain.run import (
 from omemo_content_factory.domain.schema import SchemaDomainError
 from omemo_content_factory.domain.skill import SkillDomainError
 from omemo_content_factory.domain.task import TaskDomainError
+from omemo_content_factory.domain.tool import ToolDomainError
 from omemo_content_factory.domain.workflow import (
     EmptyWorkflowError,
     Workflow,
@@ -38,6 +39,7 @@ from omemo_content_factory.domain.workflow import (
 )
 from omemo_content_factory.infrastructure.llm import LLMError
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
+from omemo_content_factory.tools.contract import ToolExecutionError
 
 
 def _domain_exception_classes() -> list[type[BaseException]]:
@@ -67,6 +69,7 @@ def test_domain_error_is_a_plain_exception() -> None:
         EvaluationDomainError,  # EDE-01 (ADR-0018)
         AnalyticsDomainError,  # ADE-01 (ADR-0020)
         SkillDomainError,  # SDE-01 (ADR-0021)
+        ToolDomainError,  # TDE-01 (ADR-0022)
         SchemaDomainError,
         WorkflowDomainError,
     ],
@@ -83,7 +86,10 @@ def test_every_error_defined_in_the_domain_layer_is_a_domain_error() -> None:
     assert offenders == []
 
 
-@pytest.mark.parametrize("technical", [LLMError, CompositionError, ProviderModelSelectionError])
+@pytest.mark.parametrize(
+    "technical",
+    [LLMError, CompositionError, ProviderModelSelectionError, ToolExecutionError],  # + TDE-01
+)
 def test_technical_failures_are_not_domain_errors(technical: type[Exception]) -> None:
     assert not issubclass(technical, DomainError)
 
