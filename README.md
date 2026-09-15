@@ -142,6 +142,19 @@ A real model call needs `ANTHROPIC_API_KEY` in the environment (optionally
 set it and exits cleanly. No QA, Human Review, publication or external
 integrations are involved.
 
+## Running the factory-role demo
+
+`demo_factory.py` runs the same kind of end-to-end Workflow, but through the **actual catalogued
+production roles** migrated from Main Core (ADR-0016) — Rin (`content_researcher@v1`) then Leo
+(`script_writer@v1`) — assembled by the real Composition Root (`compile_runtime`) instead of
+`demo.py`'s hand-written one-off prompts:
+
+```bash
+python demo_factory.py
+```
+
+Same `ANTHROPIC_API_KEY` / `OMEMO_LLM_MODEL` requirements as `demo.py`.
+
 ## Project layout
 
 ```
@@ -173,6 +186,7 @@ omemo-content-factory/
 │       ├── application/        # ContentDirector + task execution
 │       └── infrastructure/     # LLM-backed task executor
 ├── demo.py                     # End-to-end demo of the domain via ContentDirector
+├── demo_factory.py             # Same, but through the real catalogued Rin -> Leo roles
 └── tests/                      # pytest suite
 ```
 
