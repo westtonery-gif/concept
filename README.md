@@ -1,4 +1,4 @@
-# OMEMO Content Factory
+# Concept Content Factory
 
 Industrial multi-agent content production system for **OMEMO Health** — a
 managed, reproducible, human-in-the-loop pipeline for producing content.
