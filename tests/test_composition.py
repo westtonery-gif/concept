@@ -26,6 +26,7 @@ from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVers
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
 from omemo_content_factory.infrastructure.llm import LLMTaskExecutor
+from omemo_content_factory.tools.toolbox import Toolbox
 
 
 class _FakeClient:
@@ -34,7 +35,9 @@ class _FakeClient:
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> dict[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
+    ) -> dict[str, str]:
         self.calls += 1
         return {name: f"out:{user}" for name in fields}
 

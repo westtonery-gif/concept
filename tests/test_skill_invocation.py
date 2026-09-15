@@ -19,6 +19,7 @@ from omemo_content_factory.composition import (
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.task import TaskStatus
+from omemo_content_factory.tools.toolbox import Toolbox
 
 
 @dataclass
@@ -52,7 +53,9 @@ class RecordingClient:
 
     calls: list[tuple[str, str, tuple[str, ...]]] = field(default_factory=list)
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> dict[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
+    ) -> dict[str, str]:
         self.calls.append((system, user, tuple(fields)))
         return {name: "ok" for name in fields}
 

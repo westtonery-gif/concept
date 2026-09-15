@@ -13,7 +13,9 @@ separate, later concern outside this Pattern-Application slice.
 
 The module exposes the three catalogues keyed as the Composition Root expects
 (``agent.prompt_ref -> Prompt``, ``prompt.schema_ref -> Schema``) so a caller wires Rin without
-restating any ref string, exactly like ``script_writer``.
+restating any ref string, exactly like ``script_writer``. Rin is granted ``current_date@v1`` so
+the model can resolve relative dates during reasoning; the Composition Root supplies its clock
+(``ADR-0028``).
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.skills.normalize_terminology import TermMapping
+from omemo_content_factory.tools.current_date import DESCRIPTOR as CURRENT_DATE_DESCRIPTOR
 
 # --- reference strings (opaque handles used across the Composition Root) ------------------
 
@@ -77,6 +80,7 @@ CONTENT_RESEARCHER_AGENT = Agent(
     prompt_ref=PROMPT_REF,
     description="Turns a brief into minimal content research (target audience, content angle).",
     skill_refs=tuple(invocation.skill_ref for invocation in CONTENT_RESEARCHER_SKILL_INVOCATIONS),
+    tool_refs=(CURRENT_DATE_DESCRIPTOR.ref,),
 )
 
 

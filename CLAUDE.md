@@ -15,15 +15,15 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 27 ADRs (0001–0027) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 28 ADRs (0001–0028) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
-  Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), and the first Skill
-  consumer (0027) are all implemented and tested. All gates green: ruff, ruff format, mypy
-  --strict, pytest (732 passed, 0 skipped).
+  Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), the first Skill consumer
+  (0027), and the bounded LLM Tool-use loop (0028) are all implemented and tested. All gates green:
+  ruff, ruff format, mypy --strict, pytest (745 passed, 0 skipped).
 - **Storage is wired (ROADMAP Stage 7.1, ADR-0026).** `ContentDirector(..., store=RunStore)` saves
   the Run after every **orchestration step**, not every aggregate call: a Task start is committed
   *before* its executor is called, the executor's answer together with its Output + Artifact, the
@@ -86,8 +86,13 @@ the source of truth — code must never contradict them; on conflict, the docs w
   **injected**, never read from the system) and `text_metrics@v1`. `Agent.tool_refs` (default `()`
   = no Tools) is the grant. `tests/test_tool_contract.py` scans `tools/` imports: pure stdlib +
   `domain.tool` only (no `skills` — Skills may depend on Tools — no SDK/clock/agents/Run).
-  **No agent has a grant yet and there is no tool-use loop**: the LLM port is still single-shot
-  structured output; the loop + Toolbox wiring arrive with Stage 7 (ADR-0022 "Deferred").
+  **Rin now has `current_date@v1` and the Tool-use loop is wired** (ROADMAP Stage 7.3, ADR-0028):
+  `LLMClient.complete(..., toolbox=)` runs a bounded provider conversation; Anthropic translates
+  only the scoped descriptors, sends every model call through `Toolbox`, feeds the complete
+  `ToolResult` back, and finishes through its private structured-output Tool. The Root builds one
+  Toolbox per Agent and injects the date Tool's aware local clock. The default limit is 8
+  operational calls per Task step; an over-budget batch runs nothing and becomes a managed LLM
+  failure. Tool-call trace/analytics remain deferred to the metrics slice.
 - **Skills library exists and has its first consumer (ROADMAP Stage 4 + Stage 7.2, ADR-0021/0027,
   `SKILL_SPEC.md`)**: passive
   `SkillDescriptor` in `domain/skill.py` (like `Agent`), executable `Skill[In, Out]` Protocol in
@@ -225,9 +230,10 @@ process at the time, not a pattern to keep copying.)
       `normalize_terminology@v1` to the brief before its LLM call, while the Task keeps the original
       input; Composition Root fails at build time when declaration and invocation bindings differ;
       `SKILL_SPEC.md` / `SKILL_ACCEPTANCE.md` 1.1, tests `SCI`).
-   3. **Tool-use loop** — extend the LLM port (amends ADR-0014) to a real multi-turn tool-calling
-      loop, wire the existing `Toolbox`/`Tool` (ADR-0022) into it, grant an agent a real Tool
-      (`current_date@v1`) and prove it gets invoked mid-reasoning. Likely the heaviest subtask.
+   3. ~~**Tool-use loop**~~ — done (ADR-0028 amends ADR-0014 and realizes ADR-0022's deferred
+      loop: `LLMClient.complete(..., toolbox=)`, bounded Anthropic multi-turn translation,
+      `ToolCall → Toolbox → ToolResult` round-trip, private `emit_fields` finalization, Root-built
+      per-Agent Toolboxes; Rin is granted `current_date@v1`, proven mid-reasoning by `LTL`).
    4. **Metrics capture — now, not Stage 14.** Decided 2026-09-15: Stage 7's own DoD requires
       "prompt version and metrics (model, tokens, cost, latency, retries) are recorded" — that
       overrides ADR-0020's "Deferred to Stage 14" framing; capture it here. LLM adapter starts

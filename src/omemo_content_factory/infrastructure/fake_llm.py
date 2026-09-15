@@ -27,6 +27,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from omemo_content_factory.tools.toolbox import Toolbox
+
 _FAKE_PREFIX = "fake"
 
 
@@ -38,11 +40,13 @@ class FakeLLMClient:
     field names (`ADR-0014` §2, Variant B).
     """
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> Mapping[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox | None = None
+    ) -> Mapping[str, str]:
         """Return a deterministic value for each requested field.
 
-        ``system`` and ``user`` are ignored by contract: the sole source of the result is the
-        ``fields`` list. Each field is mapped **uniformly** to a non-empty placeholder — no field is
-        special-cased — which keeps the client agent-agnostic.
+        ``system``, ``user`` and ``toolbox`` are ignored by this offline provider: the sole source
+        of the result is the ``fields`` list. Each field is mapped **uniformly** to a non-empty
+        placeholder — no field is special-cased — which keeps the client agent-agnostic.
         """
         return {name: f"{_FAKE_PREFIX}::{name}" for name in fields}

@@ -4,6 +4,9 @@
 - **Date:** 2026-09-15
 - **Deciders:** Lead Architect / Domain Architect
 
+> **Stage 7 realisation:** ADR-0028 implements the deferred LLM reasoning loop, Composition Root
+> Toolbox wiring and the first production grant (`current_date@v1` to Rin).
+
 ## Context
 
 ROADMAP Stage 5 lays down the `Tools` layer: capabilities an agent calls *during its reasoning*,

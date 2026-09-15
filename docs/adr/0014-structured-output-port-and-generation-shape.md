@@ -4,6 +4,10 @@
 - **Date:** 2026-06-29
 - **Deciders:** Lead Architect / Domain Architect
 
+> **Amended by ADR-0028 (2026-09-15).** The port still returns the same opaque structured mapping,
+> but one `complete` call may now contain a bounded multi-turn Tool loop and receives a scoped
+> `Toolbox`. The Schema/field invariants in this ADR are unchanged.
+
 ## Context
 
 After Slice 3 (evaluation-ownership **Variant A**, `ADR-0013` §8) the validated finalization path

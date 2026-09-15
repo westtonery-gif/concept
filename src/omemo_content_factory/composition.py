@@ -6,10 +6,11 @@ compiler:
 
 - **constructs** the `agent_ref → TaskExecutor` mapping,
 - **injects** a Prompt into its executor **at construction time** (`Prompt.system → system_prompt`,
-  `Prompt.schema_ref → schema_ref`; `user_template` handling is deferred so the executor is left
-  unchanged),
+  `Prompt.user_template → user_template`, `Prompt.schema_ref → schema_ref`),
 - **wraps** that executor with the role's statically configured input Skill invocations when
   ``Agent.skill_refs`` declares them (`ADR-0027`),
+- **builds** one scoped ``Toolbox`` from ``Agent.tool_refs`` and Tool instances whose outside
+  dependencies are injected here (`ADR-0028`),
 - **checks structural existence** (build-time only): ``prompt_ref`` and ``Workflow.agent_ref``
   resolve to existing entries — a pure key-presence check, **not** workflow-semantics or policy.
 
@@ -23,7 +24,8 @@ point inward, `PROJECT.md` §7).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import TypeAlias
 
@@ -40,6 +42,10 @@ from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
 from omemo_content_factory.infrastructure.llm import LLMClient, LLMTaskExecutor
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
+from omemo_content_factory.tools.contract import Tool
+from omemo_content_factory.tools.current_date import CurrentDate
+from omemo_content_factory.tools.text_metrics import TextMetrics
+from omemo_content_factory.tools.toolbox import Toolbox
 
 RUN_STORE_PATH_VAR = "OMEMO_RUN_STORE_PATH"
 """Environment variable naming the SQLite file every Run is saved to (ADR-0026 §5)."""
@@ -53,6 +59,16 @@ AgentSkillInvocations: TypeAlias = Mapping[str, Sequence[TaskInputSkillInvocatio
 
 class CompositionError(Exception):
     """A build-time composition-invariant violation (never raised at runtime)."""
+
+
+def _aware_local_now() -> datetime:
+    """Read the host's aware local time; injected into ``current_date@v1`` by the Root."""
+    return datetime.now().astimezone()
+
+
+def build_available_tools(*, clock: Callable[[], datetime] = _aware_local_now) -> tuple[Tool, ...]:
+    """Build the Tool library with outside dependencies injected (ADR-0028 §1)."""
+    return (CurrentDate(clock), TextMetrics())
 
 
 def run_store_path(environ: Mapping[str, str]) -> Path:
@@ -79,6 +95,7 @@ def build_executor_map(
     schemas: Mapping[str, Schema],
     *,
     skill_invocations: AgentSkillInvocations | None = None,
+    available_tools: Iterable[Tool] | None = None,
 ) -> dict[str, TaskExecutor]:
     """Compile the `agent_ref → TaskExecutor` mapping from the static catalogues (build-time).
 
@@ -95,8 +112,12 @@ def build_executor_map(
     role's supplied invocation refs, including order, or composition also fails before execution
     (`ADR-0027`). An empty shape is rejected by the executor's own
     construction invariant (`ADR-0014` §3, Locus 2); the Composition Root passes parameters and does
-    not judge configuration correctness.
+    not judge configuration correctness. ``available_tools`` defaults to the complete built-in
+    library, with an aware local clock injected into ``current_date@v1``. Each executor gets a
+    Toolbox scoped by its Agent's ``tool_refs``; an impossible grant fails before execution
+    (`ADR-0028`).
     """
+    tools = tuple(build_available_tools() if available_tools is None else available_tools)
     executors: dict[str, TaskExecutor] = {}
     for agent in agents:
         if agent.agent_id in executors:
@@ -117,6 +138,7 @@ def build_executor_map(
             user_template=prompt.user_template,
             schema_ref=prompt.schema_ref,
             output_fields=schema.view.required_fields,
+            toolbox=Toolbox(grants=agent.tool_refs, available=tools),
         )
         configured = tuple(
             () if skill_invocations is None else skill_invocations.get(agent.agent_id, ())
@@ -173,6 +195,7 @@ def build_content_director(
     schemas: Mapping[str, Schema],
     *,
     skill_invocations: AgentSkillInvocations | None = None,
+    available_tools: Iterable[Tool] | None = None,
     store: RunStore | None = None,
 ) -> ContentDirector:
     """Compile the executor and schema maps and hand them to a ``ContentDirector``.
@@ -182,10 +205,17 @@ def build_content_director(
     into each executor (`ADR-0014` §3) and the `agent_ref → Schema` map through which execution
     finalizes Output via the validated path (`ADR-0013` §8, Variant A). ``skill_invocations`` is
     the static role configuration used to wrap agents that declare ``skill_refs`` (`ADR-0027`).
+    ``available_tools`` supplies dependency-injected Tool instances; when omitted the Root builds
+    the standard library and scopes it independently for every Agent (`ADR-0028`).
     ``store``, when given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
     """
     executors = build_executor_map(
-        agents, prompts, client, schemas, skill_invocations=skill_invocations
+        agents,
+        prompts,
+        client,
+        schemas,
+        skill_invocations=skill_invocations,
+        available_tools=available_tools,
     )
     return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)
 
@@ -214,6 +244,7 @@ def compile_runtime(
     schemas: Mapping[str, Schema],
     *,
     skill_invocations: AgentSkillInvocations | None = None,
+    available_tools: Iterable[Tool] | None = None,
     store: RunStore | None = None,
 ) -> ContentDirector:
     """Build executor + schema maps, structurally check vs ``workflow``, wire the CD.
@@ -223,11 +254,17 @@ def compile_runtime(
     so selection never raises at runtime. ``schemas`` is **required** — it supplies the generation
     shape per executor (`ADR-0014` §3) and the `agent_ref → Schema` map for the validated Output
     path (`ADR-0013` §8, Variant A). ``skill_invocations`` is the static role configuration checked
-    and wired according to ``Agent.skill_refs`` (`ADR-0027`). ``store``, when given, is the
-    ``RunStore`` the Director commits every step to (`ADR-0026`).
+    and wired according to ``Agent.skill_refs`` (`ADR-0027`). ``available_tools`` is the
+    dependency-injected library scoped by each ``Agent.tool_refs`` (`ADR-0028`). ``store``, when
+    given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
     """
     executors = build_executor_map(
-        agents, prompts, client, schemas, skill_invocations=skill_invocations
+        agents,
+        prompts,
+        client,
+        schemas,
+        skill_invocations=skill_invocations,
+        available_tools=available_tools,
     )
     validate_workflow_executors(workflow, executors)
     return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)

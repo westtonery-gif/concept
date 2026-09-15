@@ -22,6 +22,7 @@ from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.infrastructure.llm import LLMError, LLMTaskExecutor
+from omemo_content_factory.tools.toolbox import Toolbox
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,9 @@ class EchoLLMClient:
 
     tag: str
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> dict[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
+    ) -> dict[str, str]:
         return {name: f"{self.tag}:{user}" for name in fields}
 
 
@@ -41,7 +44,9 @@ class RecordingLLMClient:
     reply: str
     calls: list[tuple[str, str, tuple[str, ...]]] = field(default_factory=list)
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> dict[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
+    ) -> dict[str, str]:
         self.calls.append((system, user, tuple(fields)))
         return {name: self.reply for name in fields}
 
@@ -50,7 +55,9 @@ class RecordingLLMClient:
 class FailingLLMClient:
     """Deterministic fake that always fails with an ``LLMError``."""
 
-    def complete(self, *, system: str, user: str, fields: Sequence[str]) -> dict[str, str]:
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: Toolbox
+    ) -> dict[str, str]:
         raise LLMError("rate limited")
 
 
