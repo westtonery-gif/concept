@@ -17,6 +17,7 @@ import omemo_content_factory.domain as domain_pkg
 from omemo_content_factory.composition import CompositionError
 from omemo_content_factory.domain.artifact import ArtifactDomainError
 from omemo_content_factory.domain.errors import DomainError
+from omemo_content_factory.domain.evaluation import EvaluationDomainError
 from omemo_content_factory.domain.human_review import HumanReviewDomainError
 from omemo_content_factory.domain.output import OutputDomainError
 from omemo_content_factory.domain.run import (
@@ -61,6 +62,7 @@ def test_domain_error_is_a_plain_exception() -> None:
         OutputDomainError,
         ArtifactDomainError,
         HumanReviewDomainError,
+        EvaluationDomainError,  # EDE-01 (ADR-0018)
         SchemaDomainError,
         WorkflowDomainError,
     ],
@@ -71,8 +73,8 @@ def test_each_aggregate_base_is_rooted_at_domain_error(base: type[Exception]) ->
 
 def test_every_error_defined_in_the_domain_layer_is_a_domain_error() -> None:
     classes = _domain_exception_classes()
-    # Sanity: the scan actually sees the hierarchies (7 bases + their concrete errors + root).
-    assert len(classes) > 7
+    # Sanity: the scan actually sees the hierarchies (8 bases + their concrete errors + root).
+    assert len(classes) > 8
     offenders = [c.__qualname__ for c in classes if not issubclass(c, DomainError)]
     assert offenders == []
 

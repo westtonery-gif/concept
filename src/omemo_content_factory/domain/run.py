@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import TypeAlias
 
 from omemo_content_factory.domain.artifact import (
     Artifact,
@@ -36,11 +37,20 @@ from omemo_content_factory.domain.artifact import (
     ArtifactEvent,
     ArtifactId,
     ArtifactNotApprovedError,
+    ArtifactQaNotPassedError,
     ArtifactStatus,
     ArtifactView,
     DuplicateArtifactError,
 )
 from omemo_content_factory.domain.errors import DomainError
+from omemo_content_factory.domain.evaluation import (
+    Evaluation,
+    EvaluationCompleted,
+    EvaluationEvent,
+    EvaluationId,
+    EvaluationStatus,
+    EvaluationView,
+)
 from omemo_content_factory.domain.human_review import (
     HumanReview,
     HumanReviewApproved,
@@ -156,6 +166,12 @@ class RunFailed(RunEvent):
     reason: str | None = None
 
 
+RunLogEvent: TypeAlias = (
+    RunEvent | TaskEvent | OutputEvent | ArtifactEvent | HumanReviewEvent | EvaluationEvent
+)
+"""Any event recorded in a Run's single log: the Run's own and those of its child entities."""
+
+
 # --- Domain errors -----------------------------------------------------------------------
 # Raised on domain-rule violations (ADR-0003 §8). Distinct from technical failures. Rooted at the
 # shared ``DomainError`` (ADR-0017).
@@ -250,6 +266,8 @@ class Run:
         "_artifact_seq",
         "_artifacts",
         "_content_brief_ref",
+        "_evaluation_seq",
+        "_evaluations",
         "_events",
         "_failure_reason",
         "_human_reviews",
@@ -270,13 +288,15 @@ class Run:
     _status: RunStatus
     _rework_count: int
     _failure_reason: str | None
-    _events: list[RunEvent | TaskEvent | OutputEvent | ArtifactEvent | HumanReviewEvent]
+    _events: list[RunLogEvent]
     _tasks: dict[TaskId, Task]
     _task_seq: int
     _artifacts: dict[ArtifactId, Artifact]
     _artifact_seq: int
     _human_reviews: dict[ReviewId, HumanReview]
     _review_seq: int
+    _evaluations: dict[EvaluationId, Evaluation]
+    _evaluation_seq: int
 
     def __init__(
         self,
@@ -301,6 +321,8 @@ class Run:
         self._artifact_seq = 0
         self._human_reviews = {}
         self._review_seq = 0
+        self._evaluations = {}
+        self._evaluation_seq = 0
 
     def __setattr__(self, name: str, value: object) -> None:
         """Reject reassignment of immutable attributes and their backing fields.
@@ -373,14 +395,13 @@ class Run:
         return self._failure_reason
 
     @property
-    def events(
-        self,
-    ) -> Sequence[RunEvent | TaskEvent | OutputEvent | ArtifactEvent | HumanReviewEvent]:
+    def events(self) -> Sequence[RunLogEvent]:
         """Ordered, read-only sequence of events emitted since creation.
 
         Holds Run events (`EV-01`..`EV-05`), Task events (`TEV-01`..`TEV-06`, ADR-0004 §7),
         Output events (`OutputValidated`, ADR-0005 §7), Artifact events (`ArtifactCreated`,
-        ADR-0006 §8) and Human Review events (ADR-0007 §7), in one Run log.
+        ADR-0006 §8), Human Review events (ADR-0007 §7) and Evaluation events
+        (`EvaluationCompleted`, ADR-0018 §8), in one Run log.
         """
         return tuple(self._events)
 
@@ -537,7 +558,9 @@ class Run:
         ``CANDIDATE -> APPROVED`` / ``REJECTED`` and ``APPROVED -> PUBLISHED`` (ADR-0007 §6).
         ``CANDIDATE -> APPROVED`` additionally requires an approving Human Review for this
         Artifact, else ``ArtifactNotApprovedError`` — so ``PUBLISHED`` is unreachable without an
-        ``Approve`` (DOMAIN_MODEL.md §6).
+        ``Approve`` (DOMAIN_MODEL.md §6). It also requires the latest QA Evaluation of this
+        Artifact to be ``PASSED``, else ``ArtifactQaNotPassedError`` — fail closed: no, a pending
+        or a risk verdict keeps the gate shut, even after an ``Approve`` (ADR-0018 §5).
         """
         self._ensure_authorised(by)
         artifact = self._artifacts[artifact_id]
@@ -547,6 +570,10 @@ class Run:
         if approving and not self._has_approved_review(artifact_id):
             raise ArtifactNotApprovedError(
                 f"artifact {artifact_id} cannot be APPROVED without an approving Human Review"
+            )
+        if approving and not self._qa_passed(artifact_id):
+            raise ArtifactQaNotPassedError(
+                f"artifact {artifact_id} cannot be APPROVED without a PASSED latest QA Evaluation"
             )
         artifact.apply_transition(to)
 
@@ -627,6 +654,77 @@ class Run:
         """Read-only snapshot of one owned Human Review (ADR-0007 §5)."""
         return self._human_reviews[review_id].view
 
+    # --- Evaluation child management (additive, ADR-0018) --------------------------------
+
+    def open_evaluation(self, artifact_id: ArtifactId, *, kind: str, by: Actor) -> EvaluationId:
+        """Open a ``PENDING`` Evaluation of a candidate Artifact, through the root (ADR-0018 §4).
+
+        Content Director only. The target Artifact must be ``CANDIDATE`` (else
+        ``InvalidTransitionError``). Emits no event (only the verdict is an event,
+        DOMAIN_MODEL.md §10). A re-evaluation is a new Evaluation. Returns the new id.
+        """
+        self._ensure_authorised(by)
+        status = self._artifacts[artifact_id].view.status
+        if status is not ArtifactStatus.CANDIDATE:
+            raise InvalidTransitionError(
+                f"an Evaluation needs a CANDIDATE Artifact; {artifact_id} is {status}"
+            )
+        self._evaluation_seq += 1
+        evaluation_id = f"{self._run_id}-evaluation-{self._evaluation_seq}"
+        self._evaluations[evaluation_id] = Evaluation(
+            evaluation_id=evaluation_id, run_id=self._run_id, artifact_ref=artifact_id, kind=kind
+        )
+        return evaluation_id
+
+    def record_evaluation(
+        self,
+        evaluation_id: EvaluationId,
+        verdict: EvaluationStatus,
+        *,
+        by: Actor,
+        flags: tuple[str, ...] = (),
+    ) -> None:
+        """Persist the verdict of an Evaluation, through the root (ADR-0018 §3, §4).
+
+        **Pure sink** (Variant A, ADR-0013 §8): the verdict is decided by the QA evaluator outside
+        the domain; Run only records it. Content Director only. The evaluation must be ``PENDING``
+        and ``verdict`` terminal (else ``InvalidEvaluationTransitionError``). Emits
+        ``EvaluationCompleted``.
+        """
+        self._ensure_authorised(by)
+        evaluation = self._evaluations[evaluation_id]
+        evaluation.decide(verdict, flags)
+        self._record(
+            EvaluationCompleted(
+                run_id=self._run_id,
+                evaluation_id=evaluation_id,
+                artifact_ref=evaluation.artifact_ref,
+                verdict=verdict,
+                flags=flags,
+            )
+        )
+
+    @property
+    def evaluations(self) -> Sequence[EvaluationView]:
+        """Read-only snapshots of the Evaluations owned by this Run, in opening order."""
+        return tuple(evaluation.view for evaluation in self._evaluations.values())
+
+    def evaluation(self, evaluation_id: EvaluationId) -> EvaluationView:
+        """Read-only snapshot of one owned Evaluation (ADR-0018 §4)."""
+        return self._evaluations[evaluation_id].view
+
+    def _qa_passed(self, artifact_id: ArtifactId) -> bool:
+        """Whether the latest Evaluation of ``artifact_id`` is ``PASSED`` (ADR-0018 §5).
+
+        Evaluations are kept in opening order, so the last match is the latest. No evaluation is
+        not a pass (fail closed).
+        """
+        latest: Evaluation | None = None
+        for evaluation in self._evaluations.values():
+            if evaluation.artifact_ref == artifact_id:
+                latest = evaluation
+        return latest is not None and latest.status is EvaluationStatus.PASSED
+
     def _has_approved_review(self, artifact_id: ArtifactId) -> bool:
         """Whether an ``APPROVED`` Human Review targets ``artifact_id`` (ADR-0007 §6)."""
         return any(
@@ -683,8 +781,6 @@ class Run:
             return RunFailed(run_id=self._run_id, reason=reason)
         return None
 
-    def _record(
-        self, event: RunEvent | TaskEvent | OutputEvent | ArtifactEvent | HumanReviewEvent
-    ) -> None:
-        """Append an emitted event (Run, Task, Output, Artifact or Human Review) to the log."""
+    def _record(self, event: RunLogEvent) -> None:
+        """Append an emitted event (Run or any child entity's) to the single Run log."""
         self._events.append(event)

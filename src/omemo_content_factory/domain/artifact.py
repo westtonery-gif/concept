@@ -111,6 +111,15 @@ class ArtifactNotApprovedError(ArtifactDomainError):
     """
 
 
+class ArtifactQaNotPassedError(ArtifactDomainError):
+    """An Artifact was moved to ``APPROVED`` without a passing latest QA Evaluation (ADR-0018 §5).
+
+    Enforces the fail-closed invariant "risk -> content not further" (DOMAIN_MODEL.md §6): no
+    evaluation, a ``PENDING`` one or a ``FLAGGED``/``FAILED`` latest verdict keeps the gate shut,
+    even after a human ``Approve``. Checked by the Run root; the Artifact stays unaware of QA.
+    """
+
+
 class ImmutableArtifactAttributeError(ArtifactDomainError):
     """An attempt was made to change an immutable attribute of an Artifact (everything but status).
 
