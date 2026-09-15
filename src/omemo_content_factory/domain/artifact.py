@@ -2,17 +2,23 @@
 
 A child entity of the Run aggregate root, owned **directly by Run** (DOMAIN_MODEL.md §2.12,
 §9.1), carrying provenance to the ``Output`` it was produced from. It is created only via
-``Run.create_artifact`` (from an existing Output), is **1:1** with that Output, and is
-**immutable except for its own status lifecycle**. There is no aggregate-driving factory here.
+``Run.create_artifact`` / ``Run.create_artifact_version`` (each from an existing Output), is
+**1:1** with that Output, and is **immutable except for its own status lifecycle**. There is no
+aggregate-driving factory here.
 
 This module has no dependency on ``run``/``task``/``output`` (``run`` imports from it), so its
 references (``run_id``, ``output_ref``) are plain opaque ``str`` (ADR-0003 §3) — also avoiding an
 import cycle.
 
-Scope note (ADR-0006): this is the **minimal faithful subset** of the documented Artifact. The
-only wired transition is ``DRAFT -> CANDIDATE``; ``APPROVED``/``REJECTED``/``PUBLISHED`` (need
-Human Review) and ``SUPERSEDED`` (needs versioning/rework) are deferred — kept as documented
-vocabulary only. ``version`` is always ``1`` while versioning is deferred.
+Lifecycle scope. The full documented lifecycle (DOMAIN_MODEL.md §2.12) is wired in three additive
+steps: ``DRAFT -> CANDIDATE`` (ADR-0006); ``CANDIDATE -> APPROVED``/``REJECTED`` and
+``APPROVED -> PUBLISHED`` (ADR-0007, gated by Human Review and — since ADR-0018 — by a passing QA
+Evaluation); and every working state ``-> SUPERSEDED`` (ADR-0019, the rework path). A fixed version
+is immutable: a rework produces a **new Artifact** (``version`` + 1, ``supersedes_ref`` pointing at
+its predecessor) via ``Run.create_artifact_version``, which supersedes the predecessor in the same
+operation. Output -> Artifact stays 1:1, so each version has its own Output provenance.
+
+Deferred (ADR-0006): Output -> Artifact 1:N; flags/remarks on the Artifact itself.
 """
 
 from __future__ import annotations
@@ -30,9 +36,10 @@ ArtifactId: TypeAlias = str
 class ArtifactStatus(Enum):
     """The six lifecycle states of an Artifact (DOMAIN_MODEL.md §2.12).
 
-    An Artifact is created ``DRAFT``; the only wired transition now is ``DRAFT -> CANDIDATE``
-    (ADR-0006 §4). ``APPROVED``/``REJECTED``/``PUBLISHED`` (Human Review) and ``SUPERSEDED``
-    (versioning) are documented vocabulary whose edges are deferred.
+    An Artifact is created ``DRAFT`` and moves ``DRAFT -> CANDIDATE -> APPROVED -> PUBLISHED``
+    (ADR-0006 §4, ADR-0007 §6), ``CANDIDATE -> REJECTED``, or — from any **working** state, when a
+    new version of it is produced — to ``SUPERSEDED`` (ADR-0019 §3). ``PUBLISHED``, ``REJECTED``
+    and ``SUPERSEDED`` are terminal.
     """
 
     DRAFT = "draft"
@@ -51,7 +58,8 @@ class ArtifactView:
     """Immutable, read-only snapshot of an Artifact (ADR-0006 §2).
 
     The only representation that leaves the aggregate: no mutable Artifact object is exposed, so
-    a child changes only through its Run. A snapshot is point-in-time.
+    a child changes only through its Run. A snapshot is point-in-time. ``supersedes_ref`` is the
+    previous version this Artifact replaces, or ``None`` for a first version (ADR-0019 §2).
     """
 
     artifact_id: ArtifactId
@@ -61,6 +69,7 @@ class ArtifactView:
     content: str
     version: int
     status: ArtifactStatus
+    supersedes_ref: str | None = None
 
 
 # --- Domain events -----------------------------------------------------------------------
@@ -79,11 +88,16 @@ class ArtifactEvent:
 class ArtifactCreated(ArtifactEvent):
     """Emitted when an Artifact is created from an Output (DOMAIN_MODEL.md §10).
 
-    Carries the provenance (``output_ref``) and the artifact ``kind``.
+    Carries the provenance (``output_ref``) and the artifact ``kind``. A **new version** produced by
+    rework emits the same event (no further Artifact event is documented, ADR-0019 §5): ``version``
+    and ``supersedes_ref`` then make the supersession traceable in the Run log. Both default to a
+    first version, so the event is unchanged for existing callers.
     """
 
     output_ref: str
     kind: str
+    version: int = 1
+    supersedes_ref: str | None = None
 
 
 # --- Domain errors -----------------------------------------------------------------------
@@ -120,6 +134,16 @@ class ArtifactQaNotPassedError(ArtifactDomainError):
     """
 
 
+class ArtifactSupersessionError(ArtifactDomainError):
+    """``SUPERSEDED`` was requested without a new version replacing the Artifact (ADR-0019 §4).
+
+    Enforces the invariant "a fixed Artifact version is immutable; an edit is a new version"
+    (DOMAIN_MODEL.md §6): an Artifact is superseded **only** as the other half of creating its
+    successor (``Run.create_artifact_version``), never by a bare status change — which would leave a
+    Run with no live version of its content. Checked by the Run root.
+    """
+
+
 class ImmutableArtifactAttributeError(ArtifactDomainError):
     """An attempt was made to change an immutable attribute of an Artifact (everything but status).
 
@@ -132,12 +156,18 @@ class ImmutableArtifactAttributeError(ArtifactDomainError):
 # --- Allowed transitions -----------------------------------------------------------------
 
 # Allowed Artifact status transitions (ADR-0006 §4; extended by ADR-0007 §6 with the publication
-# path). ``CANDIDATE -> APPROVED`` is additionally gated by the Run (an approving Human Review must
-# exist). ``SUPERSEDED`` (versioning) stays deferred — no edges yet.
+# path and by ADR-0019 §3 with the rework path "any working state -> SUPERSEDED",
+# DOMAIN_MODEL.md §2.12). ``CANDIDATE -> APPROVED`` is additionally gated by the Run (an approving
+# Human Review and a PASSED latest Evaluation must exist); ``-> SUPERSEDED`` is additionally gated
+# by the Run (only ``create_artifact_version`` may take that edge).
 _ALLOWED_ARTIFACT_TRANSITIONS: dict[ArtifactStatus, set[ArtifactStatus]] = {
-    ArtifactStatus.DRAFT: {ArtifactStatus.CANDIDATE},
-    ArtifactStatus.CANDIDATE: {ArtifactStatus.APPROVED, ArtifactStatus.REJECTED},
-    ArtifactStatus.APPROVED: {ArtifactStatus.PUBLISHED},
+    ArtifactStatus.DRAFT: {ArtifactStatus.CANDIDATE, ArtifactStatus.SUPERSEDED},
+    ArtifactStatus.CANDIDATE: {
+        ArtifactStatus.APPROVED,
+        ArtifactStatus.REJECTED,
+        ArtifactStatus.SUPERSEDED,
+    },
+    ArtifactStatus.APPROVED: {ArtifactStatus.PUBLISHED, ArtifactStatus.SUPERSEDED},
     ArtifactStatus.REJECTED: set(),
     ArtifactStatus.SUPERSEDED: set(),
     ArtifactStatus.PUBLISHED: set(),
@@ -153,12 +183,14 @@ _IMMUTABLE_ARTIFACT_ATTRIBUTES = frozenset(
         "kind",
         "content",
         "version",
+        "supersedes_ref",
         "_artifact_id",
         "_run_id",
         "_output_ref",
         "_kind",
         "_content",
         "_version",
+        "_supersedes_ref",
     }
 )
 
@@ -181,6 +213,7 @@ class Artifact:
         "_output_ref",
         "_run_id",
         "_status",
+        "_supersedes_ref",
         "_version",
     )
 
@@ -190,6 +223,7 @@ class Artifact:
     _kind: str
     _content: str
     _version: int
+    _supersedes_ref: str | None
     _status: ArtifactStatus
 
     def __init__(
@@ -200,6 +234,7 @@ class Artifact:
         kind: str,
         content: str,
         version: int,
+        supersedes_ref: str | None = None,
     ) -> None:
         # Immutable fields are written exactly once, here, bypassing the guard below.
         object.__setattr__(self, "_artifact_id", artifact_id)
@@ -208,6 +243,7 @@ class Artifact:
         object.__setattr__(self, "_kind", kind)
         object.__setattr__(self, "_content", content)
         object.__setattr__(self, "_version", version)
+        object.__setattr__(self, "_supersedes_ref", supersedes_ref)
         # The status lifecycle is the only mutable state; it flows through the guarded setter.
         self._status = ArtifactStatus.DRAFT
 
@@ -233,13 +269,16 @@ class Artifact:
             content=self._content,
             version=self._version,
             status=self._status,
+            supersedes_ref=self._supersedes_ref,
         )
 
     def apply_transition(self, to: ArtifactStatus) -> None:
-        """Apply a guarded status transition (ADR-0006 §4, §6).
+        """Apply a guarded status transition against the allowed-transitions table (ADR-0006 §4).
 
-        Only ``DRAFT -> CANDIDATE`` is allowed at this stage; any other edge raises
-        ``InvalidArtifactTransitionError`` and leaves the status unchanged.
+        Any edge outside the table raises ``InvalidArtifactTransitionError`` and leaves the status
+        unchanged — including superseding a terminal version (ADR-0019 §3). The cross-entity gates
+        (Human Review, QA, and "superseded only by a successor version") belong to the Run root, not
+        here: the Artifact entity stays unaware of reviews, evaluations and its successor.
         """
         if to not in _ALLOWED_ARTIFACT_TRANSITIONS[self._status]:
             raise InvalidArtifactTransitionError(

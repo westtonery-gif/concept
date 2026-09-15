@@ -39,6 +39,7 @@ from omemo_content_factory.domain.artifact import (
     ArtifactNotApprovedError,
     ArtifactQaNotPassedError,
     ArtifactStatus,
+    ArtifactSupersessionError,
     ArtifactView,
     DuplicateArtifactError,
 )
@@ -531,22 +532,73 @@ class Run:
         self._ensure_authorised(by)
         output = self._require_output(output_id)
         self._ensure_output_unused(output_id)
+        return self._add_artifact(output, kind=kind, version=1, supersedes_ref=None)
+
+    def create_artifact_version(
+        self,
+        previous_artifact_id: ArtifactId,
+        output_id: OutputId,
+        *,
+        by: Actor,
+        kind: str | None = None,
+    ) -> ArtifactId:
+        """Create the next version of an Artifact from a reworked Output (ADR-0019 §4).
+
+        The rework path: a fixed Artifact version is immutable, so addressing a QA risk verdict or a
+        human ``Request changes`` means producing a **new** Artifact — ``version`` + 1, its own
+        Output provenance (1:1 is preserved), ``supersedes_ref`` pointing at the predecessor — while
+        that predecessor becomes ``SUPERSEDED`` in the same operation (DOMAIN_MODEL.md §2.12, §6,
+        §9.1). ``kind`` defaults to the predecessor's when ``None``.
+
+        Authorised actor only (the Content Director). The predecessor must be owned by this Run
+        (else ``KeyError``) and still in a **working** state — a ``PUBLISHED``, ``REJECTED`` or
+        already ``SUPERSEDED`` version is terminal and cannot be superseded
+        (``InvalidArtifactTransitionError``), which also keeps the version chain linear. The Output
+        must be recorded in this Run (``KeyError``) and unused (``DuplicateArtifactError``); all
+        checks run **before** any state changes, so a rejected call supersedes nothing.
+
+        The successor is a new Artifact with a new id, so it starts its own review/QA lifecycle from
+        scratch: the predecessor's Human Review and Evaluation target the old id and never carry
+        over (ADR-0019 §6). Emits ``ArtifactCreated`` with the new version and ``supersedes_ref``.
+        """
+        self._ensure_authorised(by)
+        previous = self._artifacts[previous_artifact_id]
+        previous_view = previous.view
+        output = self._require_output(output_id)
+        self._ensure_output_unused(output_id)
+        # Everything that can fail has been checked: supersede, then create, so the Run never ends
+        # up with a superseded version and no successor.
+        previous.apply_transition(ArtifactStatus.SUPERSEDED)
+        return self._add_artifact(
+            output,
+            kind=previous_view.kind if kind is None else kind,
+            version=previous_view.version + 1,
+            supersedes_ref=previous_artifact_id,
+        )
+
+    def _add_artifact(
+        self, output: Output, *, kind: str, version: int, supersedes_ref: str | None
+    ) -> ArtifactId:
+        """Register a new Artifact over ``output`` and emit ``ArtifactCreated`` (ADR-0006 §5)."""
         self._artifact_seq += 1
         artifact_id = f"{self._run_id}-artifact-{self._artifact_seq}"
         self._artifacts[artifact_id] = Artifact(
             artifact_id=artifact_id,
             run_id=self._run_id,
-            output_ref=output_id,
+            output_ref=output.output_id,
             kind=kind,
             content=output.payload,
-            version=1,
+            version=version,
+            supersedes_ref=supersedes_ref,
         )
         self._record(
             ArtifactCreated(
                 run_id=self._run_id,
                 artifact_id=artifact_id,
-                output_ref=output_id,
+                output_ref=output.output_id,
                 kind=kind,
+                version=version,
+                supersedes_ref=supersedes_ref,
             )
         )
         return artifact_id
@@ -561,9 +613,17 @@ class Run:
         ``Approve`` (DOMAIN_MODEL.md §6). It also requires the latest QA Evaluation of this
         Artifact to be ``PASSED``, else ``ArtifactQaNotPassedError`` — fail closed: no, a pending
         or a risk verdict keeps the gate shut, even after an ``Approve`` (ADR-0018 §5).
+        ``SUPERSEDED`` is **not** reachable here: it is one half of creating the next version, so it
+        is taken only by ``create_artifact_version``, else ``ArtifactSupersessionError``
+        (ADR-0019 §4).
         """
         self._ensure_authorised(by)
         artifact = self._artifacts[artifact_id]
+        if to is ArtifactStatus.SUPERSEDED:
+            raise ArtifactSupersessionError(
+                f"artifact {artifact_id} is superseded only by creating its next version "
+                "(Run.create_artifact_version)"
+            )
         approving = (
             to is ArtifactStatus.APPROVED and artifact.view.status is ArtifactStatus.CANDIDATE
         )
