@@ -14,6 +14,10 @@ import pkgutil
 import pytest
 
 import omemo_content_factory.domain as domain_pkg
+from omemo_content_factory.adapters.analytics_sink import AnalyticsSinkError
+from omemo_content_factory.adapters.brief_board import BriefBoardError
+from omemo_content_factory.adapters.review_desk import ReviewDeskError
+from omemo_content_factory.adapters.run_store import RunStoreError
 from omemo_content_factory.composition import CompositionError
 from omemo_content_factory.domain.analytics import AnalyticsDomainError
 from omemo_content_factory.domain.artifact import ArtifactDomainError
@@ -88,7 +92,16 @@ def test_every_error_defined_in_the_domain_layer_is_a_domain_error() -> None:
 
 @pytest.mark.parametrize(
     "technical",
-    [LLMError, CompositionError, ProviderModelSelectionError, ToolExecutionError],  # + TDE-01
+    [
+        LLMError,
+        CompositionError,
+        ProviderModelSelectionError,
+        ToolExecutionError,  # TDE-01 (ADR-0022)
+        RunStoreError,  # ADT-01 (ADR-0023)
+        BriefBoardError,
+        ReviewDeskError,
+        AnalyticsSinkError,
+    ],
 )
 def test_technical_failures_are_not_domain_errors(technical: type[Exception]) -> None:
     assert not issubclass(technical, DomainError)

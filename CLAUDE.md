@@ -15,13 +15,26 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 22 ADRs (0001–0022) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 23 ADRs (0001–0023) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
-  (0020), Skills library (0021), Tool Layer (0022) are all implemented and tested. All gates
-  green: ruff, ruff format, mypy --strict, pytest (578 passed, 0 skipped).
+  (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023) are all
+  implemented and tested (0015's `Run.restore`/`RunSnapshot` is still only specified — it lands
+  with task 7.4). All gates green: ruff, ruff format, mypy --strict, pytest (614 passed, 0 skipped).
+- **Adapter Layer contracts exist (ROADMAP Stage 6a, ADR-0023, `ADAPTER_SPEC.md`)**: the LLM
+  Adapter is recognised as already done (`LLMClient`/`AnthropicLLMClient`/`FakeLLMClient`/
+  `client_for_role`, unchanged, stays in `infrastructure/llm.py`). The other four are `Protocol`s in
+  the new contracts-only package **`adapters/`** (imports: pure stdlib + `domain.*`), named by role,
+  not vendor: `RunStore` (Storage: `save(run)`/`load(run_id) -> Run | None`), `BriefBoard` (Notion:
+  `fetch_brief -> IncomingBrief | None`, `report_status`), `ReviewDesk` (Google Docs:
+  `publish(ReviewPackage) -> location`, `fetch_decision -> ReviewDecision | None`), `AnalyticsSink`
+  (`export(records)`, a downstream copy — the Run's records stay authoritative). Each has its own
+  technical `<Contract>Error` (not a `DomainError`); adapters never mutate a Run.
+  `tests/test_adapter_contract.py` enforces the boundary: outside `infrastructure/` no module
+  imports a third-party package or network/storage stdlib, and only `composition.py` imports
+  `infrastructure`. **No adapter is implemented or wired yet** (7.4 / 7.5).
 - **Tool Layer exists (ROADMAP Stage 5, ADR-0022, `TOOL_SPEC.md`)**: passive `ToolDescriptor`
   in `domain/tool.py` (unlike a Skill it carries its declared `ToolParameter`s — the model and the
   Toolbox both read them); executable `Tool` Protocol in `tools/contract.py` (`descriptor` +
@@ -130,16 +143,20 @@ process at the time, not a pattern to keep copying.)
       `toolbox.py`, `Agent.tool_refs`, `TOOL_SPEC.md` / `TOOL_ACCEPTANCE.md`,
       `tests/test_tool*.py` + `tests/test_toolbox.py`). The tool-use loop in the LLM adapter was
       deliberately not built: it changes the ADR-0014 port and has no consumer before Stage 7.
-   3. **Adapter contracts** (Stage 6a) — record that the **LLM Adapter is already done**
-      (`LLMClient`/`AnthropicLLMClient`/`client_for_role`, ADR-0014/0016 — it already satisfies
-      Stage 6's LLM Adapter DoD, just not labeled as such) and design the internal contracts for
-      the remaining four: Storage, Notion, Google Docs, Analytics adapters. ADR + contracts only,
-      no implementation yet.
+   3. ~~**Adapter contracts** (Stage 6a)~~ — done (ADR-0023, `adapters/` — `RunStore`,
+      `BriefBoard`, `ReviewDesk`, `AnalyticsSink`; `ADAPTER_SPEC.md` / `ADAPTER_ACCEPTANCE.md`,
+      `tests/test_adapter_contract.py`). The LLM Adapter was recognised as done, not moved. The
+      reviewer's identity was deliberately left off `ReviewDecision`: `Run.submit_review` records
+      only the actor role, so the field would have no reader (ADR-0023 "Deferred", Stage 10).
    4. **Storage Adapter** (Stage 6b) — real persistence for `Run` and its children (everything
-      is in-memory today). Likely the heaviest subtask here. ADR + code + tests.
-   5. **Notion / Google Docs / Analytics adapter stubs** (Stage 6c) — contract + a
-      fake/stub implementation only; full integration is explicitly Stages 9-11, not here
-      (ROADMAP Stage 6: "полноценная интеграция — Этапы 9–11; здесь — контракт и базовая
+      is in-memory today). Likely the heaviest subtask here. ADR + code + tests. Implements the
+      `RunStore` contract (ADR-0023 §5). **Prerequisite inside this task:** `Run.restore` /
+      `RunSnapshot` (ADR-0015, `RUN_RESTORE_SPEC.md`) are not implemented, and the spec's snapshot
+      composition (§3) predates ADR-0018/0020 — it lacks evaluations, analytics records and their
+      id counters. Amend the spec first, then restoration, then the store.
+   5. **Notion / Google Docs / Analytics adapter stubs** (Stage 6c) — a fake/stub implementation
+      of the existing `BriefBoard` / `ReviewDesk` / `AnalyticsSink` contracts (ADR-0023) only;
+      full integration is explicitly Stages 9-11, not here (ROADMAP Stage 6: "полноценная интеграция — Этапы 9–11; здесь — контракт и базовая
       реализация/заглушка"). ADR + minimal code.
 
    After 7.5, Stage 7 (first real Agent through the full orchestrator, Milestone M2) becomes
