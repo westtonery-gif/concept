@@ -15,14 +15,15 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 26 ADRs (0001–0026) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 27 ADRs (0001–0027) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
   (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019), Analytics Record
   (0020), Skills library (0021), Tool Layer (0022), Adapter Layer contracts (0023), Storage
-  Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026) are all implemented and
-  tested. All gates green: ruff, ruff format, mypy --strict, pytest (723 passed, 0 skipped).
+  Adapter (0024), in-memory adapter stubs (0025), storage wiring (0026), and the first Skill
+  consumer (0027) are all implemented and tested. All gates green: ruff, ruff format, mypy
+  --strict, pytest (732 passed, 0 skipped).
 - **Storage is wired (ROADMAP Stage 7.1, ADR-0026).** `ContentDirector(..., store=RunStore)` saves
   the Run after every **orchestration step**, not every aggregate call: a Task start is committed
   *before* its executor is called, the executor's answer together with its Output + Artifact, the
@@ -87,14 +88,18 @@ the source of truth — code must never contradict them; on conflict, the docs w
   `domain.tool` only (no `skills` — Skills may depend on Tools — no SDK/clock/agents/Run).
   **No agent has a grant yet and there is no tool-use loop**: the LLM port is still single-shot
   structured output; the loop + Toolbox wiring arrive with Stage 7 (ADR-0022 "Deferred").
-- **Skills library exists (ROADMAP Stage 4, ADR-0021, `SKILL_SPEC.md`)**: passive
+- **Skills library exists and has its first consumer (ROADMAP Stage 4 + Stage 7.2, ADR-0021/0027,
+  `SKILL_SPEC.md`)**: passive
   `SkillDescriptor` in `domain/skill.py` (like `Agent`), executable `Skill[In, Out]` Protocol in
   `skills/contract.py` (`descriptor` + pure `apply(input, /)`), three deterministic Skills —
   `segment_text@v1`, `normalize_terminology@v1`, `check_required_elements@v1` — and
   `skills/catalogue.py`. `tests/test_skill_contract.py` scans `skills/` imports: only pure stdlib,
   `domain.skill` and `skills.*` — a Skill importing an agent/Run/application/clock fails the
-  gate. **No agent uses a Skill yet**; `Agent.skill_refs` and the `Deprecated` status arrive with
-  the first consumer (Stage 7, ADR-0021 "Deferred").
+  gate. `Agent.skill_refs` is now passive ordered configuration (default `()`); Rin declares and
+  invokes `normalize_terminology@v1` on its input before the LLM call through
+  `SkillPreprocessingTaskExecutor`. The Task retains the original input, retry re-applies the pure
+  Skill, and the Composition Root requires invocation refs to exactly match the Agent declaration
+  before execution. The `Deprecated` status and a persisted per-invocation trace remain deferred.
 - **Analytics Record exists as a domain entity only** (ADR-0020, `domain/analytics.py`,
   `ANALYTICS_RECORD_SPEC.md`): `Run.record_analytics(task_id, …)` appends an immutable per-call
   record (provider/model, `TokenUsage`, `Cost` as `Decimal`, timezone-aware `TimeRange`);
@@ -215,9 +220,11 @@ process at the time, not a pattern to keep copying.)
       uncommitted executor/evaluator call is at-least-once across a crash (ADR-0026 §4). Deliberately
       left: listing unfinished Runs for a "resume everything" entrypoint, and the human-decision
       round-trip at `WAITING_HUMAN` (Stage 10 / subtask 6).
-   2. **First Skill consumer** — pick an existing Skill (e.g. `check_required_elements@v1`) and
-      decide + document (small ADR) how a Skill is actually invoked around a Task's execution
-      (ADR-0021 "Deferred").
+   2. ~~**First Skill consumer**~~ — done (ADR-0027: `Agent.skill_refs` +
+      `TaskInputSkillInvocation` / `SkillPreprocessingTaskExecutor`; Rin applies
+      `normalize_terminology@v1` to the brief before its LLM call, while the Task keeps the original
+      input; Composition Root fails at build time when declaration and invocation bindings differ;
+      `SKILL_SPEC.md` / `SKILL_ACCEPTANCE.md` 1.1, tests `SCI`).
    3. **Tool-use loop** — extend the LLM port (amends ADR-0014) to a real multi-turn tool-calling
       loop, wire the existing `Toolbox`/`Tool` (ADR-0022) into it, grant an agent a real Tool
       (`current_date@v1`) and prove it gets invoked mid-reasoning. Likely the heaviest subtask.

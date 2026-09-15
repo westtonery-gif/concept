@@ -10,9 +10,9 @@
 > `ADR-0012` (Composition Root — dumb wiring), `ADR-0013` (Execution Topology + Authority).
 > Только предметная область: без кода, типов, исполнения и инфраструктуры.
 
-**Версия документа:** 1.0
+**Версия документа:** 1.1
 **Статус:** Принят (контракт для реализации модели Agent / Prompt)
-**Дата:** 2026-06-28
+**Дата:** 2026-09-15
 **Владелец:** Архитектор предметной области
 
 ---
@@ -36,6 +36,10 @@ Workflow (`ADR-0010`, `ADR-0011`). Он **описывает**, а не дейс
 - **optional metadata (non-execution)** — необязательные **описательные** метаданные, не влияющие
   на исполнение (например, краткое описание зоны ответственности). Они не читаются на этапах
   planning/ordering/execution.
+- **`skill_refs`** — упорядоченный кортеж ссылок на Skills роли (`ADR-0027`); по умолчанию пуст.
+  Это пассивная конфигурация: composition root сопоставляет ссылки со статическими invocation-
+  binding'ами и строит executor-decorator, а Agent ничего не вызывает. Порядок фиксирует порядок
+  последовательных преобразований входа.
 - **`tool_refs`** — выдача Tools роли (`ADR-0022`, `TOOL_SPEC.md` §5): кортеж ссылок
   `<tool_id>@v<n>`; по умолчанию пуст — у роли нет Tools. Это данные, как `prompt_ref`: читаются
   только при сборке `Toolbox` в composition root; сама роль ничего не вызывает.
@@ -51,6 +55,8 @@ Workflow (`ADR-0010`, `ADR-0011`). Он **описывает**, а не дейс
 5. **immutable** — Agent неизменяем после создания; новая ревизия = новое значение.
 6. **ровно один активный Prompt** — Agent ссылается на ровно один активный Prompt (`prompt_ref`,
    active 1:1; `DOMAIN_MODEL.md` §9.3).
+7. **Skill declaration is passive** — `skill_refs` только объявляет версии и порядок; исполняемый
+   binding существует вне Agent и сверяется в composition root (`ADR-0027`).
 
 ---
 
@@ -75,7 +81,8 @@ Workflow (`ADR-0010`, `ADR-0011`). Он **описывает**, а не дейс
 
 ## 5. Resolution rules
 
-Разрешение `agent_ref → Agent → prompt` (чтение дескрипторов) происходит **ТОЛЬКО** в
+Разрешение `agent_ref → Agent → prompt` и сопоставление `Agent.skill_refs` со статическими
+invocation-binding'ами происходит **ТОЛЬКО** в
 **composition root wiring** (`ADR-0012`, `ADR-0013`):
 
 - **never in ContentDirector** — CD не читает Agent/Prompt.
@@ -101,10 +108,10 @@ Workflow (`ADR-0010`, `ADR-0011`). Он **описывает**, а не дейс
 | Раздел AGENT_SPEC | Опора |
 |---|---|
 | 1 Overview / Agent = дескриптор | `DOMAIN_MODEL.md` §2.5, §9.3; `ADR-0010`, `ADR-0011` |
-| 2 Model | `DOMAIN_MODEL.md` §2.5; `ADR-0011` |
-| 3 Invariants | `DOMAIN_MODEL.md` §6; `ADR-0010`, `ADR-0011` |
+| 2 Model | `DOMAIN_MODEL.md` §2.5; `ADR-0011`, `ADR-0022`, `ADR-0027` |
+| 3 Invariants | `DOMAIN_MODEL.md` §6; `ADR-0010`, `ADR-0011`, `ADR-0027` |
 | 4 Prompt contract | `DOMAIN_MODEL.md` §2.7, §6; `ADR-0011`, `ADR-0008` |
-| 5 Resolution rules | `ADR-0012`, `ADR-0013` (§8 selection vs resolution) |
+| 5 Resolution rules | `ADR-0012`, `ADR-0013` (§8 selection vs resolution), `ADR-0027` |
 | 6 Anti-goals | `ADR-0010`, `ADR-0011` |
 
 > При расхождении исправляется **этот** документ: источник истины по домену —

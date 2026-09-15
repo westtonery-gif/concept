@@ -18,9 +18,11 @@ restating any ref string, exactly like ``script_writer``.
 
 from __future__ import annotations
 
+from omemo_content_factory.agents.skill_invocations import NormalizeTerminologyInvocation
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
+from omemo_content_factory.skills.normalize_terminology import TermMapping
 
 # --- reference strings (opaque handles used across the Composition Root) ------------------
 
@@ -64,11 +66,17 @@ CONTENT_RESEARCHER_PROMPT = Prompt(
 
 # --- Agent: the role descriptor (agent_ref -> prompt_ref) --------------------------------
 
+CONTENT_RESEARCHER_SKILL_INVOCATIONS = (
+    NormalizeTerminologyInvocation(glossary=(TermMapping(variant="омемо", canonical="OMEMO"),)),
+)
+"""Ordered, caller-configured Skill invocations applied before Rin's model call (ADR-0027)."""
+
 CONTENT_RESEARCHER_AGENT = Agent(
     agent_id=AGENT_REF,
     name="Rin — Content Researcher",
     prompt_ref=PROMPT_REF,
     description="Turns a brief into minimal content research (target audience, content angle).",
+    skill_refs=tuple(invocation.skill_ref for invocation in CONTENT_RESEARCHER_SKILL_INVOCATIONS),
 )
 
 
@@ -77,3 +85,5 @@ CONTENT_RESEARCHER_AGENT = Agent(
 AGENTS: tuple[Agent, ...] = (CONTENT_RESEARCHER_AGENT,)
 PROMPTS: dict[PromptId, Prompt] = {CONTENT_RESEARCHER_PROMPT.prompt_id: CONTENT_RESEARCHER_PROMPT}
 SCHEMAS: dict[str, Schema] = {SCHEMA_REF: CONTENT_RESEARCH_SCHEMA}
+SKILL_INVOCATIONS = {AGENT_REF: CONTENT_RESEARCHER_SKILL_INVOCATIONS}
+"""Static ``agent_ref -> invocations`` data consumed only by the Composition Root."""

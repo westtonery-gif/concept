@@ -8,6 +8,8 @@ compiler:
 - **injects** a Prompt into its executor **at construction time** (`Prompt.system → system_prompt`,
   `Prompt.schema_ref → schema_ref`; `user_template` handling is deferred so the executor is left
   unchanged),
+- **wraps** that executor with the role's statically configured input Skill invocations when
+  ``Agent.skill_refs`` declares them (`ADR-0027`),
 - **checks structural existence** (build-time only): ``prompt_ref`` and ``Workflow.agent_ref``
   resolve to existing entries — a pure key-presence check, **not** workflow-semantics or policy.
 
@@ -21,11 +23,16 @@ point inward, `PROJECT.md` §7).
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TypeAlias
 
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
+from omemo_content_factory.application.skill_execution import (
+    SkillPreprocessingTaskExecutor,
+    TaskInputSkillInvocation,
+)
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId
@@ -39,6 +46,9 @@ RUN_STORE_PATH_VAR = "OMEMO_RUN_STORE_PATH"
 
 DEFAULT_RUN_STORE_PATH = Path(".omemo") / "runs.sqlite3"
 """The Run store when ``OMEMO_RUN_STORE_PATH`` is unset or blank, relative to the working dir."""
+
+AgentSkillInvocations: TypeAlias = Mapping[str, Sequence[TaskInputSkillInvocation]]
+"""Static ``agent_ref -> ordered Skill invocations`` supplied by role catalogues (ADR-0027)."""
 
 
 class CompositionError(Exception):
@@ -67,6 +77,8 @@ def build_executor_map(
     prompts: Mapping[PromptId, Prompt],
     client: LLMClient,
     schemas: Mapping[str, Schema],
+    *,
+    skill_invocations: AgentSkillInvocations | None = None,
 ) -> dict[str, TaskExecutor]:
     """Compile the `agent_ref → TaskExecutor` mapping from the static catalogues (build-time).
 
@@ -79,7 +91,9 @@ def build_executor_map(
     (corollary of the structured-only port; see `ADR-0014` §4). Build-time consistency is enforced
     — a duplicate
     `agent_ref`, an unknown `prompt_ref`, or an unknown `schema_ref` raises ``CompositionError``
-    (structural existence checks, `ADR-0012`). An empty shape is rejected by the executor's own
+    (structural existence checks, `ADR-0012`). Declared ``Agent.skill_refs`` must exactly match the
+    role's supplied invocation refs, including order, or composition also fails before execution
+    (`ADR-0027`). An empty shape is rejected by the executor's own
     construction invariant (`ADR-0014` §3, Locus 2); the Composition Root passes parameters and does
     not judge configuration correctness.
     """
@@ -97,12 +111,26 @@ def build_executor_map(
             raise CompositionError(
                 f"prompt '{prompt.prompt_id}' references unknown schema '{prompt.schema_ref}'"
             )
-        executors[agent.agent_id] = LLMTaskExecutor(
+        base_executor = LLMTaskExecutor(
             client=client,
             system_prompt=prompt.system,
             user_template=prompt.user_template,
             schema_ref=prompt.schema_ref,
             output_fields=schema.view.required_fields,
+        )
+        configured = tuple(
+            () if skill_invocations is None else skill_invocations.get(agent.agent_id, ())
+        )
+        configured_refs = tuple(invocation.skill_ref for invocation in configured)
+        if configured_refs != agent.skill_refs:
+            raise CompositionError(
+                f"agent '{agent.agent_id}' declares skill_refs {agent.skill_refs!r}, "
+                f"but its invocations are {configured_refs!r}"
+            )
+        executors[agent.agent_id] = (
+            SkillPreprocessingTaskExecutor(base_executor, configured)
+            if configured
+            else base_executor
         )
     return executors
 
@@ -144,6 +172,7 @@ def build_content_director(
     client: LLMClient,
     schemas: Mapping[str, Schema],
     *,
+    skill_invocations: AgentSkillInvocations | None = None,
     store: RunStore | None = None,
 ) -> ContentDirector:
     """Compile the executor and schema maps and hand them to a ``ContentDirector``.
@@ -151,10 +180,13 @@ def build_content_director(
     The Content Director only *selects* from the assembled maps at runtime (`ADR-0013` §8); it
     never builds them. ``schemas`` is **required**: it supplies both the generation shape injected
     into each executor (`ADR-0014` §3) and the `agent_ref → Schema` map through which execution
-    finalizes Output via the validated path (`ADR-0013` §8, Variant A). ``store``, when given, is
-    the ``RunStore`` the Director commits every step to (`ADR-0026`).
+    finalizes Output via the validated path (`ADR-0013` §8, Variant A). ``skill_invocations`` is
+    the static role configuration used to wrap agents that declare ``skill_refs`` (`ADR-0027`).
+    ``store``, when given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
     """
-    executors = build_executor_map(agents, prompts, client, schemas)
+    executors = build_executor_map(
+        agents, prompts, client, schemas, skill_invocations=skill_invocations
+    )
     return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)
 
 
@@ -181,6 +213,7 @@ def compile_runtime(
     workflow: Workflow,
     schemas: Mapping[str, Schema],
     *,
+    skill_invocations: AgentSkillInvocations | None = None,
     store: RunStore | None = None,
 ) -> ContentDirector:
     """Build executor + schema maps, structurally check vs ``workflow``, wire the CD.
@@ -189,9 +222,12 @@ def compile_runtime(
     workflow-semantics, no policy) catches an unknown ``agent_ref`` as a ``CompositionError`` here,
     so selection never raises at runtime. ``schemas`` is **required** — it supplies the generation
     shape per executor (`ADR-0014` §3) and the `agent_ref → Schema` map for the validated Output
-    path (`ADR-0013` §8, Variant A). ``store``, when given, is the ``RunStore`` the Director commits
-    every step to (`ADR-0026`).
+    path (`ADR-0013` §8, Variant A). ``skill_invocations`` is the static role configuration checked
+    and wired according to ``Agent.skill_refs`` (`ADR-0027`). ``store``, when given, is the
+    ``RunStore`` the Director commits every step to (`ADR-0026`).
     """
-    executors = build_executor_map(agents, prompts, client, schemas)
+    executors = build_executor_map(
+        agents, prompts, client, schemas, skill_invocations=skill_invocations
+    )
     validate_workflow_executors(workflow, executors)
     return ContentDirector(executors, build_schema_map(agents, prompts, schemas), store=store)

@@ -501,6 +501,7 @@ def test_swr_11_a_configured_store_is_built_and_the_compiled_director_commits_to
         FakeLLMClient(),
         workflow,
         {**rin.SCHEMAS, **leo.SCHEMAS},
+        skill_invocations=rin.SKILL_INVOCATIONS,
         store=store,
     )
     run = _new_run()

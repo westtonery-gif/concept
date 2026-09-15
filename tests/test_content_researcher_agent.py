@@ -9,6 +9,7 @@ Output. Same shape as the ``script_writer`` (Leo) tests — this is Pattern Appl
 from __future__ import annotations
 
 from omemo_content_factory.agents import content_researcher as rin
+from omemo_content_factory.application.skill_execution import SkillPreprocessingTaskExecutor
 from omemo_content_factory.composition import build_content_director, build_executor_map
 from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.domain.schema import SchemaStatus
@@ -23,22 +24,36 @@ def test_assets_are_valid_and_self_consistent() -> None:
     assert view.status is SchemaStatus.ACTIVE
     assert view.required_fields == ("audience", "angle")
     assert rin.CONTENT_RESEARCHER_AGENT.agent_id == "content_researcher@v1"
+    assert rin.CONTENT_RESEARCHER_AGENT.skill_refs == ("normalize_terminology@v1",)
     # agent -> prompt -> schema references chain together through the exposed catalogues.
     assert rin.PROMPTS[rin.CONTENT_RESEARCHER_AGENT.prompt_ref] is rin.CONTENT_RESEARCHER_PROMPT
     assert rin.SCHEMAS[rin.CONTENT_RESEARCHER_PROMPT.schema_ref] is rin.CONTENT_RESEARCH_SCHEMA
     assert rin.CONTENT_RESEARCHER_PROMPT.schema_ref == "content-research-report"
 
 
-def test_composition_resolves_rin_with_generation_shape() -> None:
-    executors = build_executor_map(rin.AGENTS, rin.PROMPTS, FakeLLMClient(), rin.SCHEMAS)
+def test_composition_resolves_rin_with_generation_shape_and_skill() -> None:
+    executors = build_executor_map(
+        rin.AGENTS,
+        rin.PROMPTS,
+        FakeLLMClient(),
+        rin.SCHEMAS,
+        skill_invocations=rin.SKILL_INVOCATIONS,
+    )
     executor = executors[rin.AGENT_REF]
-    assert isinstance(executor, LLMTaskExecutor)
-    assert executor.schema_ref == "content-research-report"
-    assert executor.output_fields == ("audience", "angle")  # shape projected from Schema
+    assert isinstance(executor, SkillPreprocessingTaskExecutor)
+    assert isinstance(executor.delegate, LLMTaskExecutor)
+    assert executor.delegate.schema_ref == "content-research-report"
+    assert executor.delegate.output_fields == ("audience", "angle")  # projected from Schema
 
 
 def test_keyless_run_produces_valid_content_research() -> None:
-    director = build_content_director(rin.AGENTS, rin.PROMPTS, FakeLLMClient(), rin.SCHEMAS)
+    director = build_content_director(
+        rin.AGENTS,
+        rin.PROMPTS,
+        FakeLLMClient(),
+        rin.SCHEMAS,
+        skill_invocations=rin.SKILL_INVOCATIONS,
+    )
     run = Run.create(run_id="rin-1", content_brief_ref="brief", workflow_version_ref="wf@1")
     workflow = Workflow.create(
         workflow_id="wf",

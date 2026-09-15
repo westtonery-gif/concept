@@ -24,6 +24,7 @@ from omemo_content_factory.infrastructure.fake_llm import FakeLLMClient
 AGENTS = (*rin.AGENTS, *leo.AGENTS)
 PROMPTS = {**rin.PROMPTS, **leo.PROMPTS}
 SCHEMAS = {**rin.SCHEMAS, **leo.SCHEMAS}
+SKILL_INVOCATIONS = {**rin.SKILL_INVOCATIONS}
 
 WORKFLOW = Workflow.create(
     workflow_id="research-to-script@v1",
@@ -46,7 +47,14 @@ WORKFLOW = Workflow.create(
 
 
 def test_compile_runtime_resolves_both_migrated_roles() -> None:
-    director = compile_runtime(AGENTS, PROMPTS, FakeLLMClient(), WORKFLOW, SCHEMAS)
+    director = compile_runtime(
+        AGENTS,
+        PROMPTS,
+        FakeLLMClient(),
+        WORKFLOW,
+        SCHEMAS,
+        skill_invocations=SKILL_INVOCATIONS,
+    )
     run = Run.create(run_id="rin-leo-1", content_brief_ref="brief", workflow_version_ref="wf@1")
 
     director.execute_workflow(run, WORKFLOW, brief="умная кофеварка")
@@ -56,7 +64,14 @@ def test_compile_runtime_resolves_both_migrated_roles() -> None:
 
 
 def test_rins_output_becomes_leos_input() -> None:
-    director = compile_runtime(AGENTS, PROMPTS, FakeLLMClient(), WORKFLOW, SCHEMAS)
+    director = compile_runtime(
+        AGENTS,
+        PROMPTS,
+        FakeLLMClient(),
+        WORKFLOW,
+        SCHEMAS,
+        skill_invocations=SKILL_INVOCATIONS,
+    )
     run = Run.create(run_id="rin-leo-2", content_brief_ref="brief", workflow_version_ref="wf@1")
 
     director.execute_workflow(run, WORKFLOW, brief="умная кофеварка")
@@ -68,7 +83,14 @@ def test_rins_output_becomes_leos_input() -> None:
 
 
 def test_both_outputs_were_recorded_as_schema_valid() -> None:
-    director = compile_runtime(AGENTS, PROMPTS, FakeLLMClient(), WORKFLOW, SCHEMAS)
+    director = compile_runtime(
+        AGENTS,
+        PROMPTS,
+        FakeLLMClient(),
+        WORKFLOW,
+        SCHEMAS,
+        skill_invocations=SKILL_INVOCATIONS,
+    )
     run = Run.create(run_id="rin-leo-3", content_brief_ref="brief", workflow_version_ref="wf@1")
 
     director.execute_workflow(run, WORKFLOW, brief="умная кофеварка")

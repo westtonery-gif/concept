@@ -62,6 +62,7 @@ BRIEF = (
 AGENTS = (*rin.AGENTS, *leo.AGENTS)
 PROMPTS = {**rin.PROMPTS, **leo.PROMPTS}
 SCHEMAS = {**rin.SCHEMAS, **leo.SCHEMAS}
+SKILL_INVOCATIONS = {**rin.SKILL_INVOCATIONS}
 
 WORKFLOW = Workflow.create(
     workflow_id="research-to-script@v1",
@@ -107,7 +108,15 @@ def _build_executors() -> dict[str, TaskExecutor]:
     executors: dict[str, TaskExecutor] = {}
     for agent in AGENTS:
         role_client = client_for_role(agent.agent_id, os.environ)
-        executors.update(build_executor_map([agent], PROMPTS, role_client, SCHEMAS))
+        executors.update(
+            build_executor_map(
+                [agent],
+                PROMPTS,
+                role_client,
+                SCHEMAS,
+                skill_invocations=SKILL_INVOCATIONS,
+            )
+        )
     return executors
 
 

@@ -46,9 +46,26 @@ def test_agt_t1_agent_is_granted_no_tools_by_default() -> None:
     assert granted.tool_refs == ("text_metrics@v1",)
 
 
+def test_sci_01_agent_declares_no_skills_by_default() -> None:
+    assert _agent().skill_refs == ()
+    configured = Agent(
+        agent_id="w@v1",
+        name="W",
+        prompt_ref="p",
+        skill_refs=("normalize_terminology@v1",),
+    )
+    assert configured.skill_refs == ("normalize_terminology@v1",)
+
+
+def test_sci_01_skill_refs_are_additive_after_the_existing_positional_fields() -> None:
+    agent = Agent("w@v1", "W", "p", "description", ("text_metrics@v1",))
+    assert agent.tool_refs == ("text_metrics@v1",)
+    assert agent.skill_refs == ()
+
+
 def test_agent_is_immutable() -> None:
     agent = _agent()
-    for field in ("agent_id", "name", "prompt_ref", "description", "tool_refs"):
+    for field in ("agent_id", "name", "prompt_ref", "description", "skill_refs", "tool_refs"):
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(agent, field, "x")
 

@@ -4,7 +4,7 @@
 > `DOMAIN_MODEL.md` §2.6/§9.5 (PROJECT §17: при конфликте побеждают документы). Приёмка —
 > `SKILL_ACCEPTANCE.md`.
 >
-> **Статус:** Accepted. **Дата:** 2026-09-15.
+> **Статус:** Accepted. **Версия:** 1.1. **Дата:** 2026-09-15.
 
 ---
 
@@ -13,8 +13,8 @@
 - **Что это.** Skill — переиспользуемая детерминированная операция **одной задачи**, из которых
   агенты собирают поведение. Библиотека Skills — пакет `omemo_content_factory.skills`.
 - **В scope.** Дескриптор каталога, исполняемый контракт `Skill`, три первых Skill, каталог,
-  ошибки, проверки границ.
-- **Вне scope.** Ссылки Agent → Skill (Этап 7); статус `Active`/`Deprecated`; Skills, опирающиеся
+  ошибки, проверки границ; первая ссылка Agent → Skill и pre-execution invocation (`ADR-0027`).
+- **Вне scope.** Статус `Active`/`Deprecated`; Skills, опирающиеся
   на Tools/Adapters (после Этапов 5–6); реестр с разрешением по ref в рантайме; LLM внутри Skill.
 
 ## 2. Дескриптор (`domain/skill.py`)
@@ -64,3 +64,21 @@
 | `dataclasses.FrozenInstanceError` | — | попытка изменить дескриптор, вход или выход |
 
 `SkillDomainError` наследует `DomainError` (ADR-0017).
+
+## 7. Первый потребитель и invocation boundary (Stage 7.2)
+
+1. `Agent.skill_refs` — упорядоченный кортеж `SkillRef`, по умолчанию `()`. Это пассивная
+   декларация; Agent не получает методов исполнения.
+2. `TaskInputSkillInvocation` адаптирует строковый вход `TaskExecutor` к типизированному входу и
+   выходу конкретного Skill: `skill_ref` + `apply_to(task_input, /) -> str`.
+3. `SkillPreprocessingTaskExecutor` применяет invocation'ы в порядке `Agent.skill_refs`, затем
+   ровно один раз вызывает вложенный executor и без изменений возвращает его `ExecutionResult`.
+4. Composition Root до исполнения требует точного равенства объявленных refs и refs переданных
+   invocation'ов, включая порядок; несовпадение → `CompositionError` до вызова модели/изменения Run.
+5. Оригинальный `task_input` хранится в Task. Skill применяется после start-commit и перед внешним
+   вызовом. Retry повторяет чистое преобразование над тем же сохранённым входом; отдельного commit
+   для Skill нет.
+6. Первый потребитель — `content_researcher@v1`: `normalize_terminology@v1` с конфигурацией
+   `"омемо" → "OMEMO"`. Конфигурация принадлежит роли/вызывающей стороне, не Skill.
+7. Post-execution/report policy, персистентный trace invocation'ов и lifecycle Skills остаются вне
+   scope (ADR-0027 "Deferred").

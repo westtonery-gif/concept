@@ -12,8 +12,9 @@ A successful execution records the Task's domain ``Output`` **only via the unifi
 (3D, evaluation-ownership Variant A): when a ``schema`` is supplied and the result carries
 ``output`` + ``schema_ref`` + structured ``payload_fields``, the application invokes
 ``Schema.validate`` (Schema = authority) and the pure sink ``Run.record_output`` persists the
-VALID/INVALID verdict. There is no legacy always-VALID path. Still deliberately **out of scope**:
-QA / Human Approval; providers; adapters; queues; Skills; Tools; and any infrastructure.
+VALID/INVALID verdict. There is no legacy always-VALID path. Skill preprocessing is an executor
+decorator outside this slice (`ADR-0027`), so this module remains unaware of it. Still deliberately
+**out of scope**: QA / Human Approval; providers; adapters; queues; Tools; and infrastructure.
 """
 
 from __future__ import annotations
