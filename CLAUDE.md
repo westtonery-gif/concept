@@ -335,9 +335,41 @@ process at the time, not a pattern to keep copying.)
     suggested opening question for whichever session picks this up. Do not start any of §16's
     "video vertical slice" work, or reorder Stage 8-13, without that explicit ADR decision first.
 11. **ROADMAP Stage 8 — QA Agent.** Next (ROADMAP order; also `CONTENT_FACTORY_THOUGHTS.md` §16's
-    first step after Stage 7). First session: break it into session-sized subtasks here, as tasks 7
-    and 8 were. The fail-closed gate (ADR-0018) and rework routing (ADR-0032) already exist; what's
-    missing is a real `ArtifactEvaluator` role wired into an entrypoint.
+    first step after Stage 7). The fail-closed gate (ADR-0018) and rework routing (ADR-0032)
+    already exist; `application/qa_evaluation.py`'s `ArtifactEvaluator` Protocol
+    (`evaluate(content: str) -> EvaluationResult`) is the seam — its own docstring already says
+    "the QA Agent (ROADMAP Stage 8) implements the same contract." What's missing is a real role
+    behind it, on the same template as Rin/Leo (Stage 7): Agent + Prompt (bundled store, ADR-0030)
+    + Schema + optionally Skills/Tools. Broken into subtasks:
+    1. **Verdict shape — needs a small ADR.** `EvaluationResult.verdict` is one of
+       `PASSED`/`FLAGGED`/`FAILED` (an enum) plus `flags: tuple[str, ...]`, but the structured
+       LLM port (ADR-0014 Variant B) only returns flat `Mapping[str, str]` fields — no prior agent
+       has produced an enum-constrained field or a multi-value one. Decide and document: how the
+       model's raw structured fields map onto a validated three-way verdict and a flags list (e.g.
+       a `verdict` field with an allowed-value check in the QA Schema, `flags` as some
+       serialization convention) before writing the Schema itself.
+    2. **QA Agent role: Prompt + Schema + catalog entry** — e.g. `qa_agent@v1` in
+       `agents/qa_agent.py`, mirroring `content_researcher.py`/`script_writer.py`'s shape. The
+       system prompt needs real quality **and** medical-compliance judgment criteria for the
+       health domain (ROADMAP Stage 8's own goal) — this is product/domain content, not something
+       to invent unreviewed; flag it for the maintainer's input rather than guessing clinical
+       rules. Consider granting existing Skills (e.g. `check_required_elements@v1` for mandatory
+       disclaimers) — no new Skill/Tool needed unless a real gap shows up.
+    3. **`LLMArtifactEvaluator`** — an `ArtifactEvaluator` implementation analogous to
+       `LLMTaskExecutor` (`infrastructure/llm.py`): calls `LLMClient.complete` with the QA
+       Prompt/Schema's generation shape, converts the structured fields into an `EvaluationResult`
+       per subtask 1's mapping. Reuses the existing `LLMClient`/`client_for_role` port — no new
+       provider seam.
+    4. **Wire it into a real entrypoint** — extend Composition Root helpers (or add a small
+       analogous one) to build the QA evaluator from its catalog entry the same way
+       `build_executor_map` + `client_for_role` do for Rin/Leo, then pass `qa=` into
+       `ContentDirector` in `demo_factory.py` (or a new demo). This is the **first real exercise**
+       of a risk verdict actually produced by a model, not a test fake — watch specifically that
+       ADR-0032's rework routing fires correctly off a real `FLAGGED`/`FAILED`.
+    5. **Stage 8 acceptance** — a test in the shape of `test_m2_acceptance.py` proving both DoD
+       lines end to end: a `PASSED` verdict lets a run complete, a risk verdict fail-closes to
+       `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop
+       (ADR-0032) — covered with a realistic evaluator, not necessarily a live API call.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
