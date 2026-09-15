@@ -45,13 +45,19 @@ PAYLOAD = "generated content"
 CD = Actor.CONTENT_DIRECTOR
 
 # Edges that do NOT raise InvalidArtifactTransitionError, per the reachable source states
-# (ADR-0006 §4 + ADR-0007 §6). ``CANDIDATE -> APPROVED`` is a valid edge but gated by an approving
-# Human Review (it raises ArtifactNotApprovedError, not InvalidArtifactTransitionError); it is
-# therefore excluded from the "structurally forbidden" set tested here and covered in
-# test_human_review.py.
+# (ADR-0006 §4 + ADR-0007 §6 + ADR-0019 §3). Two of them are valid edges guarded by the Run root
+# rather than by the transition table, so they raise a *different* domain error and are excluded
+# from the "structurally forbidden" set tested here: ``CANDIDATE -> APPROVED`` (gated by an
+# approving Human Review and a passing QA verdict — see test_human_review.py / test_evaluation.py)
+# and ``-> SUPERSEDED`` (reachable only by creating the next version — see
+# test_artifact_versioning.py).
 _ALLOWED_BY_SPEC: dict[ArtifactStatus, set[ArtifactStatus]] = {
-    ArtifactStatus.DRAFT: {ArtifactStatus.CANDIDATE},
-    ArtifactStatus.CANDIDATE: {ArtifactStatus.APPROVED, ArtifactStatus.REJECTED},
+    ArtifactStatus.DRAFT: {ArtifactStatus.CANDIDATE, ArtifactStatus.SUPERSEDED},
+    ArtifactStatus.CANDIDATE: {
+        ArtifactStatus.APPROVED,
+        ArtifactStatus.REJECTED,
+        ArtifactStatus.SUPERSEDED,
+    },
 }
 _FORBIDDEN_TRANSITIONS: list[tuple[ArtifactStatus, ArtifactStatus]] = [
     (source, target)
@@ -169,7 +175,7 @@ def test_artifact_transitions_draft_to_candidate() -> None:
 def test_forbidden_artifact_transitions_are_rejected(
     source: ArtifactStatus, target: ArtifactStatus
 ) -> None:
-    """Only DRAFT -> CANDIDATE is allowed; every other edge is rejected (ADR-0006 §4)."""
+    """Every edge outside the allowed-transitions table is rejected (ADR-0006 §4)."""
     run = make_run()
     artifact_id = artifact_in(run, source)
     with pytest.raises(InvalidArtifactTransitionError):

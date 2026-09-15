@@ -12,6 +12,12 @@ aggregate root, and changes nothing in Run or Task.
 The work itself is delegated to an injected :class:`TaskExecutor` (a deterministic fake in
 tests and in the demo). When a Task succeeds with structured output, its ``Output`` is recorded
 through the Run and an ``Artifact`` is created from it (provenance ``Task -> Output -> Artifact``).
+
+QA gate (ADR-0018 §7): when a QA evaluator is injected, the ``WAITING_QA`` step becomes real — the
+final step's Artifact is made a ``CANDIDATE`` and evaluated (``evaluate_artifact``). Only a
+``PASSED`` verdict lets the Run go on; a risk verdict is **fail closed**: the Run stops at the
+Approval Gate (``WAITING_HUMAN``) with a Human Review opened for escalation, never ``COMPLETED``.
+Without an evaluator the flow is unchanged.
 """
 
 from __future__ import annotations
@@ -19,13 +25,19 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator, evaluate_artifact
 from omemo_content_factory.application.task_execution import TaskExecutor, execute_task
+from omemo_content_factory.domain.artifact import ArtifactId, ArtifactStatus
+from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.domain.workflow import Workflow
 
 _CD = Actor.CONTENT_DIRECTOR
+
+NO_CANDIDATE_REASON = "QA gate: no candidate artifact to evaluate"
+"""Failure reason when QA is wired but the final step produced no Artifact (ADR-0018 §7)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,15 +64,18 @@ class ContentDirector:
     role runs with its own implementation/prompt — selecting which executor runs a step is
     orchestration (ARCHITECTURE.md §4: the Content Director "calls agents"). The executors
     themselves are unaware of one another; the role's prompt lives inside its executor, not here.
+    ``qa`` optionally injects the QA evaluator that makes the ``WAITING_QA`` gate real (ADR-0018).
     """
 
     def __init__(
         self,
         executor: TaskExecutor | Mapping[str, TaskExecutor],
         schemas: Mapping[str, Schema] | None = None,
+        qa: ArtifactEvaluator | None = None,
     ) -> None:
         self._executor = executor
         self._schemas = schemas
+        self._qa = qa
 
     def execute(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
         """Orchestrate an **already-created** Run through its full lifecycle.
@@ -75,12 +90,13 @@ class ContentDirector:
         (provenance ``Task -> Output -> Artifact``). Structured data flows between steps: a Task's
         Output becomes the next Task's input (ARCHITECTURE.md §4), so the first step gets the
         brief (its ``task_input``) and each later step gets the previous Output. If every Task
-        succeeded, the Run proceeds ``WAITING_QA`` -> ``WAITING_HUMAN`` -> ``COMPLETED``;
-        otherwise it is routed to ``FAILED``. The Run is mutated in place through its own API.
+        succeeded, the Run proceeds ``WAITING_QA`` -> (QA gate, when wired) -> ``WAITING_HUMAN``
+        -> ``COMPLETED``; otherwise it is routed to ``FAILED``. The Run is mutated in place.
         """
         run.transition(RunStatus.QUEUED, by=_CD)
         run.transition(RunStatus.RUNNING, by=_CD)
         chained_input: str | None = None
+        candidate: ArtifactId | None = None
         for request in tasks:
             task_input = request.task_input if chained_input is None else chained_input
             task_id = execute_task(
@@ -92,15 +108,20 @@ class ContentDirector:
                 schema=self._resolve_schema(request.agent_ref),
             )
             output = run.task(task_id).output
+            candidate = None
             if output is not None:
-                run.create_artifact(output.output_id, kind=request.artifact_kind, by=_CD)
+                candidate = run.create_artifact(
+                    output.output_id, kind=request.artifact_kind, by=_CD
+                )
                 chained_input = output.payload
-        if self._all_tasks_succeeded(run):
-            run.transition(RunStatus.WAITING_QA, by=_CD)
-            run.transition(RunStatus.WAITING_HUMAN, by=_CD)
-            run.transition(RunStatus.COMPLETED, by=_CD)
-        else:
+        if not self._all_tasks_succeeded(run):
             run.transition(RunStatus.FAILED, by=_CD, reason="one or more tasks failed")
+            return
+        run.transition(RunStatus.WAITING_QA, by=_CD)
+        if self._qa is not None and not self._pass_qa_gate(run, self._qa, candidate):
+            return
+        run.transition(RunStatus.WAITING_HUMAN, by=_CD)
+        run.transition(RunStatus.COMPLETED, by=_CD)
 
     def execute_workflow(self, run: Run, workflow: Workflow, *, brief: str) -> None:
         """Resolve a Workflow into the Task sequence (strict list order) and run it (ADR-0009 §8).
@@ -147,6 +168,26 @@ class ContentDirector:
         if self._schemas is None:
             return None
         return self._schemas.get(agent_ref)
+
+    @staticmethod
+    def _pass_qa_gate(run: Run, qa: ArtifactEvaluator, candidate: ArtifactId | None) -> bool:
+        """Run the fail-closed QA gate on the final Artifact; ``True`` only on ``PASSED``.
+
+        No candidate -> the Run is routed to ``FAILED`` (nothing to evaluate is not a pass). A risk
+        verdict (``FLAGGED`` / ``FAILED``) -> forced escalation (PROJECT.md §12): the Run stops at
+        ``WAITING_HUMAN`` with a Human Review opened on the candidate; the Run's approval gate keeps
+        the Artifact from being approved (ADR-0018 §5, §7).
+        """
+        if candidate is None:
+            run.transition(RunStatus.FAILED, by=_CD, reason=NO_CANDIDATE_REASON)
+            return False
+        run.transition_artifact(candidate, ArtifactStatus.CANDIDATE, by=_CD)
+        evaluation_id = evaluate_artifact(run, qa, candidate)
+        if run.evaluation(evaluation_id).status is EvaluationStatus.PASSED:
+            return True
+        run.transition(RunStatus.WAITING_HUMAN, by=_CD)
+        run.open_human_review(candidate, by=_CD)
+        return False
 
     @staticmethod
     def _all_tasks_succeeded(run: Run) -> bool:

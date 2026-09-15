@@ -15,12 +15,18 @@ the source of truth — code must never contradict them; on conflict, the docs w
 7. Code in `src/`, tests in `tests/`
 
 ## Current state (2026-09-15)
-- **All 17 ADRs (0001–0017) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 19 ADRs (0001–0019) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
-  (0017) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict,
-  pytest (275 passed, 1 skipped).
+  (0017), Evaluation/QA + fail-closed gate (0018), Artifact versioning (0019) are all implemented
+  and tested. All gates green: ruff, ruff format, mypy --strict, pytest (328 passed, 1 skipped).
+- **QA gate is fail closed** (ADR-0018, `domain/evaluation.py`, `EVALUATION_SPEC.md`): an
+  Artifact reaches `APPROVED` only with an approving Human Review **and** a `PASSED` *latest*
+  Evaluation — no/pending/`FLAGGED`/`FAILED` QA blocks it even after a human Approve.
+  `ContentDirector(..., qa=evaluator)` evaluates the final step's Artifact at `WAITING_QA`;
+  a risk verdict stops the Run at `WAITING_HUMAN` with an escalation review. No entrypoint
+  wires a real QA evaluator yet — that is the QA Agent (ROADMAP Stage 8).
 - **Domain errors share one root**: every per-aggregate base (`RunDomainError`,
   `TaskDomainError`, …) subclasses `DomainError` (`domain/errors.py`, ADR-0017). A new
   aggregate must root its own error base there; `tests/test_domain_error.py` enforces it.
@@ -29,10 +35,16 @@ the source of truth — code must never contradict them; on conflict, the docs w
   (`tests/test_content_researcher_agent.py`, `tests/test_script_writer_agent.py`) and together
   as a real two-step Workflow (`tests/test_research_to_script_workflow.py`,
   `demo_factory.py`).
-- Artifact transitions actually wired: `DRAFT→CANDIDATE→APPROVED→PUBLISHED` and
-  `CANDIDATE→REJECTED` (gated by Human Review, ADR-0007). Only `SUPERSEDED` (versioning) has
-  no edges yet — the module docstring in `artifact.py` predates ADR-0007 and still says
-  otherwise; fix it together with the versioning ADR (task 4 below), not standalone.
+- **The Artifact lifecycle is fully wired** (ADR-0006/0007/0018/0019): `DRAFT→CANDIDATE→APPROVED→
+  PUBLISHED`, `CANDIDATE→REJECTED` (approval gated by Human Review + QA) and, from every *working*
+  state (`DRAFT`/`CANDIDATE`/`APPROVED`), `→SUPERSEDED`. A fixed version is immutable: rework goes
+  through `Run.create_artifact_version(previous, output, by=…)`, which supersedes the predecessor
+  and creates the successor (`version` + 1, `supersedes_ref`, its own Output) in one operation.
+  `SUPERSEDED` is deliberately **not** reachable via `transition_artifact`
+  (`ArtifactSupersessionError`). A new version inherits neither the predecessor's approval nor its
+  QA verdict — the gates key on the artifact id, so rework restarts the lifecycle by construction.
+  Orchestrating rework (ContentDirector routing a risk verdict into a re-run) is still open —
+  ADR-0019 "Deferred", ROADMAP Stage 7/8.
 - `client_for_role` (ADR-0016 realization, `infrastructure/provider_model.py`) is implemented
   and tested, but **not yet used by any entrypoint** — `demo.py` and `demo_factory.py` both
   still take one shared client for every role via `OMEMO_LLM_MODEL` (task 6 below).
@@ -60,12 +72,13 @@ not a precedent).
 1. ~~Actualize this file~~ — done.
 2. ~~Extract the shared `DomainError` base~~ — done (ADR-0017, `domain/errors.py`, merged via
    [PR #1](https://github.com/westtonery-gif/omemo-content-factory/pull/1)).
-3. **Evaluation / QA entity** (`fail closed`; deferred by ADR-0005/0006/0007) — new ADR +
-   SPEC/ACCEPTANCE + domain code + wiring into `application/task_execution.py` before the
-   Human Review gate. Blocks ROADMAP Stage 8 (QA Agent) and an honest MVP path. Its error base
-   subclasses `DomainError` (ADR-0017).
-4. **Artifact versioning** (`SUPERSEDED`) — new ADR + domain code; fix `artifact.py`'s stale
-   module docstring in the same change.
+3. ~~Evaluation / QA entity~~ — done (ADR-0018, `domain/evaluation.py`,
+   `application/qa_evaluation.py`; wired in `ContentDirector`, where `WAITING_QA` happens).
+4. ~~Artifact versioning (`SUPERSEDED`)~~ — done (ADR-0019, `Run.create_artifact_version` +
+   `domain/artifact.py`, `tests/test_artifact_versioning.py`; `artifact.py`'s stale module
+   docstring fixed in the same change). The domain rework path exists now; **routing** a QA risk
+   verdict / `CHANGES_REQUESTED` into a re-run that produces the new version is still open
+   (ADR-0019 "Deferred", ROADMAP Stage 7/8).
 5. **Analytics Record** entity — new ADR + domain code. Needed for ROADMAP Stage 14
    (metrics), not before — lowest urgency of the domain gaps.
 6. Wire `client_for_role` into a real entrypoint (e.g. `demo_factory.py`) so each role actually
