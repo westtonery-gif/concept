@@ -149,8 +149,9 @@ publication or external integrations are involved.
 
 `demo_factory.py` runs the same kind of end-to-end Workflow, but through the **actual catalogued
 production roles** migrated from Main Core (ADR-0016) — Rin (`content_researcher@v1`) then Leo
-(`script_writer@v1`) — assembled by the real Composition Root instead of `demo.py`'s hand-written
-one-off prompts. Unlike `demo.py`, each role resolves **its own** provider/model via
+(`script_writer@v1`), with Leo's script judged at the fail-closed QA gate by the QA role
+(`qa_agent@v1`, ADR-0038) — assembled by the real Composition Root instead of `demo.py`'s
+hand-written one-off prompts. Unlike `demo.py`, each role resolves **its own** provider/model via
 `client_for_role` (ADR-0016) — there is no shared/default model:
 
 ```bash
@@ -165,8 +166,23 @@ export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
 export OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_OUTPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_PRICE_CURRENCY__SCRIPT_WRITER_V1=USD
+export OMEMO_PROVIDER__QA_AGENT_V1=anthropic
+export OMEMO_MODEL__QA_AGENT_V1=claude-sonnet-4-6
+export OMEMO_INPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_OUTPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
+export OMEMO_PRICE_CURRENCY__QA_AGENT_V1=USD
 python demo_factory.py
 ```
+
+A `passed` QA verdict completes the Run. A `flagged` / `failed` verdict stops it at `WAITING_HUMAN`
+with a Review open; play the reviewer to drive a rework from the model's flags (ADR-0032):
+
+```bash
+python demo_factory.py --request-changes "add a source for the 70% figure"
+```
+
+If the QA call itself fails (provider error, or an answer that breaks the verdict grammar), the Run
+stays at `WAITING_QA` and running the demo again asks QA again (ADR-0038).
 
 Replace the rate placeholders with the provider's current per-million-token prices. Pricing is
 explicit and per role; an Anthropic binding without both rates and a currency fails closed rather

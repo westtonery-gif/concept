@@ -3,9 +3,10 @@
 > Приёмка реализации `EVALUATION_SPEC.md` (по `ADR-0018`). Каждый критерий фальсифицируем: при
 > неверной реализации соответствующий тест падает. Идентификаторы используются в докстрингах
 > тестов (`tests/test_evaluation.py`, `tests/test_qa_evaluation.py`, `tests/test_qa_agent.py`,
-> `tests/test_qa_call_metrics.py`).
+> `tests/test_qa_call_metrics.py`, `tests/test_qa_wiring.py`).
 >
 > **Статус:** Accepted. **Дата:** 2026-09-15. Дополнено `ADR-0036` (2026-09-16): EFL-07, §4.3.
+> Дополнено `ADR-0038` (2026-09-17): §4.4.
 
 ---
 
@@ -93,6 +94,20 @@
 | LAE-05 | Конструирование | форма без `verdict`/`flags`, пустые `prompt_ref`/`evaluator_ref` → `ValueError` |
 | LAE-06 | ContentDirector с хранилищем, QA падает после вызова | ошибка пробрасывается; сохранённый Run в `WAITING_QA`, оценка `PENDING` с `evaluator_ref`, запись вызова сохранена |
 | LAE-07 | ContentDirector с `LLMArtifactEvaluator`: `passed` / `flagged` | `COMPLETED` / `WAITING_HUMAN`; в обоих случаях ровно одна запись вызова QA на Evaluation с ролью и `prompt_ref` |
+
+### 4.4 Подключение оценщика и исход ошибки QA (QWR, ADR-0038, `EVALUATION_SPEC.md` §8.4)
+
+Модель — детерминированный фейк порта `LLMClient`; Prompt и Schema — реальные ассеты `qa_agent@v1`.
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| QWR-01 | `build_qa_evaluator(QA_AGENT, None, …)` | `evaluator_ref = qa_agent@v1`, `prompt_ref = qa-agent@v1`, `output_fields = QA_VERDICT_FIELDS`; System и User — из встроенного каталога; модель не вызвана |
+| QWR-02 | Неизвестный Prompt / неизвестная Schema | `CompositionError` |
+| QWR-03 | Agent с `skill_refs` | `CompositionError` |
+| QWR-04 | Agent с `tool_refs` | модель видит ровно выданные Tools; недоступный Tool → `ToolGrantError` при сборке |
+| QWR-05 | `compile_runtime(..., qa=)` | Run проходит гейт на вердикте собранного оценщика; оценка открыта с его `evaluator_ref`; QA-роль как шаг Workflow → `CompositionError` |
+| QWR-06 | QA падает (неверный ответ / сбой вызова), затем `resume` с исправной моделью | после ошибки: сохранённый Run `WAITING_QA`, не `FAILED`, оценка `PENDING`; после `resume`: та же и единственная оценка решена, записи обоих вызовов на ней, маршрут по вердикту |
+| QWR-07 | Модель ставит `flagged`, человек `CHANGES_REQUESTED`, `resume` | producer получает флаги модели в `qa_flags`; новая версия оценена заново; при `passed` Run `WAITING_HUMAN` со свежим Review новой версии |
 
 ## 5. Маршрутизация ContentDirector (ECD)
 

@@ -6,6 +6,7 @@
 > **Статус:** Accepted. **Дата:** 2026-09-15.
 > Дополнено `ADR-0036` (2026-09-16): `evaluator_ref`, запись метрик вызовов оценщика,
 > `LLMArtifactEvaluator` (§2, §4, §7, §8, §8.3).
+> Дополнено `ADR-0038` (2026-09-17): подключение оценщика и исход ошибки QA (§8.4).
 
 ---
 
@@ -175,9 +176,37 @@ output_fields, prompt_ref, evaluator_ref, toolbox=пустой)`:
 `Run.record_evaluation_analytics` **до** вердикта; при `MeasuredEvaluatorError` записываются
 измерения ошибки и пробрасывается то же исключение; Evaluation остаётся `PENDING`.
 `ContentDirector` открывает оценку с `evaluator_ref=qa.evaluator_ref` и при
-`MeasuredEvaluatorError` сохраняет Run в хранилище перед пробросом. Как Director в остальном
-обходится с ошибкой QA (оставить `WAITING_QA` или перевести Run в `FAILED`), решается при
-подключении (подзадача 11.4, ADR-0034 §6).
+`MeasuredEvaluatorError` сохраняет Run в хранилище перед пробросом. Что Director делает с
+ошибкой QA дальше, определяет §8.4.
+
+### 8.4 Подключение оценщика и исход ошибки QA (ADR-0038)
+
+**Ошибка QA.** Если оценщик бросает исключение, Director **не меняет** состояние Run: Run остаётся
+`WAITING_QA`, Evaluation — `PENDING` со своим `evaluator_ref`. Вызовы из `MeasuredEvaluatorError`
+записаны и сохранены, **то же** исключение пробрасывается вызывающему. Автоматического повтора и
+причины отказа нет; Run не переводится в `FAILED`. `resume` снова вызывает оценщик для той же
+Evaluation, без второй; первый полученный вердикт маршрутизируется по §9.
+
+**Composition Root** (`composition.py`):
+
+- `build_qa_evaluator(agent, prompts, client, schemas, *, available_tools=None) ->
+  LLMArtifactEvaluator` — `agent.prompt_ref → Prompt → schema_ref → Schema` (неизвестные →
+  `CompositionError`; `prompts=None` — встроенный каталог). Внедряются `system_prompt` /
+  `user_template`, `output_fields = required_fields` Schema, `prompt_ref =
+  <prompt_id>@v<version>`, `evaluator_ref = agent.agent_id`, `Toolbox` по `agent.tool_refs`.
+  Непустые `skill_refs` → `CompositionError` (у пути QA нет места вызова Skill). Модель при сборке
+  не вызывается;
+- `validate_qa_evaluator(workflow, qa)` — `CompositionError`, если `agent_ref` какого-либо шага
+  равен `qa.evaluator_ref` (QA-роль не шаг Workflow, ADR-0035 §4);
+- `build_content_director(..., qa=None)` и `compile_runtime(..., qa=None)` передают оценщик в
+  `ContentDirector`; `compile_runtime` вызывает `validate_qa_evaluator`.
+
+**Точка входа** `demo_factory.py`: QA-роль получает свою привязку `client_for_role` с явными
+ценами; `MeasuredEvaluatorError` перехватывается только здесь — демо сообщает, что Run остался в
+`WAITING_QA`, и показывает сохранённый Run. `--request-changes "<указания>"` от имени
+`HUMAN_REVIEWER` отправляет `CHANGES_REQUESTED` на ожидающий Review сохранённого Run и возобновляет
+его (доработка ADR-0032 по флагам реальной модели); без сохранённого Run или ожидающего Review
+ничего не меняет.
 
 ## 9. Маршрутизация в ContentDirector
 

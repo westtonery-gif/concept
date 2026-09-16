@@ -1,5 +1,8 @@
 """Demonstration: the two migrated production roles (Rin, Leo) running together for real.
 
+The script Leo writes then goes through the fail-closed QA gate, judged by the real QA role
+(``qa_agent@v1``, ADR-0035/0036/0038).
+
 Runs the ``research-to-script@v1`` Workflow — Rin (``content_researcher@v1``) then Leo
 (``script_writer@v1``) — through the real Composition Root (`ADR-0012`/`ADR-0013`) and the real
 Run/Task/Output/Artifact domain, backed by a live Anthropic model. Unlike ``demo.py`` (which
@@ -20,7 +23,12 @@ silent hardcoded fallback either.
 Run with: ``python demo_factory.py``. Needs ``ANTHROPIC_API_KEY`` plus a per-role provider/model
 binding and exact input/output token prices + currency for each of Rin and Leo (see the printed
 instructions, or README.md); missing values make the demo explain what to set and exit cleanly.
-No QA, Human Review, publication or external integrations are involved.
+The QA role is bound and priced the same way. A ``PASSED`` verdict completes the Run; a risk
+verdict stops it at ``WAITING_HUMAN`` with a Review opened. Play the human reviewer with
+``python demo_factory.py --request-changes "<instructions>"``: it requests changes on that Review
+and resumes, so Leo reworks the script from the model's flags and QA judges the new version
+(ADR-0032). A failed QA call leaves the Run at ``WAITING_QA``; running again asks QA again
+(ADR-0038 §1). Publication and external integrations are not involved.
 
 The Run is saved after every step to the Run store (`ADR-0026`; ``OMEMO_RUN_STORE_PATH``, default
 ``.omemo/runs.sqlite3``). Running the demo again resumes the stored Run instead of starting over:
@@ -30,22 +38,32 @@ for work already committed.
 
 from __future__ import annotations
 
+import argparse
 import os
+from collections.abc import Sequence
 
 from demo import print_final_article, safe_print, show_run
 
 from omemo_content_factory.agents import content_researcher as rin
+from omemo_content_factory.agents import qa_agent
 from omemo_content_factory.agents import script_writer as leo
 from omemo_content_factory.application.content_director import ContentDirector
+from omemo_content_factory.application.qa_evaluation import (
+    ArtifactEvaluator,
+    MeasuredEvaluatorError,
+)
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.composition import (
     build_executor_map,
+    build_qa_evaluator,
     build_run_store,
     build_schema_map,
     run_store_path,
+    validate_qa_evaluator,
     validate_workflow_executors,
 )
-from omemo_content_factory.domain.run import Run
+from omemo_content_factory.domain.human_review import ReviewStatus
+from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
@@ -90,7 +108,7 @@ def _env_token(agent_ref: str) -> str:
 
 def _print_binding_instructions() -> None:
     """Print every per-role provider/model/pricing variable needed for a real client."""
-    for agent in AGENTS:
+    for agent in (*AGENTS, *qa_agent.AGENTS):
         token = _env_token(agent.agent_id)
         safe_print(f"  export OMEMO_PROVIDER__{token}=anthropic")
         safe_print(f"  export OMEMO_MODEL__{token}=claude-sonnet-4-6")
@@ -126,8 +144,49 @@ def _build_executors() -> dict[str, TaskExecutor]:
     return executors
 
 
-def main() -> None:
-    """Run the Rin -> Leo Workflow, each role on its own configured provider/model."""
+def _build_qa_evaluator() -> ArtifactEvaluator:
+    """Compile the QA role from its catalogue entry on its own provider/model (ADR-0038 §2)."""
+    return build_qa_evaluator(
+        qa_agent.QA_AGENT,
+        None,
+        client_for_role(qa_agent.AGENT_REF, os.environ),
+        qa_agent.SCHEMAS,
+    )
+
+
+def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument(
+        "--request-changes",
+        metavar="INSTRUCTIONS",
+        help="as the human reviewer, request changes on the stored Run's pending Review, "
+        "then resume it (ADR-0032)",
+    )
+    return parser.parse_args(argv)
+
+
+def _request_changes(run: Run | None, instructions: str) -> bool:
+    """Submit ``CHANGES_REQUESTED`` on the pending Review; whether it was submitted."""
+    if run is None:
+        safe_print(f"No stored {RUN_ID} to review; run the demo without arguments first.")
+        return False
+    pending = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
+    if run.status is not RunStatus.WAITING_HUMAN or not pending:
+        safe_print(f"{RUN_ID} is '{run.status.value}' with no pending Review; nothing to decide.")
+        return False
+    run.submit_review(
+        pending[-1].review_id,
+        ReviewStatus.CHANGES_REQUESTED,
+        by=Actor.HUMAN_REVIEWER,
+        reason=instructions,
+    )
+    safe_print(f"Requested changes on {pending[-1].review_id}: {instructions}")
+    return True
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the Rin -> Leo Workflow and its QA gate, each role on its own provider/model."""
+    args = _parse_args(argv)
     if not os.environ.get("ANTHROPIC_API_KEY"):
         safe_print("ANTHROPIC_API_KEY is not set, so no real model can be called.")
         safe_print("Set it and re-run, e.g.:")
@@ -137,6 +196,7 @@ def main() -> None:
 
     try:
         executors = _build_executors()
+        qa = _build_qa_evaluator()
     except ProviderModelSelectionError as exc:
         safe_print(f"Provider/model selection failed: {exc}")
         safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")
@@ -144,28 +204,67 @@ def main() -> None:
         return
 
     validate_workflow_executors(WORKFLOW, executors)
+    validate_qa_evaluator(WORKFLOW, qa)
     store = build_run_store(os.environ)
-    director = ContentDirector(executors, build_schema_map(AGENTS, None, SCHEMAS), store=store)
+    director = ContentDirector(
+        executors, build_schema_map(AGENTS, None, SCHEMAS), qa=qa, store=store
+    )
 
     safe_print("=" * 78)
-    safe_print("Rin -> Leo, the real catalogued roles, each on its own configured provider/model")
+    safe_print("Rin -> Leo -> QA, the real catalogued roles, each on its own provider/model")
     safe_print("=" * 78)
     run = store.load(RUN_ID)
-    if run is None:
-        run = Run.create(
-            run_id=RUN_ID,
-            content_brief_ref="brief-magnesium-sleep",
-            workflow_version_ref=WORKFLOW.workflow_id,
+    if args.request_changes is not None:
+        if not _request_changes(run, args.request_changes):
+            return
+        assert run is not None
+        store.save(run)
+    try:
+        if run is None:
+            run = Run.create(
+                run_id=RUN_ID,
+                content_brief_ref="brief-magnesium-sleep",
+                workflow_version_ref=WORKFLOW.workflow_id,
+            )
+            director.execute_workflow(run, WORKFLOW, brief=BRIEF)
+        else:
+            location = run_store_path(os.environ)
+            safe_print(f"Resuming {RUN_ID} from {location} at '{run.status.value}';")
+            safe_print("committed steps are not run again. Delete that file to start over.")
+            director.resume_workflow(run, WORKFLOW, brief=BRIEF)
+    except MeasuredEvaluatorError as exc:
+        safe_print(f"QA gave no verdict ({type(exc).__name__}: {exc}).")
+        safe_print(
+            "The Run stays at WAITING_QA with its Evaluation PENDING; run again to ask QA again."
         )
-        director.execute_workflow(run, WORKFLOW, brief=BRIEF)
-    else:
-        location = run_store_path(os.environ)
-        safe_print(f"Resuming {RUN_ID} from {location} at '{run.status.value}';")
-        safe_print("committed steps are not run again. Delete that file to start over.")
-        director.resume_workflow(run, WORKFLOW, brief=BRIEF)
     show_run(run)
+    _show_quality_gate(run)
     _show_model_calls(run)
     print_final_article(run)
+
+
+def _show_quality_gate(run: Run) -> None:
+    """Print each QA Evaluation and Human Review — what the Stage 8 live check reads (ADR-0038)."""
+    safe_print("  QA Evaluations:")
+    for evaluation in run.evaluations:
+        safe_print(
+            f"    - {evaluation.evaluation_id} on {evaluation.artifact_ref} "
+            f"[{evaluation.status.value}] by {evaluation.evaluator_ref}"
+        )
+        for flag in evaluation.flags:
+            safe_print(f"        flag: {flag}")
+    safe_print("  Human Reviews:")
+    for review in run.human_reviews:
+        reason = "" if review.reason is None else f" — {review.reason}"
+        safe_print(
+            f"    - {review.review_id} on {review.artifact_ref} [{review.status.value}]{reason}"
+        )
+    if run.status is RunStatus.WAITING_HUMAN and any(
+        review.status is ReviewStatus.PENDING for review in run.human_reviews
+    ):
+        safe_print(
+            '  To request changes: python demo_factory.py --request-changes "<instructions>"'
+        )
 
 
 def _show_model_calls(run: Run) -> None:

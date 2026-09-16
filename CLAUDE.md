@@ -31,7 +31,19 @@ anything ahead of the queue below — see task 10.
   (`qa-agent`, `content-researcher`, `script-writer`) still say OMEMO/health — a Prompt version is
   immutable (ADR-0030/0035), so the new criteria land as **v2** (task 12). The Python package keeps
   the name `omemo_content_factory`; renaming it is a separate mechanical change, if ever.
-- **All 36 ADRs (0001–0036) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **The QA gate runs on a real model from a real entrypoint (ROADMAP Stage 8, ADR-0038).**
+  `composition.build_qa_evaluator(agent, prompts, client, schemas)` compiles `qa_agent@v1` from its
+  catalogue entry into an `LLMArtifactEvaluator` (evaluator_ref = agent id, `qa-agent@v<n>`,
+  Schema fields as shape, scoped Toolbox; declared `skill_refs` → `CompositionError`);
+  `build_content_director` / `compile_runtime` take `qa=`, and `validate_qa_evaluator` refuses the
+  QA role as a Workflow step. **ADR-0034 §6 decided: a QA failure does not fail the Run** — it
+  stays `WAITING_QA`, Evaluation `PENDING`, calls committed, the same error propagates, and
+  `resume` asks again (no attempt bound yet — deferred with Evaluation attempts). `FAILED` was
+  rejected: it is terminal and would discard the paid producer work. `demo_factory.py` wires the
+  QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
+  `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
+  `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
+- **All 38 ADRs (0001–0038) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -43,10 +55,11 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036) are all implemented and tested. All gates green: ruff, ruff format,
-  mypy --strict, pytest (875 passed, 0 skipped).
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037) and the QA evaluator wiring (0038) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (884 passed,
+  0 skipped).
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
-  ADR-0036) — but no entrypoint wires it yet (11.4).** `infrastructure/llm.py`
+  ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
   `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
   `LLMClient.complete` and decodes only through `decode_verdict`; an `LLMError` becomes
   `QaCallError`, a malformed answer a `QaVerdictError` — both `MeasuredEvaluatorError`s carrying
@@ -406,7 +419,14 @@ process at the time, not a pattern to keep copying.)
        record" (knowingly breaks PROJECT.md §16). An `LLMError` is not swallowed: it is re-raised
        as `QaCallError` chained `from` it, because the application layer may not import
        infrastructure and still has to receive the failed call's measurements.
-    4. **Wire it into a real entrypoint** — extend Composition Root helpers (or add a small
+    4. ~~**Wire it into a real entrypoint**~~ — done (ADR-0038, `composition.build_qa_evaluator` /
+       `validate_qa_evaluator`, `qa=` on `build_content_director` / `compile_runtime`,
+       `demo_factory.py` incl. `--request-changes`, `EVALUATION_SPEC.md` §8.4,
+       `EVALUATION_ACCEPTANCE.md` §4.4 `QWR`, `tests/test_qa_wiring.py`). Decided without asking
+       (a technical call, reversible): a QA failure keeps the Run at `WAITING_QA` for `resume`
+       rather than routing to `FAILED`. Verified offline with scripted models through the demo
+       (QA error → re-run → `flagged` → `--request-changes` → rework → `passed`); a live-provider
+       run is still the operator's check. Original brief: extend Composition Root helpers (or add a small
        analogous one) to build the QA evaluator from its catalog entry the same way
        `build_executor_map` + `client_for_role` do for Rin/Leo, then pass `qa=` into
        `ContentDirector` in `demo_factory.py` (or a new demo). This is the **first real exercise**

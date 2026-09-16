@@ -13,6 +13,8 @@ compiler:
   ``Agent.skill_refs`` declares them (`ADR-0027`),
 - **builds** one scoped ``Toolbox`` from ``Agent.tool_refs`` and Tool instances whose outside
   dependencies are injected here (`ADR-0028`),
+- **builds** the QA role's ``ArtifactEvaluator`` from its catalogue entry the same way
+  (`ADR-0038`),
 - **checks structural existence** (build-time only): ``prompt_ref`` and ``Workflow.agent_ref``
   resolve to existing entries — a pure key-presence check, **not** workflow-semantics or policy.
 
@@ -35,6 +37,7 @@ from typing import TypeAlias
 
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
+from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
 from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.skill_execution import (
     SkillPreprocessingTaskExecutor,
@@ -45,7 +48,11 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
-from omemo_content_factory.infrastructure.llm import LLMClient, LLMTaskExecutor
+from omemo_content_factory.infrastructure.llm import (
+    LLMArtifactEvaluator,
+    LLMClient,
+    LLMTaskExecutor,
+)
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 from omemo_content_factory.tools.contract import Tool
 from omemo_content_factory.tools.current_date import CurrentDate
@@ -148,6 +155,27 @@ def _resolve_prompts(prompts: PromptCatalogueInput) -> Mapping[PromptId, Prompt]
     return load_prompt_catalogue() if prompts is None else prompts
 
 
+def _prompt_and_schema(
+    agent: Agent, prompts: Mapping[PromptId, Prompt], schemas: Mapping[str, Schema]
+) -> tuple[Prompt, Schema]:
+    """Resolve ``agent.prompt_ref → Prompt → schema_ref → Schema`` by key presence only."""
+    prompt = prompts.get(agent.prompt_ref)
+    if prompt is None:
+        raise CompositionError(
+            f"agent '{agent.agent_id}' references unknown prompt '{agent.prompt_ref}'"
+        )
+    schema = schemas.get(prompt.schema_ref)
+    if schema is None:
+        raise CompositionError(
+            f"prompt '{prompt.prompt_id}' references unknown schema '{prompt.schema_ref}'"
+        )
+    return prompt, schema
+
+
+def _prompt_version_ref(prompt: Prompt) -> str:
+    return f"{prompt.prompt_id}@v{prompt.version.value}"
+
+
 def _aware_local_now() -> datetime:
     """Read the host's aware local time; injected into ``current_date@v1`` by the Root."""
     return datetime.now().astimezone()
@@ -211,23 +239,14 @@ def build_executor_map(
     for agent in agents:
         if agent.agent_id in executors:
             raise CompositionError(f"duplicate agent_ref '{agent.agent_id}'")
-        prompt = resolved_prompts.get(agent.prompt_ref)
-        if prompt is None:
-            raise CompositionError(
-                f"agent '{agent.agent_id}' references unknown prompt '{agent.prompt_ref}'"
-            )
-        schema = schemas.get(prompt.schema_ref)
-        if schema is None:
-            raise CompositionError(
-                f"prompt '{prompt.prompt_id}' references unknown schema '{prompt.schema_ref}'"
-            )
+        prompt, schema = _prompt_and_schema(agent, resolved_prompts, schemas)
         base_executor = LLMTaskExecutor(
             client=client,
             system_prompt=prompt.system,
             user_template=prompt.user_template,
             schema_ref=prompt.schema_ref,
             output_fields=schema.view.required_fields,
-            prompt_ref=f"{prompt.prompt_id}@v{prompt.version.value}",
+            prompt_ref=_prompt_version_ref(prompt),
             toolbox=Toolbox(grants=agent.tool_refs, available=tools),
         )
         configured = tuple(
@@ -245,6 +264,42 @@ def build_executor_map(
             else base_executor
         )
     return executors
+
+
+def build_qa_evaluator(
+    agent: Agent,
+    prompts: PromptCatalogueInput,
+    client: LLMClient,
+    schemas: Mapping[str, Schema],
+    *,
+    available_tools: Iterable[Tool] | None = None,
+) -> LLMArtifactEvaluator:
+    """Compile one verdict-answering role into its ``ArtifactEvaluator`` (build-time, `ADR-0038`).
+
+    The QA counterpart of :func:`build_executor_map`: ``agent.prompt_ref → Prompt → schema_ref →
+    Schema`` by the same structural lookups, then the Prompt's text, the Schema's
+    ``required_fields`` as the generation shape, ``<prompt_id>@v<version>``, the Agent's id as
+    ``evaluator_ref`` and a Toolbox scoped by ``agent.tool_refs`` are injected. An Agent declaring
+    ``skill_refs`` is refused: the QA path has no Skill invocation seam (`ADR-0035` §4). A shape
+    without the verdict fields is rejected by the evaluator's own invariant. The model is not
+    called. ``prompts=None`` reads the bundled store (`ADR-0030`).
+    """
+    if agent.skill_refs:
+        raise CompositionError(
+            f"agent '{agent.agent_id}' declares skill_refs {agent.skill_refs!r}, "
+            "but a QA evaluator has no Skill invocation seam"
+        )
+    prompt, schema = _prompt_and_schema(agent, _resolve_prompts(prompts), schemas)
+    tools = tuple(build_available_tools() if available_tools is None else available_tools)
+    return LLMArtifactEvaluator(
+        client=client,
+        system_prompt=prompt.system,
+        user_template=prompt.user_template,
+        output_fields=schema.view.required_fields,
+        prompt_ref=_prompt_version_ref(prompt),
+        evaluator_ref=agent.agent_id,
+        toolbox=Toolbox(grants=agent.tool_refs, available=tools),
+    )
 
 
 def build_schema_map(
@@ -267,16 +322,7 @@ def build_schema_map(
     for agent in agents:
         if agent.agent_id in result:
             raise CompositionError(f"duplicate agent_ref '{agent.agent_id}'")
-        prompt = resolved_prompts.get(agent.prompt_ref)
-        if prompt is None:
-            raise CompositionError(
-                f"agent '{agent.agent_id}' references unknown prompt '{agent.prompt_ref}'"
-            )
-        schema = schemas.get(prompt.schema_ref)
-        if schema is None:
-            raise CompositionError(
-                f"prompt '{prompt.prompt_id}' references unknown schema '{prompt.schema_ref}'"
-            )
+        prompt, schema = _prompt_and_schema(agent, resolved_prompts, schemas)
         result[agent.agent_id] = SchemaBinding(prompt.schema_ref, schema)
     return result
 
@@ -290,6 +336,7 @@ def build_content_director(
     skill_invocations: AgentSkillInvocations | None = None,
     available_tools: Iterable[Tool] | None = None,
     store: RunStore | None = None,
+    qa: ArtifactEvaluator | None = None,
 ) -> ContentDirector:
     """Compile the executor and schema maps and hand them to a ``ContentDirector``.
 
@@ -301,6 +348,7 @@ def build_content_director(
     ``available_tools`` supplies dependency-injected Tool instances; when omitted the Root builds
     the standard library and scopes it independently for every Agent (`ADR-0028`).
     ``store``, when given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
+    ``qa``, when given, is the evaluator of the ``WAITING_QA`` gate (`ADR-0018`, `ADR-0038`).
     ``prompts=None`` reads one bundled Prompt catalogue snapshot and shares it across both maps
     (`ADR-0030`).
     """
@@ -314,7 +362,7 @@ def build_content_director(
         available_tools=available_tools,
     )
     return ContentDirector(
-        executors, build_schema_map(agents, resolved_prompts, schemas), store=store
+        executors, build_schema_map(agents, resolved_prompts, schemas), qa=qa, store=store
     )
 
 
@@ -334,6 +382,21 @@ def validate_workflow_executors(workflow: Workflow, executors: Mapping[str, Task
         )
 
 
+def validate_qa_evaluator(workflow: Workflow, qa: ArtifactEvaluator) -> None:
+    """Build-time check that the QA role is not also a Workflow step (`ADR-0035` §4, `ADR-0038`).
+
+    A verdict-answering role yields no Output, so a step bound to ``qa.evaluator_ref`` raises
+    ``CompositionError`` before any Run executes. Structural only, like
+    :func:`validate_workflow_executors`.
+    """
+    steps = sorted({s.step_id for s in workflow.steps if s.agent_ref == qa.evaluator_ref})
+    if steps:
+        raise CompositionError(
+            f"workflow '{workflow.workflow_id}' uses the QA evaluator '{qa.evaluator_ref}' "
+            f"as step(s) {steps}"
+        )
+
+
 def compile_runtime(
     agents: Iterable[Agent],
     prompts: PromptCatalogueInput,
@@ -344,6 +407,7 @@ def compile_runtime(
     skill_invocations: AgentSkillInvocations | None = None,
     available_tools: Iterable[Tool] | None = None,
     store: RunStore | None = None,
+    qa: ArtifactEvaluator | None = None,
 ) -> ContentDirector:
     """Build executor + schema maps, structurally check vs ``workflow``, wire the CD.
 
@@ -354,7 +418,8 @@ def compile_runtime(
     path (`ADR-0013` §8, Variant A). ``skill_invocations`` is the static role configuration checked
     and wired according to ``Agent.skill_refs`` (`ADR-0027`). ``available_tools`` is the
     dependency-injected library scoped by each ``Agent.tool_refs`` (`ADR-0028`). ``store``, when
-    given, is the ``RunStore`` the Director commits every step to (`ADR-0026`).
+    given, is the ``RunStore`` the Director commits every step to (`ADR-0026`). ``qa``, when given,
+    is the ``WAITING_QA`` gate's evaluator; its role must not be a step (`ADR-0038`).
     ``prompts=None`` reads one bundled Prompt catalogue snapshot for the whole graph (`ADR-0030`).
     """
     resolved_prompts = _resolve_prompts(prompts)
@@ -367,6 +432,8 @@ def compile_runtime(
         available_tools=available_tools,
     )
     validate_workflow_executors(workflow, executors)
+    if qa is not None:
+        validate_qa_evaluator(workflow, qa)
     return ContentDirector(
-        executors, build_schema_map(agents, resolved_prompts, schemas), store=store
+        executors, build_schema_map(agents, resolved_prompts, schemas), qa=qa, store=store
     )

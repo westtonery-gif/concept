@@ -486,6 +486,8 @@ class ContentDirector:
         ``WAITING_HUMAN`` with a Human Review opened on the candidate; the Run's approval gate keeps
         the Artifact from being approved (ADR-0018 §5, §7). A ``PENDING`` Evaluation a restart left
         behind is finished instead of opening a second one; a recorded verdict is routed as it is.
+        An evaluator exception leaves the Run at ``WAITING_QA`` with the Evaluation ``PENDING`` and
+        propagates; :meth:`resume` asks again (ADR-0038 §1).
         """
         candidate = self._final_candidate(run)
         if candidate is None:
