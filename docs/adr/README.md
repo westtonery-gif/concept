@@ -62,3 +62,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0036](0036-qa-call-metrics-attributed-to-the-evaluation.md) | QA call metrics attributed to the Evaluation, and the `LLMArtifactEvaluator` | Accepted |
 | [0037](0037-domain-pivot-to-a-business-agnostic-content-factory.md) | Domain pivot — a business-agnostic content factory, uniqueness as value #1 | Accepted |
 | [0038](0038-qa-evaluator-wiring-and-qa-failure-surfacing.md) | Wiring the QA evaluator into the Composition Root and an entrypoint, and how a QA failure surfaces | Accepted |
+| [0039](0039-stage-8-acceptance.md) | The ROADMAP Stage 8 (QA Agent) acceptance | Accepted |

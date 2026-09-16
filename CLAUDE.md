@@ -20,7 +20,17 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-16)
+## Current state (2026-09-17)
+- **ROADMAP Stage 8 (QA Agent) is closed (ADR-0039).** `tests/test_stage8_acceptance.py` (`S8A`,
+  `STAGE8_ACCEPTANCE.md`) runs Rin → Leo with the `qa_agent@v1` gate through `compile_runtime` on
+  production assets only — bundled Prompts for all three roles, two real `AnthropicLLMClient`s
+  (producers / QA, priced separately; transport scripted below the SDK), real `SqliteRunStore`,
+  every restart a fresh Root over the same file: `passed` → `COMPLETED`; `flagged`/`failed` →
+  escalation a human Approve cannot open; model flag → `CHANGES_REQUESTED` → rework of Leo only →
+  v2 judged again → approvable; malformed verdict → parked at `WAITING_QA` → restart asks again.
+  No gap found, no production code changed. **Noted, deferred (ADR-0039):** `AnthropicLLMClient`
+  stringifies field values with `str()`, so a model that sends `flags` as a native array (not the
+  declared string) yields `['…']` → `QaVerdictError` → the gate parks instead of escalating.
 - **The domain pivoted: no health content, no OMEMO (ADR-0037; charter `PROJECT.md` is now 1.3).**
   The factory is **business-agnostic** — domain, brand, audience and rules arrive as a client
   profile, not baked into the core. Value #1 is now **uniqueness** + quality (not templated, not a
@@ -43,7 +53,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 38 ADRs (0001–0038) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 39 ADRs (0001–0039) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -55,8 +65,8 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036), the domain pivot (0037) and the QA evaluator wiring (0038) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (884 passed,
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038) and the Stage 8 acceptance (0039) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (892 passed,
   0 skipped).
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -384,7 +394,7 @@ process at the time, not a pattern to keep copying.)
     MVP) before Stage 13, or carve out an earlier narrow video slice. §19 has the doc's own
     suggested opening question for whichever session picks this up. Do not start any of §16's
     "video vertical slice" work, or reorder Stage 8-13, without that explicit ADR decision first.
-11. **ROADMAP Stage 8 — QA Agent.** Next (ROADMAP order; also `CONTENT_FACTORY_THOUGHTS.md` §16's
+11. ~~**ROADMAP Stage 8 — QA Agent.**~~ — done (closed by subtask 5 below, ADR-0039). (ROADMAP order; also `CONTENT_FACTORY_THOUGHTS.md` §16's
     first step after Stage 7). The fail-closed gate (ADR-0018) and rework routing (ADR-0032)
     already exist; `application/qa_evaluation.py`'s `ArtifactEvaluator` Protocol
     (`evaluate(content: str) -> EvaluationResult`) is the seam — its own docstring already says
@@ -441,7 +451,8 @@ process at the time, not a pattern to keep copying.)
        with `evaluator_ref` and commits recorded QA calls before re-raising a
        `MeasuredEvaluatorError` (today it propagates out of `execute`/`resume`); a non-measured
        exception still propagates without that extra commit.
-    5. **Stage 8 acceptance** — a test in the shape of `test_m2_acceptance.py` proving both DoD
+    5. ~~**Stage 8 acceptance**~~ — done (ADR-0039, `STAGE8_ACCEPTANCE.md`,
+       `tests/test_stage8_acceptance.py` `S8A`; no behaviour change needed). Original brief: a test in the shape of `test_m2_acceptance.py` proving both DoD
        lines end to end: a `PASSED` verdict lets a run complete, a risk verdict fail-closes to
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop
        (ADR-0032) — covered with a realistic evaluator, not necessarily a live API call.
