@@ -21,13 +21,13 @@ Definition of Done Этапа 8 (ROADMAP.md): (1) QA выдаёт структу
 
 | ID | Критерий |
 |---|---|
-| S8A-01 | Модель QA отвечает `passed`: Run `COMPLETED`; ровно одна Evaluation — `PASSED`, `evaluator_ref = qa_agent@v1`, на финальном Artifact (скрипт Leo, `CANDIDATE`); промежуточный Artifact Rin `DRAFT` и не оценён; Human Review не открыт. |
+| S8A-01 | Модель QA отвечает `passed`: Run `WAITING_HUMAN` (Approval Gate, ADR-0044); ровно одна Evaluation — `PASSED`, `evaluator_ref = qa_agent@v1`, на финальном Artifact (скрипт Leo, `CANDIDATE`); промежуточный Artifact Rin `DRAFT` и не оценён; открыт `PENDING` Human Review на кандидате. `APPROVED` человека и перезапуск `resume` → Artifact `APPROVED`, Run `COMPLETED`, модели не вызваны. |
 | S8A-02 | Провайдер QA получает System и User из записи `qa-agent` встроенного каталога (User = шаблон с содержимым скрипта Leo), принудительный `emit_fields` ровно с полями `verdict`/`flags` и без операционных Tools. |
 | S8A-03 | Вызов QA — одна Analytics Record, привязанная к Evaluation (`task_id` пуст, `evaluation_id`, `agent_ref = qa_agent@v1`, `prompt_ref = qa-agent@v<n>`, фактическая model QA, точная стоимость по ценам QA-роли, `retries = None`); записи producer-ролей не изменились. |
-| S8A-04 | Модель QA отвечает `flagged` или `failed` с флагами: Run `WAITING_HUMAN`, не `COMPLETED`; Evaluation с вердиктом и флагами модели; открыт `PENDING` Human Review на кандидате; сохранённая строка равна Run. Даже `APPROVED` человека не одобряет Artifact (`ArtifactQaNotPassedError`), а `resume` без решения человека не вызывает модель. |
-| S8A-05 | Риск → человек `CHANGES_REQUESTED` → перезапуск `resume`: вызывается только Leo (Rin — нет), его вход — канонический JSON с флагами модели QA и инструкцией человека; результат — версия 2 скрипта, версия 1 `SUPERSEDED`; QA заново оценивает именно версию 2; при `passed` Run `WAITING_HUMAN` со свежим `PENDING` Review версии 2; `APPROVED` человека теперь одобряет версию 2. |
-| S8A-06 | Модель QA нарушает грамматику вердикта: `QaVerdictError` пробрасывается; сохранённый Run `WAITING_QA`, Evaluation `PENDING`, вызов записан. Перезапуск `resume` спрашивает QA снова на той же Evaluation, producer-роли не вызываются, Run `COMPLETED`, обе записи вызовов QA на этой Evaluation. |
-| S8A-07 | Завершённый Run, прочитанный новым store, равен Run; его `resume` не вызывает ни producer-модель, ни модель QA. |
+| S8A-04 | Модель QA отвечает `flagged` или `failed` с флагами: Run `WAITING_HUMAN`, не `COMPLETED`; Evaluation с вердиктом и флагами модели; открыт `PENDING` Human Review на кандидате; сохранённая строка равна Run. Даже `APPROVED` человека не одобряет Artifact (`ArtifactQaNotPassedError`), а `resume` без решения человека не вызывает модель; `resume` после такого `APPROVED` оставляет Run в `WAITING_HUMAN`. |
+| S8A-05 | Риск → человек `CHANGES_REQUESTED` → перезапуск `resume`: вызывается только Leo (Rin — нет), его вход — канонический JSON с флагами модели QA и инструкцией человека; результат — версия 2 скрипта, версия 1 `SUPERSEDED`; QA заново оценивает именно версию 2; при `passed` Run `WAITING_HUMAN` со свежим `PENDING` Review версии 2; `APPROVED` человека и `resume` одобряют версию 2 и завершают Run (`COMPLETED`). |
+| S8A-06 | Модель QA нарушает грамматику вердикта: `QaVerdictError` пробрасывается; сохранённый Run `WAITING_QA`, Evaluation `PENDING`, вызов записан. Перезапуск `resume` спрашивает QA снова на той же Evaluation, producer-роли не вызываются, Run `WAITING_HUMAN` с Review, обе записи вызовов QA на этой Evaluation. |
+| S8A-07 | Завершённый (одобренный человеком) Run, прочитанный новым store, равен Run; его `resume` не вызывает ни producer-модель, ни модель QA. |
 
 ## Вне критериев
 

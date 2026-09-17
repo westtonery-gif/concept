@@ -221,7 +221,7 @@ def test_qwr_05_the_compiled_director_runs_the_gate_with_the_built_evaluator() -
 
     director(qa_client, WriterClient()).execute(run, REQUESTS)
 
-    assert run.status is RunStatus.COMPLETED
+    assert (run.status, len(run.human_reviews)) == (RunStatus.WAITING_HUMAN, 1)
     [evaluation] = run.evaluations
     assert (evaluation.status, evaluation.evaluator_ref) == (EvaluationStatus.PASSED, "qa_agent@v1")
     assert qa_client.users[0].startswith("Материал на проверку:\n")
@@ -286,7 +286,7 @@ def test_qwr_06_a_failed_qa_call_leaves_the_run_resumable_and_resume_asks_again(
 
     resumed = store.load("run-qwr-0001")
     assert resumed is not None
-    assert resumed.status is RunStatus.COMPLETED
+    assert (resumed.status, len(resumed.human_reviews)) == (RunStatus.WAITING_HUMAN, 1)
     [decided] = resumed.evaluations
     assert (decided.evaluation_id, decided.status) == (
         pending.evaluation_id,

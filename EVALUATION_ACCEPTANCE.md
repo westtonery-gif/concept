@@ -94,7 +94,7 @@
 | LAE-04 | `LLMError` после завершённых turn / без ответа провайдера | `QaCallError`, причина — та же `LLMError`; завершённые turn записаны, без ответа — записей нет; оценка `PENDING`; одобрение запрещено |
 | LAE-05 | Конструирование | форма без `verdict`/`flags`, пустые `prompt_ref`/`evaluator_ref` → `ValueError` |
 | LAE-06 | ContentDirector с хранилищем, QA падает после вызова | ошибка пробрасывается; сохранённый Run в `WAITING_QA`, оценка `PENDING` с `evaluator_ref`, запись вызова сохранена |
-| LAE-07 | ContentDirector с `LLMArtifactEvaluator`: `passed` / `flagged` | `COMPLETED` / `WAITING_HUMAN`; в обоих случаях ровно одна запись вызова QA на Evaluation с ролью и `prompt_ref` |
+| LAE-07 | ContentDirector с `LLMArtifactEvaluator`: `passed` / `flagged` | `WAITING_HUMAN` с Review в обоих случаях; в обоих случаях ровно одна запись вызова QA на Evaluation с ролью и `prompt_ref` |
 
 ### 4.4 Подключение оценщика и исход ошибки QA (QWR, ADR-0038, `EVALUATION_SPEC.md` §8.4)
 
@@ -107,15 +107,25 @@
 | QWR-02 | Неизвестный Prompt / неизвестная Schema | `CompositionError` |
 | QWR-03 | Agent с `skill_refs` | `CompositionError` |
 | QWR-04 | Agent с `tool_refs` | модель видит ровно выданные Tools; недоступный Tool → `ToolGrantError` при сборке |
-| QWR-05 | `compile_runtime(..., qa=)` | Run проходит гейт на вердикте собранного оценщика; оценка открыта с его `evaluator_ref`; QA-роль как шаг Workflow → `CompositionError` |
-| QWR-06 | QA падает (неверный ответ / сбой вызова), затем `resume` с исправной моделью | после ошибки: сохранённый Run `WAITING_QA`, не `FAILED`, оценка `PENDING`; после `resume`: та же и единственная оценка решена, записи обоих вызовов на ней, маршрут по вердикту |
+| QWR-05 | `compile_runtime(..., qa=)` | Run проходит QA-гейт на вердикте собранного оценщика и ждёт человека с Review (ADR-0044); оценка открыта с его `evaluator_ref`; QA-роль как шаг Workflow → `CompositionError` |
+| QWR-06 | QA падает (неверный ответ / сбой вызова), затем `resume` с исправной моделью | после ошибки: сохранённый Run `WAITING_QA`, не `FAILED`, оценка `PENDING`; после `resume`: та же и единственная оценка решена, записи обоих вызовов на ней, маршрут по вердикту (при `passed` — `WAITING_HUMAN` с Review) |
 | QWR-07 | Модель ставит `flagged`, человек `CHANGES_REQUESTED`, `resume` | producer получает флаги модели в `qa_flags`; новая версия оценена заново; при `passed` Run `WAITING_HUMAN` со свежим Review новой версии |
+
+### 4.5 Approval Gate (APG, ADR-0044, `EVALUATION_SPEC.md` §9) — `tests/test_review_publication.py`
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| APG-01 | QA `PASSED` | Run `WAITING_HUMAN`; ровно один `PENDING` Review на кандидате (`CANDIDATE`); в store ровно один снимок `WAITING_HUMAN`, и в нём уже есть Review |
+| APG-02 | затем `APPROVED` и `resume` | артефакт `APPROVED`, Run `COMPLETED` — ровно один новый коммит; исполнитель и оценщик не вызваны |
+| APG-03 | `resume` при: `PASSED` + Review `PENDING`; `PASSED` + `REJECTED`; `FLAGGED`/`FAILED` + `APPROVED`; `FLAGGED` + `REJECTED` | снимок Run не изменён, коммитов нет, моделей нет |
+| APG-04 | QA не подключён | Run `COMPLETED` без Review (прежний маршрут) |
+| APG-05 | `FLAGGED` → `CHANGES_REQUESTED` → версия 2 `PASSED` → `APPROVED` → `resume` | версия 2 ждёт человека со свежим Review; после одобрения — `APPROVED`, Run `COMPLETED`, версия 1 `SUPERSEDED` |
 
 ## 5. Маршрутизация ContentDirector (ECD)
 
 | ID | Сценарий | Ожидание |
 |---|---|---|
-| ECD-01 | QA `PASSED` | Run `COMPLETED`; финальный артефакт `CANDIDATE` с одной `PASSED` оценкой; промежуточные `DRAFT` и не оценены |
+| ECD-01 | QA `PASSED` | Run `WAITING_HUMAN` с `PENDING` Review кандидата; финальный артефакт `CANDIDATE` с одной `PASSED` оценкой; промежуточные `DRAFT` и не оценены; `APPROVED` + `resume` → артефакт `APPROVED`, Run `COMPLETED` без повторного вызова оценщика |
 | ECD-02 | QA `FLAGGED` | Run `WAITING_HUMAN` (не `COMPLETED`); открыт `PENDING` Human Review кандидата; даже Approve человека не даёт одобрить артефакт |
 | ECD-03 | QA `FAILED` | как ECD-02 |
 | ECD-04 | QA подключён, артефакта нет | Run `FAILED` с причиной `QA gate: no candidate artifact to evaluate`; оценщик не вызван |

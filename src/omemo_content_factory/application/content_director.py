@@ -227,6 +227,7 @@ class ContentDirector:
             if self._qa is not None and not self._pass_qa_gate(run, self._qa):
                 return
             run.transition(RunStatus.WAITING_HUMAN, by=_CD)
+            self._open_approval_review(run)
             self._commit(run)
         self._route_human_gate(run)
 
@@ -252,18 +253,54 @@ class ContentDirector:
         return True
 
     def _route_human_gate(self, run: Run) -> None:
-        """Open the successor's fresh review, or preserve the legacy no-QA completion route."""
+        """Hold the Approval Gate on the candidate, or keep the legacy no-QA completion route.
+
+        With QA wired (or in rework) the candidate never completes on its own (ADR-0044 §1): a
+        candidate with no Review gets one and the Run stops; an ``APPROVED`` latest Review of a
+        candidate whose latest QA is ``PASSED`` approves the Artifact and completes the Run in one
+        commit. Any other decision leaves the Run waiting (``CHANGES_REQUESTED`` is routed by
+        :meth:`_drive`; ``REJECTED`` and an approved escalation stay deferred, ADR-0044 §2).
+        """
         if run.status is not RunStatus.WAITING_HUMAN:
             return
-        if run.rework_count:
-            candidate = self._final_candidate(run)
-            if candidate is not None and self._latest_review(run, candidate) is None:
-                run.open_human_review(candidate, by=_CD)
+        if self._qa is None and not run.rework_count:
+            if not run.human_reviews:
+                run.transition(RunStatus.COMPLETED, by=_CD)
                 self._commit(run)
             return
-        if not run.human_reviews:
+        if self._open_approval_review(run):
+            self._commit(run)
+            return
+        candidate = self._final_candidate(run)
+        if candidate is None:
+            return
+        review = self._latest_review(run, candidate)
+        if review is None:
+            return
+        evaluation = self._latest_qa(run, candidate)
+        if (
+            review.status is ReviewStatus.APPROVED
+            and evaluation is not None
+            and evaluation.status is EvaluationStatus.PASSED
+        ):
+            if run.artifact(candidate).status is ArtifactStatus.CANDIDATE:
+                run.transition_artifact(candidate, ArtifactStatus.APPROVED, by=_CD)
             run.transition(RunStatus.COMPLETED, by=_CD)
             self._commit(run)
+
+    def _open_approval_review(self, run: Run) -> bool:
+        """Open the Approval Gate's Review on a candidate that has none; whether one was opened.
+
+        Only where the gate holds (QA wired, or a rework successor) and never twice for the same
+        candidate, so the caller can commit it together with the transition to ``WAITING_HUMAN``.
+        """
+        if self._qa is None and not run.rework_count:
+            return False
+        candidate = self._final_candidate(run)
+        if candidate is None or self._latest_review(run, candidate) is not None:
+            return False
+        run.open_human_review(candidate, by=_CD)
+        return True
 
     # --- Rework -------------------------------------------------------------------------
 

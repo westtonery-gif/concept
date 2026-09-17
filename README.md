@@ -174,10 +174,13 @@ export OMEMO_PRICE_CURRENCY__QA_AGENT_V1=USD
 python demo_factory.py
 ```
 
-A `passed` QA verdict completes the Run. A `flagged` / `failed` verdict stops it at `WAITING_HUMAN`
-with a Review open; play the reviewer to drive a rework from the model's flags (ADR-0032):
+Every candidate stops at the Approval Gate (`WAITING_HUMAN` with a Review open, ADR-0044): a
+`passed` one waits for approval, a `flagged` / `failed` one is an escalation. Play the reviewer to
+approve a passed candidate (the Run completes) or to drive a rework from the model's flags
+(ADR-0032):
 
 ```bash
+python demo_factory.py --approve
 python demo_factory.py --request-changes "add a source for the 70% figure"
 ```
 
@@ -217,18 +220,23 @@ python demo_notion.py <notion-page-id>
 
 A brief that is not on the board, not marked ready, or has no text all print the same message and
 exit cleanly (`BriefBoard.fetch_brief` returns `None` for each, deliberately indistinguishable —
-ADR-0040 §3). `--request-changes "<instructions>"` works the same as in `demo_factory.py`.
+ADR-0040 §3). `--approve` and `--request-changes "<instructions>"` work the same as in
+`demo_factory.py`.
 
 Every status the Run passes through (`queued`, `running`, `waiting_qa`, `waiting_human`,
 `completed`, `failed`) is written back onto the page's `Run status` / `Run id` properties as soon as
 it is stored, and synced once more at the end of each invocation (ADR-0041). If Notion refuses a
 report, the Run carries on regardless — the refusal is logged and printed, and the next run retries.
 
-## Google Docs review desk (not wired yet)
+## Google Docs review desk
 
 `GoogleDocsReviewDesk` (ROADMAP Stage 10, ADR-0043) publishes a candidate for human review as a
-Google Doc and reads the reviewer's decision back. It is not called by any entrypoint yet
-(publishing on `waiting_human` and applying the decision are the next steps). Operator setup:
+Google Doc and reads the reviewer's decision back. `demo_notion.py` publishes the pending review of
+a Run waiting for a human at the end of every invocation and prints the Doc's link (ADR-0044);
+publishing again finds the same Doc, and a refusal leaves the Run untouched for the next run to
+retry. Without the two variables below reviews stay in the Run store; setting only one is an error.
+Reading the decision back into the Run is not wired yet — until then apply it with `--approve` /
+`--request-changes`. Operator setup:
 
 1. In Google Cloud, enable the **Google Drive API**, create a **service account** and download its
    JSON key — keep it outside the repository.

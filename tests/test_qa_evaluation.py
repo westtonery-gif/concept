@@ -248,10 +248,11 @@ def test_qvd_10_the_verdict_fields_are_pinned() -> None:
 # --- ContentDirector routing (ECD) -------------------------------------------------------
 
 
-def test_ecd_01_passed_verdict_continues_to_completed() -> None:
+def test_ecd_01_passed_verdict_stops_at_the_approval_gate_and_an_approve_completes() -> None:
     evaluator = RecordingEvaluator(EvaluationResult(EvaluationStatus.PASSED))
     run = run_director(evaluator)
-    assert run.status is RunStatus.COMPLETED
+    assert run.snapshot.status is RunStatus.WAITING_HUMAN
+    assert not any(isinstance(event, RunCompleted) for event in run.events)
     research, script = run.artifacts
     assert research.status is ArtifactStatus.DRAFT
     assert script.status is ArtifactStatus.CANDIDATE
@@ -259,7 +260,25 @@ def test_ecd_01_passed_verdict_continues_to_completed() -> None:
     (evaluation,) = run.evaluations
     assert evaluation.artifact_ref == script.artifact_id
     assert evaluation.status is EvaluationStatus.PASSED
-    assert run.human_reviews == ()
+    (review,) = run.human_reviews
+    assert (review.artifact_ref, review.status) == (script.artifact_id, ReviewStatus.PENDING)
+
+    director = ContentDirector(
+        OutputtingExecutor(),
+        {
+            "researcher@v1": SchemaBinding("s@v1", _open_schema()),
+            "writer@v1": SchemaBinding("s@v1", _open_schema()),
+        },
+        qa=evaluator,
+    )
+    director.resume(run, REQUESTS)  # still pending: nothing moves
+    assert run.snapshot.status is RunStatus.WAITING_HUMAN
+    run.submit_review(review.review_id, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER)
+    director.resume(run, REQUESTS)
+
+    assert run.status is RunStatus.COMPLETED
+    assert run.artifact(script.artifact_id).status is ArtifactStatus.APPROVED
+    assert evaluator.seen == [FINAL_CONTENT]
 
 
 @pytest.mark.parametrize("verdict", RISK_VERDICTS)

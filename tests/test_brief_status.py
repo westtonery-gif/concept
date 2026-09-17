@@ -179,7 +179,7 @@ def _produce(
     ("qa", "fail", "expected"),
     [
         (None, False, _STRAIGHT),
-        (Evaluator(), False, _STRAIGHT),
+        (Evaluator(), False, [Q, RN, WQ, WH]),
         (None, True, [Q, RN, F]),
     ],
     ids=["no-qa", "qa-passed", "step-fails"],
@@ -205,8 +205,13 @@ def test_bsr_02_a_status_is_stored_before_it_is_shown() -> None:
     store = MemoryStore()
     board = WatchingBoard(store)
 
-    _produce(store, board, qa=Evaluator())
+    run, reporter = _produce(store, board, qa=Evaluator())
+    run.submit_review(
+        run.human_reviews[-1].review_id, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER
+    )
+    _director(reporter, qa=Evaluator()).resume_workflow(run, WORKFLOW, brief="")
 
+    assert run.status is C
     assert board.stored_at_report == _STRAIGHT
 
 
@@ -254,10 +259,10 @@ def test_bsr_04_a_refused_report_is_logged_kept_and_retried_without_touching_the
     reference = _new_run()
     _director(plain, qa=Evaluator()).execute_workflow(reference, WORKFLOW, brief=BRIEF.body)
 
-    assert run.status is C
+    assert run.status is WH
     assert run.snapshot == reference.snapshot
     assert store.snapshots[RUN_ID] == plain.snapshots[RUN_ID]
-    assert board.shown() == [Q, WQ, WH, C]
+    assert board.shown() == [Q, WQ, WH]
     assert reporter.failed_reports == (FailedReport(RUN_ID, RN, "board is down"),)
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     assert RUN_ID in caplog.text and "running" in caplog.text

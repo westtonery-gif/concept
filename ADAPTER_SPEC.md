@@ -232,9 +232,23 @@ Doc в настроенной папке (общие диски поддержа
 JSON-ключу) и `OMEMO_GOOGLE_REVIEW_FOLDER_ID` — обязательны; отсутствующие/пустые →
 `ReviewDeskError` с их именами. Ключ читается сразу: нечитаем, не JSON-объект, `type` не
 `service_account`, пустые `client_email`/`private_key`/`token_uri`, ключ не RSA PEM →
-`ReviewDeskError` (путь назвать можно, ключ — никогда; в `repr` настроек ключа нет). Не подключён:
-публикация на `WAITING_HUMAN` — задача 14.2, применение решения — 14.3. Приёмка —
+`ReviewDeskError` (путь назвать можно, ключ — никогда; в `repr` настроек ключа нет). Применение
+решения (`fetch_decision` → `Run.submit_review`) не подключено — задача 14.3. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §10.
+
+**Публикация ожидающего ревью (Этап 10, ADR-0044).** `application/review_publication.py`:
+
+| Функция | Поведение |
+|---|---|
+| `pending_review_package(run) -> ReviewPackage \| None` | `None`, если Run не в `WAITING_HUMAN` или нет `PENDING` Review; иначе пакет последнего ожидающего Review: `candidate` — его Artifact, `brief` — `task_input` первой Task, `qa_flags` — флаги последней QA-оценки кандидата (`()` без флагов/оценки) |
+| `publish_pending_review(run, desk) -> PublishedReview \| None` | `desk.publish(пакет)` → `PublishedReview(review_id, location)`; нечего публиковать → `None`, площадка не вызывается; `ReviewDeskError` пробрасывается |
+
+Run только читается. Точка входа вызывает публикацию **после** возврата Director при каждом запуске:
+повтор публикации того же `review_id` безвреден, поэтому это и первая попытка, и повтор после сбоя
+или падения процесса; место в Run не сохраняется. `composition.build_review_desk(environ)` строит
+`GoogleDocsReviewDesk` (fail closed, как `google_docs_settings_from_env`). `demo_notion.py`
+публикует, если задана хотя бы одна переменная `OMEMO_GOOGLE_*` (неполная настройка — сообщение и
+выход до вызова моделей), и печатает ссылку или отказ. Приёмка — `ADAPTER_ACCEPTANCE.md` §11.
 
 ## 7. `AnalyticsSink` (`adapters/analytics_sink.py`)
 

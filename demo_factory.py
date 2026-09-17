@@ -23,12 +23,13 @@ silent hardcoded fallback either.
 Run with: ``python demo_factory.py``. Needs ``ANTHROPIC_API_KEY`` plus a per-role provider/model
 binding and exact input/output token prices + currency for each of Rin and Leo (see the printed
 instructions, or README.md); missing values make the demo explain what to set and exit cleanly.
-The QA role is bound and priced the same way. A ``PASSED`` verdict completes the Run; a risk
-verdict stops it at ``WAITING_HUMAN`` with a Review opened. Play the human reviewer with
-``python demo_factory.py --request-changes "<instructions>"``: it requests changes on that Review
-and resumes, so Leo reworks the script from the model's flags and QA judges the new version
-(ADR-0032). A failed QA call leaves the Run at ``WAITING_QA``; running again asks QA again
-(ADR-0038 §1). Publication and external integrations are not involved.
+The QA role is bound and priced the same way. Every candidate stops at ``WAITING_HUMAN`` with a
+Review opened — a ``PASSED`` one for approval, a risk verdict as an escalation (ADR-0044). Play the
+human reviewer with ``python demo_factory.py --approve``, which approves a passed candidate and
+completes the Run, or ``python demo_factory.py --request-changes "<instructions>"``: it requests
+changes on that Review and resumes, so Leo reworks the script from the model's flags and QA judges
+the new version (ADR-0032). A failed QA call leaves the Run at ``WAITING_QA``; running again asks
+QA again (ADR-0038 §1). Publication and external integrations are not involved.
 
 The Run is saved after every step to the Run store (`ADR-0026`; ``OMEMO_RUN_STORE_PATH``, default
 ``.omemo/runs.sqlite3``). Running the demo again resumes the stored Run instead of starting over:
@@ -156,31 +157,67 @@ def _build_qa_evaluator() -> ArtifactEvaluator:
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
-    parser.add_argument(
+    add_reviewer_arguments(parser)
+    return parser.parse_args(argv)
+
+
+def add_reviewer_arguments(parser: argparse.ArgumentParser) -> None:
+    """The two ways to play the human reviewer on the stored Run's pending Review."""
+    decision = parser.add_mutually_exclusive_group()
+    decision.add_argument(
         "--request-changes",
         metavar="INSTRUCTIONS",
         help="as the human reviewer, request changes on the stored Run's pending Review, "
         "then resume it (ADR-0032)",
     )
-    return parser.parse_args(argv)
+    decision.add_argument(
+        "--approve",
+        action="store_true",
+        help="as the human reviewer, approve the stored Run's pending Review, then resume it; "
+        "only a candidate that passed QA completes (ADR-0044)",
+    )
+
+
+def _play_reviewer(run: Run | None, args: argparse.Namespace) -> bool:
+    """Apply ``--approve`` / ``--request-changes`` to ``run``; whether a decision was submitted."""
+    if args.approve:
+        return _approve(run)
+    if args.request_changes is not None:
+        return _request_changes(run, args.request_changes)
+    return False
+
+
+def _approve(run: Run | None) -> bool:
+    """Submit ``APPROVED`` on the pending Review; whether it was submitted."""
+    pending = _pending_review(run)
+    if run is None or pending is None:
+        return False
+    run.submit_review(pending, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER)
+    safe_print(f"Approved {pending}.")
+    return True
+
+
+def _pending_review(run: Run | None) -> str | None:
+    """The id of the stored Run's pending Review, or ``None`` (with the reason printed)."""
+    if run is None:
+        safe_print(f"No stored {RUN_ID} to review; run the demo without arguments first.")
+        return None
+    pending = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
+    if run.status is not RunStatus.WAITING_HUMAN or not pending:
+        safe_print(f"{RUN_ID} is '{run.status.value}' with no pending Review; nothing to decide.")
+        return None
+    return pending[-1].review_id
 
 
 def _request_changes(run: Run | None, instructions: str) -> bool:
     """Submit ``CHANGES_REQUESTED`` on the pending Review; whether it was submitted."""
-    if run is None:
-        safe_print(f"No stored {RUN_ID} to review; run the demo without arguments first.")
-        return False
-    pending = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
-    if run.status is not RunStatus.WAITING_HUMAN or not pending:
-        safe_print(f"{RUN_ID} is '{run.status.value}' with no pending Review; nothing to decide.")
+    pending = _pending_review(run)
+    if run is None or pending is None:
         return False
     run.submit_review(
-        pending[-1].review_id,
-        ReviewStatus.CHANGES_REQUESTED,
-        by=Actor.HUMAN_REVIEWER,
-        reason=instructions,
+        pending, ReviewStatus.CHANGES_REQUESTED, by=Actor.HUMAN_REVIEWER, reason=instructions
     )
-    safe_print(f"Requested changes on {pending[-1].review_id}: {instructions}")
+    safe_print(f"Requested changes on {pending}: {instructions}")
     return True
 
 
@@ -214,8 +251,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     safe_print("Rin -> Leo -> QA, the real catalogued roles, each on its own provider/model")
     safe_print("=" * 78)
     run = store.load(RUN_ID)
-    if args.request_changes is not None:
-        if not _request_changes(run, args.request_changes):
+    if args.approve or args.request_changes is not None:
+        if not _play_reviewer(run, args):
             return
         assert run is not None
         store.save(run)
@@ -262,6 +299,7 @@ def _show_quality_gate(run: Run) -> None:
     if run.status is RunStatus.WAITING_HUMAN and any(
         review.status is ReviewStatus.PENDING for review in run.human_reviews
     ):
+        safe_print("  To approve:         python demo_factory.py --approve")
         safe_print(
             '  To request changes: python demo_factory.py --request-changes "<instructions>"'
         )

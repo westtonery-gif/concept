@@ -36,6 +36,7 @@ from omemo_content_factory.composition import (
 )
 from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus
+from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import (
     Actor,
     InvalidTransitionError,
@@ -221,9 +222,14 @@ _QA_PASSED_CHECKPOINTS = [
     *_NO_QA_CHECKPOINTS,
     (RunStatus.WAITING_QA, (S, S), 2, (EvaluationStatus.PENDING,), 0),
     (RunStatus.WAITING_QA, (S, S), 2, (PASSED,), 0),
-    (RunStatus.WAITING_HUMAN, (S, S), 2, (PASSED,), 0),
-    (RunStatus.COMPLETED, (S, S), 2, (PASSED,), 0),
+    (RunStatus.WAITING_HUMAN, (S, S), 2, (PASSED,), 1),
 ]
+
+
+def _approve(run: Run) -> None:
+    """Play the human reviewer: approve the Run's pending Review (the Approval Gate, ADR-0044)."""
+    (pending,) = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
+    run.submit_review(pending.review_id, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER)
 
 
 # --- SWR-01..03: commit points ------------------------------------------------------------
@@ -253,6 +259,11 @@ def test_swr_01_every_step_is_committed_once_in_order_through_the_qa_gate() -> N
     )
 
     assert [_shape(s) for s in passed.snapshots] == _QA_PASSED_CHECKPOINTS
+    assert passed.last == passed_run.snapshot
+    _approve(passed_run)
+    _director(CountingExecutor(), passed, CountingEvaluator()).resume(passed_run, REQUESTS)
+    assert _shape(passed.last) == (RunStatus.COMPLETED, (S, S), 2, (PASSED,), 1)
+    assert passed_run.artifacts[-1].status is ArtifactStatus.APPROVED
     assert [_shape(s) for s in flagged.snapshots] == [
         *_QA_PASSED_CHECKPOINTS[:8],
         (RunStatus.WAITING_QA, (S, S), 2, (FLAGGED,), 0),
@@ -349,8 +360,12 @@ def test_swr_05_a_crash_after_any_commit_resumes_without_repeating_work(
     assert _shape(run.snapshot) == _QA_PASSED_CHECKPOINTS[crash_after - 1]
     executor, qa = CountingExecutor(), CountingEvaluator()
     _director(executor, store, qa).resume(run, REQUESTS)
+    assert run.snapshot.status is RunStatus.WAITING_HUMAN
+    _approve(run)
+    _director(executor, store, qa).resume(run, REQUESTS)
 
     assert run.status is RunStatus.COMPLETED
+    assert len(run.human_reviews) == 1
     assert [a.content for a in run.artifacts] == [SECOND_INPUT, FINAL_CONTENT]
     assert sorted(first_executor.calls + executor.calls) == sorted(["brief", SECOND_INPUT])
     assert first_qa.calls + qa.calls == 1
@@ -375,7 +390,7 @@ def test_swr_06_a_crash_during_qa_finishes_the_same_evaluation(tmp_path: Path) -
 
     assert (executor.calls, qa.calls) == ([], 1)
     assert [(e.evaluation_id, e.status) for e in run.evaluations] == [(pending, PASSED)]
-    assert run.status is RunStatus.COMPLETED
+    assert (run.status, len(run.human_reviews)) == (RunStatus.WAITING_HUMAN, 1)
 
 
 # --- SWR-07..10: what resume leaves alone or refuses --------------------------------------
@@ -385,10 +400,11 @@ def test_swr_06_a_crash_during_qa_finishes_the_same_evaluation(tmp_path: Path) -
     ("executor", "qa", "status"),
     [
         (CountingExecutor(), CountingEvaluator(FLAGGED), RunStatus.WAITING_HUMAN),
-        (CountingExecutor(), CountingEvaluator(), RunStatus.COMPLETED),
+        (CountingExecutor(), CountingEvaluator(), RunStatus.WAITING_HUMAN),
+        (CountingExecutor(), None, RunStatus.COMPLETED),
         (CountingExecutor(fail_on=SECOND_INPUT), None, RunStatus.FAILED),
     ],
-    ids=["waiting-for-the-human", "completed", "failed"],
+    ids=["escalated-to-the-human", "waiting-for-approval", "completed", "failed"],
 )
 def test_swr_07_a_run_that_is_waiting_or_done_is_left_alone(
     executor: CountingExecutor, qa: CountingEvaluator | None, status: RunStatus

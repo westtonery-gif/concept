@@ -18,8 +18,15 @@ bindings as ``demo_factory.py``, plus the six ``OMEMO_NOTION_*`` variables
 (`infrastructure/notion_brief_board.py`); any missing configuration is explained and the demo
 exits cleanly. A brief that is not on the board, not marked ready, or has no text also exits
 cleanly (`BriefBoard.fetch_brief` returns ``None`` for all of these — deliberately
-indistinguishable, ADR-0040 §3). ``--request-changes "<instructions>"`` plays the human reviewer,
-same as in ``demo_factory.py``.
+indistinguishable, ADR-0040 §3). ``--approve`` / ``--request-changes "<instructions>"`` play the
+human reviewer, same as in ``demo_factory.py``.
+
+When both ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID`` are set, a Run
+waiting for a human has its pending review published as a Google Doc at the end of every invocation
+(ADR-0043/0044) and the Doc's link is printed; publishing again finds the same Doc. Without them the
+review stays in the Run store only; a half-configured desk is explained and the demo exits. A desk
+that refuses to publish never touches the Run — the refusal is printed and the next invocation
+tries again. Reading the reviewer's decision back from the Doc is not wired yet (queue task 14.3).
 """
 
 from __future__ import annotations
@@ -35,27 +42,33 @@ from demo_factory import (
     WORKFLOW,
     _build_executors,
     _build_qa_evaluator,
+    _play_reviewer,
     _print_binding_instructions,
-    _request_changes,
     _show_model_calls,
     _show_quality_gate,
+    add_reviewer_arguments,
 )
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError
+from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.application.brief_intake import BriefIntakeError, produce_brief
 from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
+from omemo_content_factory.application.review_publication import publish_pending_review
 from omemo_content_factory.composition import (
     build_brief_board,
+    build_review_desk,
     build_run_store,
     build_schema_map,
     run_store_path,
     validate_qa_evaluator,
     validate_workflow_executors,
 )
-from omemo_content_factory.domain.run import Run
+from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
+
+_GOOGLE_VARS = ("OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE", "OMEMO_GOOGLE_REVIEW_FOLDER_ID")
 
 
 def _run_id_for(brief_ref: str) -> str:
@@ -66,13 +79,18 @@ def _run_id_for(brief_ref: str) -> str:
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("brief_ref", help="the Notion page id of the brief to produce")
-    parser.add_argument(
-        "--request-changes",
-        metavar="INSTRUCTIONS",
-        help="as the human reviewer, request changes on the stored Run's pending Review, "
-        "then resume it (ADR-0032)",
-    )
+    add_reviewer_arguments(parser)
     return parser.parse_args(argv)
+
+
+def _build_review_desk() -> ReviewDesk | None:
+    """The Google Docs desk when configured, ``None`` when not configured at all (ADR-0044 §5).
+
+    A partly or wrongly configured desk raises ``ReviewDeskError`` naming what is wrong.
+    """
+    if not any(os.environ.get(name, "").strip() for name in _GOOGLE_VARS):
+        return None
+    return build_review_desk(os.environ)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -87,10 +105,15 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     try:
         board = build_brief_board(os.environ)
+        desk = _build_review_desk()
         executors = _build_executors()
         qa = _build_qa_evaluator()
     except BriefBoardError as exc:
         safe_print(f"The Notion board is not configured: {exc}")
+        return
+    except ReviewDeskError as exc:
+        safe_print(f"The Google Docs review desk is not configured: {exc}")
+        safe_print(f"Set both {' and '.join(_GOOGLE_VARS)}, or neither to keep reviews local.")
         return
     except ProviderModelSelectionError as exc:
         safe_print(f"Provider/model selection failed: {exc}")
@@ -109,16 +132,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     safe_print("=" * 78)
     safe_print(f"Notion brief '{args.brief_ref}' -> Rin -> Leo -> QA")
     safe_print("=" * 78)
-    stored = store.load(run_id)
-    if args.request_changes is not None:
-        if not _request_changes(stored, args.request_changes):
-            return
-        assert stored is not None
-        store.save(stored)
-    elif stored is not None:
-        location = run_store_path(os.environ)
-        safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
-        safe_print("committed steps are not run again. Delete that file to start over.")
+    if not _prepare_stored_run(store, run_id, args):
+        return
     try:
         run = produce_brief(
             director, store, board, WORKFLOW, brief_ref=args.brief_ref, run_id=run_id
@@ -144,6 +159,38 @@ def main(argv: Sequence[str] | None = None) -> None:
     _show_model_calls(run)
     print_final_article(run)
     _show_board_reports(store, run)
+    _publish_review(desk, run)
+
+
+def _prepare_stored_run(store: BriefStatusReporter, run_id: str, args: argparse.Namespace) -> bool:
+    """Apply a reviewer decision to the stored Run, or announce a resume; whether to go on."""
+    stored = store.load(run_id)
+    if args.approve or args.request_changes is not None:
+        if not _play_reviewer(stored, args):
+            return False
+        assert stored is not None
+        store.save(stored)
+    elif stored is not None:
+        location = run_store_path(os.environ)
+        safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
+        safe_print("committed steps are not run again. Delete that file to start over.")
+    return True
+
+
+def _publish_review(desk: ReviewDesk | None, run: Run) -> None:
+    """Put the Run's pending review on the desk and say where it is (ADR-0044 §4)."""
+    if desk is None:
+        if run.status is RunStatus.WAITING_HUMAN:
+            safe_print("No review desk is configured; the review stays in the Run store.")
+        return
+    try:
+        published = publish_pending_review(run, desk)
+    except ReviewDeskError as exc:
+        safe_print(f"Google Docs refused to publish the review: {exc}")
+        safe_print("The Run is unchanged; run again to retry the publication.")
+        return
+    if published is not None:
+        safe_print(f"Review {published.review_id} is on Google Docs: {published.location}")
 
 
 def _show_board_reports(store: BriefStatusReporter, run: Run) -> None:

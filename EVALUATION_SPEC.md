@@ -211,7 +211,7 @@ Evaluation, без второй; первый полученный вердик�
 `WAITING_QA`, и показывает сохранённый Run. `--request-changes "<указания>"` от имени
 `HUMAN_REVIEWER` отправляет `CHANGES_REQUESTED` на ожидающий Review сохранённого Run и возобновляет
 его (доработка ADR-0032 по флагам реальной модели); без сохранённого Run или ожидающего Review
-ничего не меняет.
+ничего не меняет. `--approve` отправляет `APPROVED` на ожидающий Review и возобновляет Run (ADR-0044).
 
 ## 9. Маршрутизация в ContentDirector
 
@@ -221,10 +221,25 @@ Evaluation, без второй; первый полученный вердик�
 | Ситуация | Маршрут |
 |---|---|
 | финальный шаг не дал артефакта | Run → `FAILED`, причина `QA gate: no candidate artifact to evaluate` |
-| вердикт `PASSED` | артефакт финального шага `CANDIDATE`; далее прежний маршрут `WAITING_HUMAN` → `COMPLETED` |
+| вердикт `PASSED` | артефакт финального шага `CANDIDATE`; Run → `WAITING_HUMAN`, открыт `PENDING` Human Review кандидата **в том же коммите** (Approval Gate, ADR-0044 §1); Run **не** завершается без человека |
 | вердикт `FLAGGED` / `FAILED` | Run → `WAITING_HUMAN`, открыт Human Review кандидата; Run **не** завершается |
 
 Оценивается только артефакт финального шага; промежуточные остаются `DRAFT`.
 Если человек отвечает `CHANGES_REQUESTED`, дальнейший маршрут определён
 `REWORK_ROUTING_SPEC.md`: повторно исполняется producer текущего кандидата, а его Output создаёт
 новую версию Artifact. Сам QA-риск до решения человека по-прежнему только эскалируется.
+
+**Approval Gate (ADR-0044 §1).** С `qa` (или в доработке) `resume` Run в `WAITING_HUMAN` смотрит
+последний Review кандидата и последнюю QA-оценку кандидата:
+
+| Последний Review | Последняя QA | Маршрут |
+|---|---|---|
+| нет (Run сохранён старым кодом) | любая | открыть `PENDING` Review, один коммит |
+| `PENDING` | любая | ничего, коммита нет |
+| `APPROVED` | `PASSED` | артефакт → `APPROVED`, Run → `COMPLETED`, **один** коммит |
+| `APPROVED` | `FLAGGED` / `FAILED` | ничего (отложено, ADR-0044 §2) |
+| `CHANGES_REQUESTED` | любая | доработка (`REWORK_ROUTING_SPEC.md`) |
+| `REJECTED` | любая | ничего (отложено, ADR-0044 §2) |
+
+Модель ни в одной строке не вызывается. Без `qa` и вне доработки маршрут прежний:
+`WAITING_HUMAN` → `COMPLETED` без Review.

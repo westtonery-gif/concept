@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from omemo_content_factory.adapters.brief_board import BriefBoard
+from omemo_content_factory.adapters.review_desk import ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
@@ -49,6 +50,10 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
+from omemo_content_factory.infrastructure.google_docs_review_desk import (
+    GoogleDocsReviewDesk,
+    google_docs_settings_from_env,
+)
 from omemo_content_factory.infrastructure.llm import (
     LLMArtifactEvaluator,
     LLMClient,
@@ -216,6 +221,16 @@ def build_brief_board(environ: Mapping[str, str]) -> BriefBoard:
     :func:`client_for_role`'s fail-closed binding.
     """
     return NotionBriefBoard(notion_settings_from_env(environ))
+
+
+def build_review_desk(environ: Mapping[str, str]) -> ReviewDesk:
+    """Build the ``ReviewDesk`` a real entrypoint publishes reviews to (ROADMAP Stage 10, ADR-0044).
+
+    Reads ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID``
+    (:func:`google_docs_settings_from_env`, ADR-0043): a missing variable or an unusable key file
+    fails closed with ``ReviewDeskError`` before any request is made.
+    """
+    return GoogleDocsReviewDesk(google_docs_settings_from_env(environ))
 
 
 def build_executor_map(

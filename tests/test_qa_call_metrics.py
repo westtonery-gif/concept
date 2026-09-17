@@ -480,7 +480,7 @@ def test_lae_06_the_director_commits_a_failed_qa_call_before_the_error_propagate
 @pytest.mark.parametrize(
     ("fields", "status"),
     [
-        ({"verdict": "passed", "flags": "[]"}, RunStatus.COMPLETED),
+        ({"verdict": "passed", "flags": "[]"}, RunStatus.WAITING_HUMAN),
         ({"verdict": "flagged", "flags": '["нет источника"]'}, RunStatus.WAITING_HUMAN),
     ],
 )

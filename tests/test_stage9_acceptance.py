@@ -194,19 +194,32 @@ def test_s9a_01_a_filed_brief_produces_a_valid_run(tmp_path: Path) -> None:
     )
     assert run.tasks[0].task_input == BRIEF
     assert BRIEF in _user_text(process.producer.calls[0])
-    assert run.status is C
+    assert run.status is WH
     stored = _stored(environ)
     assert stored is not None and stored.snapshot == run.snapshot
 
 
 def test_s9a_02_every_status_lands_back_on_the_brief(tmp_path: Path) -> None:
+    environ = _environ(tmp_path)
     board = _filed_board()
-    process = _Process(_environ(tmp_path), board, _producer_turns(), [_verdict("passed", [])])
+    process = _Process(environ, board, _producer_turns(), [_verdict("passed", [])])
     run = process.produced()
 
-    assert board.reports(BRIEF_REF) == tuple((RUN_ID, s) for s in (Q, RN, WQ, WH, C))
+    assert board.reports(BRIEF_REF) == tuple((RUN_ID, s) for s in (Q, RN, WQ, WH))
     assert process.store.shown_status(RUN_ID) is run.status
     assert process.store.failed_reports == ()
+
+    decided = _stored(environ)
+    assert decided is not None
+    [pending] = decided.human_reviews
+    decided.submit_review(pending.review_id, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER)
+    build_run_store(environ).save(decided)
+    later = _Process(environ, board, [], [])
+    done = later.produced()
+
+    assert later.silent()
+    assert done.status is C
+    assert board.reports(BRIEF_REF) == tuple((RUN_ID, s) for s in (Q, RN, WQ, WH, C))
 
 
 @pytest.mark.parametrize("ready", [None, False])
@@ -273,8 +286,8 @@ def test_s9a_05_a_crash_before_the_first_task_resumes_on_the_brief_from_the_boar
 
     assert run.tasks[0].task_input == BRIEF
     assert BRIEF in _user_text(restart.producer.calls[0])
-    assert run.status is C
-    assert board.shown()[-1] is C
+    assert run.status is WH
+    assert board.shown()[-1] is WH
 
 
 def test_s9a_05_a_crash_before_the_first_task_with_the_brief_withdrawn_is_refused(
@@ -320,8 +333,8 @@ def test_s9a_06_a_qa_error_is_shown_parked_and_a_restart_asks_again(tmp_path: Pa
         parked.evaluations[0].evaluation_id,
         EvaluationStatus.PASSED,
     )
-    assert run.status is C
-    assert board.shown()[-1] is C
+    assert run.status is WH
+    assert board.shown()[-1] is WH
 
 
 def test_s9a_07_a_board_outage_never_stops_the_run_and_the_next_invocation_catches_up(
@@ -340,9 +353,9 @@ def test_s9a_07_a_board_outage_never_stops_the_run_and_the_next_invocation_catch
     outage = _Process(environ, board, _producer_turns(), [_verdict("passed", [])])
     run = outage.produced()
 
-    assert run.status is C
+    assert run.status is WH
     assert run.snapshot == reference.snapshot
-    assert [f.status for f in outage.store.failed_reports] == [Q, RN, WQ, WH, C, C]
+    assert [f.status for f in outage.store.failed_reports] == [Q, RN, WQ, WH, WH]
     assert board.shown() == []
 
     board.down = False
@@ -351,7 +364,7 @@ def test_s9a_07_a_board_outage_never_stops_the_run_and_the_next_invocation_catch
 
     assert later.silent()
     assert again.snapshot == run.snapshot
-    assert board.shown() == [C]
+    assert board.shown() == [WH]
 
 
 def test_s9a_08_a_stored_run_of_another_brief_is_refused_untouched(tmp_path: Path) -> None:

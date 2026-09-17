@@ -21,6 +21,23 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **The Approval Gate now holds every QA-passed candidate, and a pending review is published
+  (ROADMAP Stage 10, ADR-0044; queue task 14.2).** Found while wiring: `PASSED` used to go
+  `WAITING_HUMAN → COMPLETED` with no Human Review, contradicting `PROJECT.md` §12 /
+  `ARCHITECTURE.md` §13 / `RUN_SPEC.md` §4 — **the maintainer chose to hold the gate.** With QA wired
+  (or in rework) reaching `WAITING_HUMAN` opens the candidate's `PENDING` review **in the same
+  commit**; on `resume`, latest review `APPROVED` + latest QA `PASSED` → Artifact `APPROVED` + Run
+  `COMPLETED` in one commit; `PENDING`, `REJECTED` and an approved escalation are left alone
+  (`REJECTED` routing still deferred, ADR-0044 §2). Without QA the legacy no-review completion
+  stays. `application/review_publication.py` `publish_pending_review(run, desk)` builds the
+  `ReviewPackage` from the Run only (candidate, first Task's input as the brief, latest QA flags),
+  never mutates it, and lets `ReviewDeskError` propagate; the **entrypoint** calls it after the
+  Director returns (idempotent per `review_id`, so it is also the retry). `composition.
+  build_review_desk(environ)`; `demo_notion.py` publishes when `OMEMO_GOOGLE_*` is set and prints
+  the Doc link; both demos gained `--approve`. Stage 8/9, SWR, BSR, QWR, LAE, ECD expectations moved
+  from `passed → completed` to `passed → waiting_human (+review) → APPROVED → completed`. Tests:
+  `tests/test_review_publication.py` (`APG`, `EVALUATION_ACCEPTANCE.md` §4.5; `RPB`,
+  `ADAPTER_ACCEPTANCE.md` §11). Suite: 1029 passed.
 - **A real Google Docs `ReviewDesk` exists (ROADMAP Stage 10, ADR-0043; queue task 14.1) — not
   wired yet.** `infrastructure/google_docs_review_desk.py` `GoogleDocsReviewDesk` speaks the **Google
   Drive API v3** only, through stdlib `urllib`: find by `appProperties` (SHA-256 of `review_id` /
@@ -126,7 +143,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 42 ADRs (0001–0042) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 44 ADRs (0001–0044) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -648,14 +665,24 @@ process at the time, not a pattern to keep copying.)
        flags (`ReviewPackage`'s existing fields) and returns its location; `fetch_decision` reads
        whatever mechanism the ADR chose. Second non-Anthropic third-party surface after Notion —
        decide the library (official `google-api-python-client` vs. raw REST) in this subtask.
-    2. **Publish wiring.** `WAITING_HUMAN` gets a real desk the way `WAITING_QA` got a real
-       evaluator (ADR-0038): `ContentDirector` (or an `application/` module analogous to
-       `qa_evaluation.py`) builds the `ReviewPackage` from the Run's candidate Artifact, brief and
-       the QA Evaluation's flags, and calls `desk.publish`.
-    3. **Decision-fetch wiring.** `desk.fetch_decision(review_id)` → `Run.submit_review(...)`,
-       replacing/complementing `demo_factory.py`'s manual `--request-changes` (which stays useful
-       for keyless/local testing). A pending decision (`None`) leaves the Run at `WAITING_HUMAN`
-       for the next invocation to check again — same shape as the QA-retry-on-resume pattern.
+    2. ~~**Publish wiring.**~~ — done (ADR-0044, `application/review_publication.py`,
+       `composition.build_review_desk`, `demo_notion.py`, `EVALUATION_SPEC.md` §9,
+       `ADAPTER_SPEC.md` §6, `EVALUATION_ACCEPTANCE.md` §4.5 `APG`, `ADAPTER_ACCEPTANCE.md` §11
+       `RPB`, `tests/test_review_publication.py`). Grew a gate change the maintainer chose when
+       asked: a `PASSED` candidate no longer completes on its own — it waits at `WAITING_HUMAN` with
+       a review, and `APPROVED` + `PASSED` completes on `resume`. Decided without asking
+       (technical, reversible): publish from the entrypoint after the Director returns, not from
+       the Director or a `RunStore` decorator. Original brief: `WAITING_HUMAN` gets a real desk the
+       way `WAITING_QA` got a real evaluator (ADR-0038): build the `ReviewPackage` from the Run's
+       candidate Artifact, brief and the QA Evaluation's flags, and call `desk.publish`.
+    3. **Decision-fetch wiring.** Next. `desk.fetch_decision(review_id)` → `Run.submit_review(...,
+       by=Actor.HUMAN_REVIEWER, reason=...)` for the pending review, then `resume` — the Director
+       already routes `APPROVED` (ADR-0044 §1) and `CHANGES_REQUESTED` (ADR-0032), so this is the
+       application/entrypoint side only, probably next to `publish_pending_review`. Replaces/
+       complements the demos' manual `--approve` / `--request-changes` (they stay for keyless/local
+       testing). A pending decision (`None`) leaves the Run at `WAITING_HUMAN` for the next
+       invocation to check again. Decide there what a fetched `REJECTED` does to the Run — still
+       deferred (ADR-0032, ADR-0044 §2) and a domain decision: ask, don't guess.
     4. **Stage 10 acceptance** — a test in the `test_stage9_acceptance.py` shape (`S10A`,
        `STAGE10_ACCEPTANCE.md`) against `InMemoryReviewDesk` for CI; a live Google Docs round-trip
        is the operator's manual check (needs real credentials, not available in this environment) —

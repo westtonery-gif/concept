@@ -240,11 +240,14 @@ def _decide(environ: dict[str, str], decision: ReviewStatus, reason: str | None 
 # --- S8A ------------------------------------------------------------------------------
 
 
-def test_s8a_01_a_passed_verdict_completes_the_run(tmp_path: Path) -> None:
-    process = _Process(_environ(tmp_path), _producer_turns(), [_verdict("passed", [])])
+def test_s8a_01_a_passed_verdict_waits_for_the_human_and_an_approve_completes_the_run(
+    tmp_path: Path,
+) -> None:
+    environ = _environ(tmp_path)
+    process = _Process(environ, _producer_turns(), [_verdict("passed", [])])
     run = process.execute()
 
-    assert run.status is RunStatus.COMPLETED
+    assert run.status is RunStatus.WAITING_HUMAN
     research, script = run.artifacts
     [evaluation] = run.evaluations
     assert (evaluation.status, evaluation.flags, evaluation.evaluator_ref) == (
@@ -254,7 +257,16 @@ def test_s8a_01_a_passed_verdict_completes_the_run(tmp_path: Path) -> None:
     )
     assert evaluation.artifact_ref == script.artifact_id
     assert (research.status, script.status) == (ArtifactStatus.DRAFT, ArtifactStatus.CANDIDATE)
-    assert run.human_reviews == ()
+    [review] = run.human_reviews
+    assert (review.artifact_ref, review.status) == (script.artifact_id, ReviewStatus.PENDING)
+
+    _decide(environ, ReviewStatus.APPROVED)
+    restart = _Process(environ, [], [])
+    done = restart.resume()
+
+    assert done.status is RunStatus.COMPLETED
+    assert done.artifact(script.artifact_id).status is ArtifactStatus.APPROVED
+    assert (restart.producer.calls, restart.qa.calls) == ([], [])
 
 
 def test_s8a_02_the_qa_provider_gets_the_catalogued_prompt_and_the_verdict_shape(
@@ -318,6 +330,9 @@ def test_s8a_04_a_risk_verdict_stops_the_content_at_the_human_gate(
     with pytest.raises(ArtifactQaNotPassedError):
         approved.transition_artifact(script.artifact_id, ArtifactStatus.APPROVED, by=_CD)
     assert approved.artifact(script.artifact_id).status is ArtifactStatus.CANDIDATE
+    still = _Process(environ, [], []).resume()
+    assert still.status is RunStatus.WAITING_HUMAN
+    assert still.artifact(script.artifact_id).status is ArtifactStatus.CANDIDATE
 
 
 def test_s8a_05_a_model_flag_drives_rework_and_the_new_version_is_judged_again(
@@ -358,9 +373,10 @@ def test_s8a_05_a_model_flag_drives_rework_and_the_new_version_is_judged_again(
     latest = run.human_reviews[-1]
     assert (latest.artifact_ref, latest.status) == (v2.artifact_id, ReviewStatus.PENDING)
 
-    approved = _decide(environ, ReviewStatus.APPROVED)
-    approved.transition_artifact(v2.artifact_id, ArtifactStatus.APPROVED, by=_CD)
-    assert approved.artifact(v2.artifact_id).status is ArtifactStatus.APPROVED
+    _decide(environ, ReviewStatus.APPROVED)
+    done = _Process(environ, [], []).resume()
+    assert done.status is RunStatus.COMPLETED
+    assert done.artifact(v2.artifact_id).status is ArtifactStatus.APPROVED
 
 
 def test_s8a_06_a_malformed_verdict_parks_the_gate_and_a_restart_asks_again(
@@ -382,7 +398,7 @@ def test_s8a_06_a_malformed_verdict_parks_the_gate_and_a_restart_asks_again(
 
     assert restart.producer.calls == []
     assert len(restart.qa.calls) == 1
-    assert run.status is RunStatus.COMPLETED
+    assert run.status is RunStatus.WAITING_HUMAN
     [decided] = run.evaluations
     assert (decided.evaluation_id, decided.status) == (
         pending.evaluation_id,
@@ -394,7 +410,10 @@ def test_s8a_06_a_malformed_verdict_parks_the_gate_and_a_restart_asks_again(
 
 def test_s8a_07_a_completed_run_is_stored_and_resume_calls_no_model(tmp_path: Path) -> None:
     environ = _environ(tmp_path)
-    run = _Process(environ, _producer_turns(), [_verdict("passed", [])]).execute()
+    _Process(environ, _producer_turns(), [_verdict("passed", [])]).execute()
+    _decide(environ, ReviewStatus.APPROVED)
+    run = _Process(environ, [], []).resume()
+    assert run.status is RunStatus.COMPLETED
 
     restart = _Process(environ, [], [])
     back = restart.resume()
