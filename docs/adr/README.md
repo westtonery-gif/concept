@@ -64,3 +64,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0038](0038-qa-evaluator-wiring-and-qa-failure-surfacing.md) | Wiring the QA evaluator into the Composition Root and an entrypoint, and how a QA failure surfaces | Accepted |
 | [0039](0039-stage-8-acceptance.md) | The ROADMAP Stage 8 (QA Agent) acceptance | Accepted |
 | [0040](0040-notion-brief-board.md) | Notion Adapter — a real `BriefBoard` over the Notion REST API | Accepted |
+| [0041](0041-brief-status-write-back.md) | Status write-back — every committed Run status is shown on its brief | Accepted |

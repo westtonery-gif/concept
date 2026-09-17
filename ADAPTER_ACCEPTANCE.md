@@ -45,7 +45,7 @@
 
 Поведение реализаций — оно проверяется против каждой реализации отдельно: Storage Adapter — §5,
 заглушки (идемпотентность `publish`/`report_status`/`export`) — §6, проводка `RunStore` в Content
-Director — §7. Проводку остальных адаптеров; реальные Notion/Google Docs/аналитику (Этапы 9–10,
+Director — §7, Notion Adapter — §8, обратная запись статусов — §9. Проводку остальных адаптеров; реальные Notion/Google Docs/аналитику (Этапы 9–10,
 13–14).
 
 ## 5. Storage Adapter (STO) — `tests/test_sqlite_run_store.py` (ADR-0024)
@@ -120,3 +120,21 @@ Run (§3). «Падение процесса» — исключение, бро�
 | NBB-06 | `report_status`: пустой ref; `404`; архив; корзина; другая база; свойство отсутствует / не `rich_text`; сбой `PATCH` | `BriefBoardError`; во всех случаях, кроме сбоя `PATCH`, `PATCH` не отправлен |
 | NBB-07 | ref с `/`, `?`, `#`, `..` | кодируется целиком в один сегмент пути; другой эндпоинт не адресуется |
 | NBB-08 | `notion_settings_from_env`: все переменные; отсутствующие/пустые; токен | настройки; `BriefBoardError`, в сообщении имена всех отсутствующих, без значений; токена нет ни в `repr` настроек, ни в сообщениях ошибок |
+
+## 9. Обратная запись статусов (BSR) — `tests/test_brief_status.py` (ADR-0041)
+
+Проверяется `BriefStatusReporter` вокруг настоящего `ContentDirector` и `SqliteRunStore` (или
+записывающего store) с `InMemoryBriefBoard`; доска-двойник, где нужно, отказывает на заданном
+статусе и в момент каждого отчёта смотрит, что уже лежит в store. Исполнители и оценщик
+детерминированы.
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| BSR-01 | двухшаговый прогон через репортёр: без QA; с QA `PASSED`; шаг падает | на доске ровно `queued`, `running`, `waiting_qa`, `waiting_human`, `completed` / то же / `queued`, `running`, `failed`, каждый один раз, с `run_id` Run; итоговый Run и сохранённый снимок те же, что без репортёра |
+| BSR-02 | в момент каждого отчёта | store уже хранит Run в этом статусе |
+| BSR-03 | QA `FLAGGED` → `CHANGES_REQUESTED` → перезапуск (новый store на том же файле, новый репортёр) → `resume_workflow` | до перезапуска: … `waiting_qa`, `waiting_human`; после: `running`, `waiting_qa`, `waiting_human` |
+| BSR-04 | доска отказывает (`BriefBoardError`) на `running`; отдельно — на `waiting_human` (конец прогона), потом снова доступна: `save` в том же статусе, затем `sync` | прогон доходит до `completed` с тем же снимком, что без отказа; `running` не показан, остальные показаны; ровно одна попытка, один `FailedReport(run_id, running, …)` и один `WARNING`; во втором случае `save` не повторяет, `sync` показывает `waiting_human` |
+| BSR-05 | `save` store падает (`RunStoreError`) | ошибка пробрасывается; отчёта нет |
+| BSR-06 | повторные `save` без смены статуса; `sync` показанного; новый репортёр, `sync` Run в `waiting_human` | один отчёт; ничего нового; один отчёт `waiting_human` |
+| BSR-07 | доска бросает не `BriefBoardError`; `load` | исключение пробрасывается; `load` возвращает то же, что store |
+| BSR-08 | `BriefStatusReporter` как контракт | проходит mypy --strict как `RunStore` |

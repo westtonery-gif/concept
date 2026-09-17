@@ -219,9 +219,10 @@ A brief that is not on the board, not marked ready, or has no text all print the
 exit cleanly (`BriefBoard.fetch_brief` returns `None` for each, deliberately indistinguishable —
 ADR-0040 §3). `--request-changes "<instructions>"` works the same as in `demo_factory.py`.
 
-**Not done here:** writing the Run's status back onto the Notion page (`BriefBoard.report_status`
-exists and is tested, ADR-0040, but nothing calls it yet — which transitions to report is its own
-design decision, CLAUDE.md queue subtask 13.3).
+Every status the Run passes through (`queued`, `running`, `waiting_qa`, `waiting_human`,
+`completed`, `failed`) is written back onto the page's `Run status` / `Run id` properties as soon as
+it is stored, and synced once more at the end of each invocation (ADR-0041). If Notion refuses a
+report, the Run carries on regardless — the refusal is logged and printed, and the next run retries.
 
 ## Project layout
 

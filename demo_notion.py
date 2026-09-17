@@ -7,8 +7,10 @@ nothing about Notion beyond the ``BriefBoard`` Protocol it was handed
 rework) is exactly what ``demo_factory.py`` already exercises, reused from it rather than
 duplicated.
 
-Status write-back to Notion (``BriefBoard.report_status``) is **not** wired here — which
-transitions to report is its own design decision, left to the next queue subtask (13.3).
+Every Run status the Director commits is also shown on the brief's Notion page (ADR-0041): the
+Run store is wrapped in a ``BriefStatusReporter``, and the current status is synced once more at
+the end of every invocation. A board that refuses a report never stops the Run; the refusal is
+printed.
 
 Run with: ``python demo_notion.py <brief-ref>``, where ``<brief-ref>`` is the id of a page in the
 configured Notion database. Needs the same ``ANTHROPIC_API_KEY`` / per-role provider+pricing
@@ -40,6 +42,7 @@ from demo_factory import (
 )
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError
+from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
 from omemo_content_factory.composition import (
@@ -50,7 +53,7 @@ from omemo_content_factory.composition import (
     validate_qa_evaluator,
     validate_workflow_executors,
 )
-from omemo_content_factory.domain.run import Run, RunStatus
+from omemo_content_factory.domain.run import Run
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
 
 
@@ -96,7 +99,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     validate_workflow_executors(WORKFLOW, executors)
     validate_qa_evaluator(WORKFLOW, qa)
-    store = build_run_store(os.environ)
+    store = BriefStatusReporter(build_run_store(os.environ), board)
     director = ContentDirector(
         executors, build_schema_map(AGENTS, None, SCHEMAS), qa=qa, store=store
     )
@@ -136,16 +139,25 @@ def main(argv: Sequence[str] | None = None) -> None:
         safe_print(
             "The Run stays at WAITING_QA with its Evaluation PENDING; run again to ask QA again."
         )
+    store.sync(run)
     show_run(run)
     _show_quality_gate(run)
     _show_model_calls(run)
     print_final_article(run)
-    if run.status is RunStatus.COMPLETED:
-        safe_print("")
+    _show_board_reports(store, run)
+
+
+def _show_board_reports(store: BriefStatusReporter, run: Run) -> None:
+    """Say what the Notion page shows now, and every report the board refused (ADR-0041 §3)."""
+    safe_print("")
+    for failed in store.failed_reports:
         safe_print(
-            "Status write-back to Notion is not wired yet (queue subtask 13.3) — "
-            "the board still shows this brief as it was before this run."
+            f"Notion refused status '{failed.status.value}' of {failed.run_id}: {failed.message}"
         )
+    if store.shown_status(run.run_id) is run.status:
+        safe_print(f"The Notion page shows '{run.status.value}' for {run.run_id}.")
+    else:
+        safe_print("The Notion page may show an older status; run again to retry the report.")
 
 
 if __name__ == "__main__":

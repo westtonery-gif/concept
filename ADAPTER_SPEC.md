@@ -120,8 +120,33 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 Настройки — `notion_settings_from_env(environ)`: `OMEMO_NOTION_TOKEN`, `OMEMO_NOTION_DATABASE_ID`,
 `OMEMO_NOTION_READY_PROPERTY`, `OMEMO_NOTION_READY_VALUE`, `OMEMO_NOTION_RUN_STATUS_PROPERTY`,
 `OMEMO_NOTION_RUN_ID_PROPERTY` — все обязательны, без умолчаний; отсутствующие/пустые →
-`BriefBoardError` с их именами (значения и токен в сообщения и `repr` не попадают). Не проведён —
-задача 13.2. Приёмка — `ADAPTER_ACCEPTANCE.md` §8.
+`BriefBoardError` с их именами (значения и токен в сообщения и `repr` не попадают). Строится
+`composition.build_brief_board(environ)`; бриф → Run — `demo_notion.py`. Приёмка —
+`ADAPTER_ACCEPTANCE.md` §8.
+
+**Обратная запись статусов (Этап 9, ADR-0041).** `BriefStatusReporter(store, board)`
+(`application/brief_status.py`) — сам `RunStore`, обёртка над настоящим store:
+
+| Операция | Поведение |
+|---|---|
+| `save(run)` | сначала `store.save(run)`; затем `board.report_status(run.content_brief_ref, run_id=run.run_id, status=run.status)`, один раз на смену статуса: только если последняя попытка этого репортёра для Run была с другим статусом. Сбой `save` (`RunStoreError`) пробрасывается, отчёта нет |
+| `load(run_id)` | `store.load(run_id)` без изменений |
+| `sync(run)` | отчёт о текущем статусе, если он ещё не был **успешно** показан; без сохранения — это повтор отказанного отчёта |
+
+Показывается **каждая** смена статуса, которую фиксирует Content Director (`queued`, `running`,
+`waiting_qa`, `waiting_human`, `completed`, `failed`; `created` не сохраняется и не показывается) —
+и никогда раньше, чем статус сохранён. `ContentDirector` не изменён: он уже вызывает `save` в каждой
+точке смены статуса (ADR-0026 §2). Память «последняя попытка» и «показан» — в процессе, по
+`run_id`; новый процесс
+показывает статус снова (повтор безвреден).
+
+`BriefBoardError` из `report_status` **не останавливает** прогон и не меняет Run: `WARNING` в логгер
+`omemo_content_factory.application.brief_status`, запись в `failed_reports`
+(`FailedReport(run_id, status, message)`), статус не считается показанным. Следующие `save` в том же
+статусе его **не** повторяют (иначе при отказе Notion каждый коммит ждал бы таймаут); его заменит
+отчёт о следующем статусе или повторит `sync`. Любое другое исключение доски пробрасывается. `demo_notion.py` оборачивает свой store и
+вызывает `sync(run)` в конце каждого запуска (в том числе после `MeasuredEvaluatorError`), печатая
+неудавшиеся отчёты. Приёмка — `ADAPTER_ACCEPTANCE.md` §9.
 
 ## 6. `ReviewDesk` (`adapters/review_desk.py`)
 

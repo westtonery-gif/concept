@@ -21,6 +21,18 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **Run statuses are written back to the Notion brief (ROADMAP Stage 9, ADR-0041; queue task
+  13.3).** `application/brief_status.py` `BriefStatusReporter(store, board)` is itself a
+  `RunStore`: `save` saves through the wrapped store, **then** reports `run.status` on
+  `run.content_brief_ref` — once per status change (every one the Director commits: `queued`,
+  `running`, `waiting_qa`, `waiting_human`, `completed`, `failed`; never `created`, never before the
+  save). `ContentDirector` is **unchanged** — it already saves at every status change (ADR-0026 §2).
+  A `BriefBoardError` never stops the Run: `WARNING` log + `failed_reports`, not retried by later
+  saves in the same status (a Notion outage would otherwise cost a timeout per commit), retried by
+  `sync(run)` or superseded by the next status; any other board exception propagates.
+  `demo_notion.py` wraps its store and calls `sync` at the end of every invocation, printing refused
+  reports. Verified end to end against a local fake Notion (PATCH 503 then 200) with fake providers.
+  Tests: `tests/test_brief_status.py` (`BSR`, `ADAPTER_ACCEPTANCE.md` §9). Suite: 948 passed.
 - **A real Notion `BriefBoard` exists (ROADMAP Stage 9, ADR-0040; queue task 13.1) — not wired
   yet.** `infrastructure/notion_brief_board.py` `NotionBriefBoard` speaks the Notion REST API
   through stdlib `urllib` (**no new dependency** — `notion-client` was rejected: three endpoints,
@@ -80,7 +92,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 40 ADRs (0001–0040) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 41 ADRs (0001–0041) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -92,8 +104,8 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039) and the Notion `BriefBoard` (0040) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (936 passed,
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040) and the status write-back (0041) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (948 passed,
   0 skipped).
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -553,13 +565,17 @@ process at the time, not a pattern to keep copying.)
        non-grammar verdict and parked at `WAITING_QA` (fail-closed, ADR-0038) → second run resumed
        without re-executing Rin/Leo, asked QA again. README documents the new entrypoint.
        Status write-back is explicitly out of scope here — that's 13.3, next.
-    3. **Status write-back — needs a design decision.** Decide which `Run` transitions get
-       reported to Notion (every one, like Storage's per-step commits, ADR-0026 §2? or only
-       terminal/human-facing states — `QUEUED`/`WAITING_HUMAN`/`COMPLETED`/`FAILED`?) and wire
-       `report_status` calls into the entrypoint or `ContentDirector`. `report_status`'s own
-       contract already makes repeating the same status harmless (ADR-0023/0025), so this is about
-       *when* to call it, not safety.
-    4. **Stage 9 acceptance** — a test in the `test_stage8_acceptance.py` shape proving the DoD
+    3. ~~**Status write-back — needs a design decision.**~~ — done (ADR-0041,
+       `application/brief_status.py` `BriefStatusReporter`, `ADAPTER_SPEC.md` §5 "Обратная запись
+       статусов", `ADAPTER_ACCEPTANCE.md` §9 `BSR`, `tests/test_brief_status.py`, `demo_notion.py`).
+       Decided without asking (technical, reversible): **every** committed status change, reported
+       after the save, through a `RunStore` decorator rather than a `board=` on the Director (core
+       untouched). Filtered/resting-only reporting was rejected: `running` is the longest-lived
+       state an editor wants to see. A refused report is logged and kept, never fails the Run; it is
+       retried by `sync`, not by every later commit. Original brief: decide which `Run` transitions
+       get reported (every one, or only `QUEUED`/`WAITING_HUMAN`/`COMPLETED`/`FAILED`) and wire
+       `report_status` into the entrypoint or `ContentDirector`.
+    4. **Stage 9 acceptance** — next. — a test in the `test_stage8_acceptance.py` shape proving the DoD
        (a filed brief produces a valid Run; statuses land back on the board), run against
        `InMemoryBriefBoard` for CI like Stage 8 used scripted transport under a real
        `AnthropicLLMClient`. A live Notion round-trip is the operator's manual check afterward
