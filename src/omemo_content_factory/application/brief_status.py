@@ -7,6 +7,10 @@ every status change (ADR-0026 §2), so it is left untouched and keeps knowing on
 The store is the truth and the board its showcase: a report follows the save, never precedes it,
 and a board outage (``BriefBoardError``) is logged and retried by ``sync`` instead of stopping
 production. Any other exception from the board is a defect and propagates.
+
+Once a review is published, the reporter also shows where it is (``show_review_location``,
+ADR-0047). A location already shown is not sent again: a page write re-triggers an automation that
+polls the page for edits (ROADMAP Stage 11), so a call with nothing new must write nothing.
 """
 
 from __future__ import annotations
@@ -30,6 +34,15 @@ class FailedReport:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class FailedLocationReport:
+    """A review location the board refused to show: which Run, which location, and the message."""
+
+    run_id: str
+    location: str
+    message: str
+
+
 class BriefStatusReporter:
     """A ``RunStore`` that shows each newly saved Run status on the Run's brief (ADR-0041 §2).
 
@@ -45,6 +58,8 @@ class BriefStatusReporter:
         self._attempted: dict[str, RunStatus] = {}
         self._shown: dict[str, RunStatus] = {}
         self._failed: list[FailedReport] = []
+        self._shown_locations: dict[str, str] = {}
+        self._failed_locations: list[FailedLocationReport] = []
 
     def save(self, run: Run, /) -> None:
         """Save through the wrapped store, then show the status once, when it has changed.
@@ -85,6 +100,36 @@ class BriefStatusReporter:
             )
             return
         self._shown[run.run_id] = status
+
+    def show_review_location(self, run: Run, location: str) -> None:
+        """Show where ``run``'s latest review is, unless this reporter already showed it (§4).
+
+        Nothing is saved and the Run is not touched. A ``BriefBoardError`` is logged and kept in
+        :attr:`failed_location_reports`, and the next call tries again; any other exception
+        propagates.
+        """
+        if self._shown_locations.get(run.run_id) == location:
+            return
+        try:
+            self._board.report_review_location(
+                run.content_brief_ref, run_id=run.run_id, location=location
+            )
+        except BriefBoardError as exc:
+            self._failed_locations.append(FailedLocationReport(run.run_id, location, str(exc)))
+            _LOG.warning(
+                "could not show the review location of run %s on its brief: %s", run.run_id, exc
+            )
+            return
+        self._shown_locations[run.run_id] = location
+
+    def shown_review_location(self, run_id: str) -> str | None:
+        """The review location this reporter last showed successfully for ``run_id``, if any."""
+        return self._shown_locations.get(run_id)
+
+    @property
+    def failed_location_reports(self) -> tuple[FailedLocationReport, ...]:
+        """Every refused review-location report so far, oldest first."""
+        return tuple(self._failed_locations)
 
     def shown_status(self, run_id: str) -> RunStatus | None:
         """The status this reporter last showed successfully for ``run_id``, if any."""

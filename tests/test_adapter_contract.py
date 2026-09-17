@@ -75,6 +75,9 @@ class _NullBoard:
     def report_status(self, brief_ref: str, /, *, run_id: str, status: RunStatus) -> None:
         self.reported.append((brief_ref, run_id, status))
 
+    def report_review_location(self, brief_ref: str, /, *, run_id: str, location: str) -> None:
+        self.reported.append((brief_ref, run_id, RunStatus.WAITING_HUMAN))
+
 
 class _NullDesk:
     def publish(self, package: ReviewPackage, /) -> str:
@@ -168,6 +171,7 @@ _CONTRACT_METHODS: dict[Any, dict[str, list[tuple[str, str]]]] = {
     BriefBoard: {
         "fetch_brief": [("brief_ref", _POS)],
         "report_status": [("brief_ref", _POS), ("run_id", _KW), ("status", _KW)],
+        "report_review_location": [("brief_ref", _POS), ("run_id", _KW), ("location", _KW)],
     },
     ReviewDesk: {"publish": [("package", _POS)], "fetch_decision": [("review_id", _POS)]},
     AnalyticsSink: {"export": [("records", _POS)]},

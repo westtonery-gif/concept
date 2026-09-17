@@ -144,6 +144,28 @@ def test_stb_03_a_status_on_an_unknown_brief_is_refused_and_not_recorded() -> No
     assert board.reports("brief-7") == ()
 
 
+def test_stb_08_review_locations_are_shown_in_order_and_a_repeat_is_harmless() -> None:
+    board = InMemoryBriefBoard()
+    board.put(BRIEF)
+    for location in ("doc://1", "doc://1", "doc://2"):
+        board.report_review_location("brief-7", run_id="r-1", location=location)
+
+    assert board.review_locations("brief-7") == (("r-1", "doc://1"), ("r-1", "doc://2"))
+    assert board.reports("brief-7") == ()
+    assert board.review_locations("brief-unknown") == ()
+
+
+@pytest.mark.parametrize(("ref", "location"), [("brief-unknown", "doc://1"), ("brief-7", " ")])
+def test_stb_08_a_location_on_an_unknown_brief_or_a_blank_one_is_refused(
+    ref: str, location: str
+) -> None:
+    board = InMemoryBriefBoard()
+    board.put(BRIEF)
+    with pytest.raises(BriefBoardError):
+        board.report_review_location(ref, run_id="r-1", location=location)
+    assert board.review_locations(ref) == ()
+
+
 # --- STB-04 / STB-05: the desk ------------------------------------------------------------
 
 

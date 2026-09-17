@@ -23,10 +23,10 @@ indistinguishable, ADR-0040 §3). ``--approve`` / ``--request-changes "<instruct
 
 When both ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID`` are set, a Run
 waiting for a human has its pending review published as a Google Doc at the end of every invocation
-(ADR-0043/0044) and the Doc's link is printed; publishing again finds the same Doc. Without them the
-review stays in the Run store only; a half-configured desk is explained and the demo exits. A desk
-that refuses to publish never touches the Run — the refusal is printed and the next invocation
-tries again.
+(ADR-0043/0044), the Doc's link is printed and written onto the brief's page (ADR-0047); publishing
+again finds the same Doc. Without them the review stays in the Run store only; a half-configured
+desk is explained and the demo exits. A desk that refuses to publish never touches the Run — the
+refusal is printed and the next invocation tries again.
 
 With the desk configured and no reviewer flag given, a stored Run waiting for a human first has its
 review published (idempotent) and the reviewer's decision read from the Doc (ADR-0045): approved,
@@ -170,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     _show_model_calls(run)
     print_final_article(run)
     _show_board_reports(store, run)
-    _publish_review(desk, run)
+    _publish_review(desk, run, store)
 
 
 def _prepare_stored_run(
@@ -215,8 +215,8 @@ def _read_decision(store: BriefStatusReporter, desk: ReviewDesk, stored: Run) ->
     safe_print(f"The Doc decides {fetched.decision.value} on {fetched.review_id}{reason}")
 
 
-def _publish_review(desk: ReviewDesk | None, run: Run) -> None:
-    """Put the Run's pending review on the desk and say where it is (ADR-0044 §4)."""
+def _publish_review(desk: ReviewDesk | None, run: Run, store: BriefStatusReporter) -> None:
+    """Put the Run's pending review on the desk, show where it is on the brief (ADR-0044, 0047)."""
     if desk is None:
         if run.status is RunStatus.WAITING_HUMAN:
             safe_print("No review desk is configured; the review stays in the Run store.")
@@ -227,8 +227,14 @@ def _publish_review(desk: ReviewDesk | None, run: Run) -> None:
         safe_print(f"Google Docs refused to publish the review: {exc}")
         safe_print("The Run is unchanged; run again to retry the publication.")
         return
-    if published is not None:
-        safe_print(f"Review {published.review_id} is on Google Docs: {published.location}")
+    if published is None:
+        return
+    safe_print(f"Review {published.review_id} is on Google Docs: {published.location}")
+    store.show_review_location(run, published.location)
+    if store.shown_review_location(run.run_id) == published.location:
+        safe_print("The Notion page links to it.")
+    else:
+        safe_print("Notion refused the review link; run again to retry.")
 
 
 def _show_board_reports(store: BriefStatusReporter, run: Run) -> None:

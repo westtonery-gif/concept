@@ -1,9 +1,9 @@
-"""The Notion Adapter contract — briefs in, statuses out (ADR-0023 §6).
+"""The Notion Adapter contract — briefs in, statuses and review links out (ADR-0023 §6, ADR-0047).
 
 ``BriefBoard`` is the editorial board the core works for: it hands over a brief that is ready for
-production and shows how the brief's Run is going. It is named by its role, not by the tool behind
-it (DOMAIN_MODEL §8). ``IncomingBrief`` is what the core reads from the board — deliberately not the
-Content Brief entity, which does not exist yet (ROADMAP Stage 9).
+production, shows how the brief's Run is going and where its review is. It is named by its role,
+not by the tool behind it (DOMAIN_MODEL §8). ``IncomingBrief`` is what the core reads from the
+board — deliberately not the Content Brief entity, which does not exist yet (ROADMAP Stage 9).
 """
 
 from __future__ import annotations
@@ -49,5 +49,13 @@ class BriefBoard(Protocol):
         """Show the Run's current status on its brief.
 
         Reporting the same status again is harmless, and a failed report never changes the Run.
+        """
+        ...
+
+    def report_review_location(self, brief_ref: str, /, *, run_id: str, location: str) -> None:
+        """Show where the Run's latest published review can be found on its brief (ADR-0047).
+
+        ``location`` is the review desk's opaque answer to a publication. Reporting the same
+        location again is harmless, and a failed report never changes the Run.
         """
         ...

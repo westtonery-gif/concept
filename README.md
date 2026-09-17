@@ -217,6 +217,7 @@ export OMEMO_NOTION_READY_PROPERTY=Stage
 export OMEMO_NOTION_READY_VALUE="Ready for production"
 export OMEMO_NOTION_RUN_STATUS_PROPERTY="Run status"
 export OMEMO_NOTION_RUN_ID_PROPERTY="Run id"
+export OMEMO_NOTION_REVIEW_LINK_PROPERTY="Review"   # a URL property
 python demo_notion.py <notion-page-id>
 ```
 
@@ -229,6 +230,8 @@ Every status the Run passes through (`queued`, `running`, `waiting_qa`, `waiting
 `completed`, `failed`) is written back onto the page's `Run status` / `Run id` properties as soon as
 it is stored, and synced once more at the end of each invocation (ADR-0041). If Notion refuses a
 report, the Run carries on regardless — the refusal is logged and printed, and the next run retries.
+Once a review is published, its Google Doc link is written into the page's `Review` URL property
+(ADR-0047); a link already shown is not written again.
 
 ## Google Docs review desk
 

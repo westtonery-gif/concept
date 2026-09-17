@@ -70,3 +70,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0044](0044-approval-gate-and-review-publication.md) | The Approval Gate holds every QA-passed candidate, and a pending review is published | Accepted |
 | [0045](0045-review-decision-fetch-and-rejection-routing.md) | The reviewer's decision is read from the desk, and a rejection is reworked with its reason | Accepted |
 | [0046](0046-stage-10-acceptance-and-review-decision-intake.md) | The ROADMAP Stage 10 (Google Docs) acceptance, and taking a review decision into the store | Accepted |
+| [0047](0047-review-link-on-the-brief.md) | The review Doc's link is shown on the brief | Accepted |

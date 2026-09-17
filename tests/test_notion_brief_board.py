@@ -39,6 +39,7 @@ SETTINGS = NotionBoardSettings(
     ready_value="Ready for production",
     run_status_property="Run status",
     run_id_property="Run id",
+    review_link_property="Review",
 )
 
 ENV = {
@@ -48,6 +49,7 @@ ENV = {
     "OMEMO_NOTION_READY_VALUE": "Ready for production",
     "OMEMO_NOTION_RUN_STATUS_PROPERTY": "Run status",
     "OMEMO_NOTION_RUN_ID_PROPERTY": "Run id",
+    "OMEMO_NOTION_REVIEW_LINK_PROPERTY": "Review",
 }
 
 
@@ -168,6 +170,7 @@ def _page(
             "Stage": {"id": "a", "type": stage_type, stage_type: option},
             "Run status": {"id": "b", "type": "rich_text", "rich_text": []},
             "Run id": {"id": "c", "type": "rich_text", "rich_text": []},
+            "Review": {"id": "d", "type": "url", "url": None},
         },
     }
 
@@ -517,4 +520,109 @@ def test_nbb_08_blank_settings_are_refused() -> None:
             ready_value="Ready",
             run_status_property="Run status",
             run_id_property="Run id",
+            review_link_property="Review",
         )
+
+
+@pytest.mark.parametrize("variable", ["OMEMO_NOTION_REVIEW_LINK_PROPERTY"])
+def test_nbb_08_the_review_link_property_is_required_too(variable: str) -> None:
+    environ = {**ENV}
+    del environ[variable]
+
+    with pytest.raises(BriefBoardError, match=variable):
+        notion_settings_from_env(environ)
+
+
+# --- NBB-09/10: the review link (ADR-0047) ------------------------------------------------
+
+DOC = "https://docs.google.com/document/d/doc-1/edit"
+
+
+def test_nbb_09_a_review_location_is_written_into_the_url_property_and_a_repeat_is_harmless(
+    notion: tuple[_FakeNotion, str],
+) -> None:
+    fake, url = notion
+    _file(fake, _page())
+    board: BriefBoard = _board(url)
+
+    board.report_review_location(PAGE, run_id="run-7", location=DOC)
+    after_first = json.dumps(fake.pages[PAGE], sort_keys=True)
+    board.report_review_location(PAGE, run_id="run-7", location=DOC)
+
+    assert fake.pages[PAGE]["properties"]["Review"]["url"] == DOC
+    assert json.dumps(fake.pages[PAGE], sort_keys=True) == after_first
+    patch = fake.requests[-1]
+    assert (patch.method, patch.body) == ("PATCH", {"properties": {"Review": {"url": DOC}}})
+    assert patch.headers["Authorization"] == f"Bearer {TOKEN}"
+    assert _text(fake.pages[PAGE]["properties"]["Run status"]) == ""
+
+
+def test_nbb_09_a_later_location_replaces_the_earlier_one(notion: tuple[_FakeNotion, str]) -> None:
+    fake, url = notion
+    _file(fake, _page())
+    board = _board(url)
+
+    board.report_review_location(PAGE, run_id="run-7", location=DOC)
+    board.report_review_location(PAGE, run_id="run-7", location=DOC.replace("doc-1", "doc-2"))
+
+    assert fake.pages[PAGE]["properties"]["Review"]["url"].endswith("/doc-2/edit")
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        None,
+        _page(archived=True),
+        _page(in_trash=True),
+        _page(database="99999999-9999-9999-9999-999999999999"),
+    ],
+    ids=["unknown", "archived", "in-trash", "other-database"],
+)
+def test_nbb_10_a_location_for_a_page_not_on_the_board_is_refused_before_any_write(
+    notion: tuple[_FakeNotion, str], page: dict[str, Any] | None
+) -> None:
+    fake, url = notion
+    if page is not None:
+        _file(fake, page)
+
+    with pytest.raises(BriefBoardError, match="not on the board"):
+        _board(url).report_review_location(PAGE, run_id="run-1", location=DOC)
+    assert "PATCH" not in [r.method for r in fake.requests]
+
+
+@pytest.mark.parametrize(("ref", "location"), [("", DOC), (PAGE, " ")], ids=["ref", "location"])
+def test_nbb_10_a_blank_ref_or_location_is_refused_without_a_request(
+    notion: tuple[_FakeNotion, str], ref: str, location: str
+) -> None:
+    fake, url = notion
+    _file(fake, _page())
+
+    with pytest.raises(BriefBoardError, match="blank"):
+        _board(url).report_review_location(ref, run_id="run-1", location=location)
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize("broken", ["missing", "rich-text"])
+def test_nbb_10_a_misconfigured_link_property_is_refused_before_any_write(
+    notion: tuple[_FakeNotion, str], broken: str
+) -> None:
+    fake, url = notion
+    page = _page()
+    if broken == "missing":
+        del page["properties"]["Review"]
+    else:
+        page["properties"]["Review"] = {"id": "d", "type": "rich_text", "rich_text": []}
+    _file(fake, page)
+
+    with pytest.raises(BriefBoardError, match="Review"):
+        _board(url).report_review_location(PAGE, run_id="run-1", location=DOC)
+    assert "PATCH" not in [r.method for r in fake.requests]
+
+
+def test_nbb_10_a_failed_link_write_is_an_error(notion: tuple[_FakeNotion, str]) -> None:
+    fake, url = notion
+    _file(fake, _page())
+    fake.fail_patch = 502
+
+    with pytest.raises(BriefBoardError, match="HTTP 502"):
+        _board(url).report_review_location(PAGE, run_id="run-1", location=DOC)

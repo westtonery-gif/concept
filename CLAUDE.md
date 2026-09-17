@@ -21,6 +21,15 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **The review Doc's link is shown on the Notion brief (ROADMAP Stage 11, ADR-0047; queue task
+  15.1).** Additive `BriefBoard.report_review_location(brief_ref, /, *, run_id, location)`;
+  `NotionBriefBoard` writes it into a `url` property named by the **new required seventh variable
+  `OMEMO_NOTION_REVIEW_LINK_PROPERTY`** (an existing `.env` must add it); `InMemoryBriefBoard`
+  records it (`review_locations`). `BriefStatusReporter.show_review_location(run, location)` reports
+  only a location it has not yet shown successfully — a page write re-triggers n8n's polling Notion
+  Trigger, so a call with nothing new writes nothing; a refusal → `WARNING` +
+  `FailedLocationReport`, retried by the next call. `demo_notion.py` shows it after publishing.
+  Tests: NBB-09/10, STB-08, BSR-09. Suite: 1073 passed.
 - **ROADMAP Stage 10 (Google Docs) is closed (ADR-0046).** `tests/test_stage10_acceptance.py`
   (`S10A`, `STAGE10_ACCEPTANCE.md`) reuses S9A's production path and adds a review desk
   (`InMemoryReviewDesk` subclassed to play a Doc: the decision line can be retyped, the desk can go
@@ -736,7 +745,7 @@ process at the time, not a pattern to keep copying.)
     writes (ADR-0041) — one writer, no n8n write access to Notion. Found while designing: n8n's
     Notion Trigger polls `last_edited_time`, so every core write to the page re-triggers it — a
     trigger for a brief with nothing to do must write nothing, or the loop never stops. Subtasks:
-    1. **Review link on the brief.** Additive `BriefBoard.report_review_location(brief_ref, /, *,
+    1. ~~**Review link on the brief.**~~ — done (ADR-0047). Additive `BriefBoard.report_review_location(brief_ref, /, *,
        run_id, location)`; `NotionBriefBoard` writes a `url` property named by a new required
        `OMEMO_NOTION_REVIEW_LINK_PROPERTY`; `InMemoryBriefBoard` records it;
        `BriefStatusReporter.show_review_location(run, location)` shows it once per location (a

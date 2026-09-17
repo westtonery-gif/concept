@@ -1,9 +1,10 @@
 """The Notion Adapter — a real ``BriefBoard`` over the Notion REST API (ADR-0040).
 
 A brief is a page of one configured database: it is ready when a ``status``/``select`` property
-holds the configured option, its body is the text of its top-level blocks, and a Run's status is
-written back into two ``rich_text`` properties. The API is reached through ``urllib`` with the
-version pinned; no Notion shape leaves this module (ADAPTER_SPEC §3).
+holds the configured option, its body is the text of its top-level blocks, a Run's status is
+written back into two ``rich_text`` properties and the Run's review link into a ``url`` property
+(ADR-0047). The API is reached through ``urllib`` with the version pinned; no Notion shape leaves
+this module (ADAPTER_SPEC §3).
 
 Where the contract is silent (ADR-0040 §3): a brief that simply is not producible is ``None``, while
 a technical or configuration fault is ``BriefBoardError`` — never a guess.
@@ -39,6 +40,7 @@ READY_PROPERTY_VAR = "OMEMO_NOTION_READY_PROPERTY"
 READY_VALUE_VAR = "OMEMO_NOTION_READY_VALUE"
 RUN_STATUS_PROPERTY_VAR = "OMEMO_NOTION_RUN_STATUS_PROPERTY"
 RUN_ID_PROPERTY_VAR = "OMEMO_NOTION_RUN_ID_PROPERTY"
+REVIEW_LINK_PROPERTY_VAR = "OMEMO_NOTION_REVIEW_LINK_PROPERTY"
 
 _READY_TYPES = ("status", "select")
 _PAGE_SIZE = 100
@@ -54,6 +56,7 @@ class NotionBoardSettings:
     ready_value: str
     run_status_property: str
     run_id_property: str
+    review_link_property: str
 
     def __post_init__(self) -> None:
         for name in (
@@ -63,6 +66,7 @@ class NotionBoardSettings:
             "ready_value",
             "run_status_property",
             "run_id_property",
+            "review_link_property",
         ):
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
@@ -70,7 +74,7 @@ class NotionBoardSettings:
 
 
 def notion_settings_from_env(environ: Mapping[str, str]) -> NotionBoardSettings:
-    """Read the six required variables; any missing or blank one fails closed, named, no values."""
+    """Read the seven required variables; a missing or blank one fails closed, named, no values."""
     names = (
         TOKEN_VAR,
         DATABASE_ID_VAR,
@@ -78,6 +82,7 @@ def notion_settings_from_env(environ: Mapping[str, str]) -> NotionBoardSettings:
         READY_VALUE_VAR,
         RUN_STATUS_PROPERTY_VAR,
         RUN_ID_PROPERTY_VAR,
+        REVIEW_LINK_PROPERTY_VAR,
     )
     values = {name: environ.get(name, "").strip() for name in names}
     missing = [name for name in names if not values[name]]
@@ -90,6 +95,7 @@ def notion_settings_from_env(environ: Mapping[str, str]) -> NotionBoardSettings:
         ready_value=values[READY_VALUE_VAR],
         run_status_property=values[RUN_STATUS_PROPERTY_VAR],
         run_id_property=values[RUN_ID_PROPERTY_VAR],
+        review_link_property=values[REVIEW_LINK_PROPERTY_VAR],
     )
 
 
@@ -121,11 +127,7 @@ class NotionBriefBoard:
 
     def report_status(self, brief_ref: str, /, *, run_id: str, status: RunStatus) -> None:
         """Write the Run's status and id onto its page; a page not on the board is refused."""
-        if not brief_ref.strip():
-            raise BriefBoardError("a status needs a non-blank brief reference")
-        page = self._board_page(brief_ref)
-        if page is None:
-            raise BriefBoardError(f"brief {brief_ref!r} is not on the board")
+        page = self._writable_page(brief_ref, "a status")
         settings = self._settings
         for name in (settings.run_status_property, settings.run_id_property):
             self._property(page, name, ("rich_text",))
@@ -134,6 +136,28 @@ class NotionBriefBoard:
             settings.run_id_property: _rich_text(run_id),
         }
         self._request("PATCH", _page_path(brief_ref), body={"properties": properties})
+
+    def report_review_location(self, brief_ref: str, /, *, run_id: str, location: str) -> None:
+        """Write the review's location into its ``url`` property (ADR-0047 §2).
+
+        A blank location, a page not on the board and a missing or non-``url`` property are refused
+        before any write.
+        """
+        if not location.strip():
+            raise BriefBoardError(f"a review location for run {run_id} must not be blank")
+        page = self._writable_page(brief_ref, "a review location")
+        name = self._settings.review_link_property
+        self._property(page, name, ("url",))
+        properties = {name: {"url": location}}
+        self._request("PATCH", _page_path(brief_ref), body={"properties": properties})
+
+    def _writable_page(self, brief_ref: str, what: str) -> dict[str, Any]:
+        if not brief_ref.strip():
+            raise BriefBoardError(f"{what} needs a non-blank brief reference")
+        page = self._board_page(brief_ref)
+        if page is None:
+            raise BriefBoardError(f"brief {brief_ref!r} is not on the board")
+        return page
 
     # --- reading ------------------------------------------------------------------------
 

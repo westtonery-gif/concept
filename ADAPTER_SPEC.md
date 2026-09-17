@@ -91,6 +91,7 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 |---|---|
 | `fetch_brief(brief_ref, /) -> IncomingBrief \| None` | бриф, готовый к производству; `None` — неизвестный **или** не готовый (ядро не создаёт Run — fail closed) |
 | `report_status(brief_ref, /, *, run_id, status: RunStatus) -> None` | показать статус Run на брифе; повтор того же статуса безвреден; сбой не меняет Run |
+| `report_review_location(brief_ref, /, *, run_id, location) -> None` | показать на брифе, где последнее опубликованное ревью Run (ADR-0047); `location` — непрозрачный ответ площадки; повтор безвреден; пустые `brief_ref`/`location` → `BriefBoardError`; сбой не меняет Run |
 
 `IncomingBrief(brief_ref, body)` — frozen; оба поля — непустые `str` (иначе `ValueError`).
 `brief_ref` становится `content_brief_ref` Run, `body` — вход первого шага
@@ -98,8 +99,9 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 
 **Реализация (6c, ADR-0025).** `InMemoryBriefBoard` (`infrastructure/in_memory_adapters.py`):
 брифы в памяти процесса; сторона управления (вне протокола) — `put(brief, *, ready=True)` и
-`reports(brief_ref)`. Там, где контракт молчит: статус на неизвестном брифе → `BriefBoardError`,
-ничего не записано; повтор последнего отчёта `(run_id, status)` не дублируется. Приёмка —
+`reports(brief_ref)`, `review_locations(brief_ref)`. Там, где контракт молчит: статус или место
+ревью на неизвестном брифе → `BriefBoardError`, ничего не записано; повтор последнего отчёта
+`(run_id, status)` / `(run_id, location)` не дублируется. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §6.
 
 **Реализация (Этап 9, ADR-0040).** `NotionBriefBoard` (`infrastructure/notion_brief_board.py`):
@@ -108,7 +110,9 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 страница настроенной базы; «готов» — свойство `status`/`select` равно настроенному значению;
 `body` — текст верхнеуровневых блоков с `rich_text`, по строке на блок, со всех страниц выдачи.
 `report_status` пишет `status.value` и `run_id` в два настроенных свойства `rich_text`
-(перезапись, поэтому повтор безвреден).
+(перезапись, поэтому повтор безвреден). `report_review_location` пишет `location` в настроенное
+свойство типа `url` (ADR-0047); пустое место, страница не на доске, свойство отсутствует или не
+`url` → `BriefBoardError` до `PATCH`.
 
 | Случай | `fetch_brief` | `report_status` |
 |---|---|---|
@@ -119,7 +123,8 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 
 Настройки — `notion_settings_from_env(environ)`: `OMEMO_NOTION_TOKEN`, `OMEMO_NOTION_DATABASE_ID`,
 `OMEMO_NOTION_READY_PROPERTY`, `OMEMO_NOTION_READY_VALUE`, `OMEMO_NOTION_RUN_STATUS_PROPERTY`,
-`OMEMO_NOTION_RUN_ID_PROPERTY` — все обязательны, без умолчаний; отсутствующие/пустые →
+`OMEMO_NOTION_RUN_ID_PROPERTY`, `OMEMO_NOTION_REVIEW_LINK_PROPERTY` — все семь обязательны, без
+умолчаний; отсутствующие/пустые →
 `BriefBoardError` с их именами (значения и токен в сообщения и `repr` не попадают). Строится
 `composition.build_brief_board(environ)`; бриф → Run — `application.brief_intake.produce_brief`
 (ADR-0042), вызываемый из `demo_notion.py`. Приёмка —
@@ -148,6 +153,15 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 отчёт о следующем статусе или повторит `sync`. Любое другое исключение доски пробрасывается. `demo_notion.py` оборачивает свой store, а
 `produce_brief` вызывает `sync(run)` в конце каждого запуска (в том числе после
 `MeasuredEvaluatorError`); демо печатает неудавшиеся отчёты. Приёмка — `ADAPTER_ACCEPTANCE.md` §9.
+
+**Ссылка на ревью (Этап 11, ADR-0047).** `show_review_location(run, location)` — показать место
+ревью через `board.report_review_location`, только если этот репортёр ещё не показал **успешно**
+это же место для Run (иначе запросов нет: запись на страницу снова будит n8n, опрашивающий правки).
+Ничего не сохраняет, Run не трогает. `BriefBoardError` → `WARNING`,
+`FailedLocationReport(run_id, location, message)` в `failed_location_reports`, место не считается
+показанным — следующий вызов повторит; прочие исключения пробрасываются.
+`shown_review_location(run_id)` — последнее успешно показанное место. `demo_notion.py` вызывает его
+после публикации ожидающего ревью.
 
 **Приём брифа (Этап 9, ADR-0042).** `produce_brief(director, store, board, workflow, *, brief_ref,
 run_id) -> Run | None` (`application/brief_intake.py`), где `store` — `BriefStatusReporter`, через

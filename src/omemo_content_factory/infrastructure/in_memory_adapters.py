@@ -40,6 +40,7 @@ class InMemoryBriefBoard:
         self._briefs: dict[str, IncomingBrief] = {}
         self._ready: set[str] = set()
         self._reports: dict[str, list[tuple[str, RunStatus]]] = {}
+        self._locations: dict[str, list[tuple[str, str]]] = {}
 
     def put(self, brief: IncomingBrief, *, ready: bool = True) -> None:
         """File ``brief`` (control side: the editor), replacing what its reference held before.
@@ -71,6 +72,24 @@ class InMemoryBriefBoard:
     def reports(self, brief_ref: str) -> tuple[tuple[str, RunStatus], ...]:
         """What the board shows for ``brief_ref``: ``(run_id, status)`` reports, oldest first."""
         return tuple(self._reports.get(brief_ref, ()))
+
+    def report_review_location(self, brief_ref: str, /, *, run_id: str, location: str) -> None:
+        """Show the review's location on its brief; repeating the last report changes nothing.
+
+        A brief the board never had, or a blank location, raises ``BriefBoardError`` and nothing is
+        recorded (ADR-0047 §3).
+        """
+        if brief_ref not in self._briefs:
+            raise BriefBoardError(f"brief {brief_ref} is not on the board")
+        if not location.strip():
+            raise BriefBoardError(f"a review location for run {run_id} must not be blank")
+        history = self._locations.setdefault(brief_ref, [])
+        if not history or history[-1] != (run_id, location):
+            history.append((run_id, location))
+
+    def review_locations(self, brief_ref: str) -> tuple[tuple[str, str], ...]:
+        """Review locations shown for ``brief_ref``: ``(run_id, location)``, oldest first."""
+        return tuple(self._locations.get(brief_ref, ()))
 
 
 class InMemoryReviewDesk:

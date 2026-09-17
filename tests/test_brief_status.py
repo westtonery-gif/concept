@@ -1,9 +1,9 @@
-"""Tests for the status write-back to the brief board (ADR-0041).
+"""Tests for the status and review-link write-back to the brief board (ADR-0041, ADR-0047).
 
 Maps ADAPTER_ACCEPTANCE.md §9 (BSR). ``BriefStatusReporter`` wraps the store handed to a real
 ``ContentDirector``; the board is ``InMemoryBriefBoard``, or a double around it that refuses a
-chosen status and looks at the store at the moment of every report. Executors and the evaluator are
-deterministic.
+chosen status (or every review location) and looks at the store at the moment of every report.
+Executors and the evaluator are deterministic.
 """
 
 from __future__ import annotations
@@ -16,7 +16,11 @@ import pytest
 
 from omemo_content_factory.adapters.brief_board import BriefBoard, BriefBoardError, IncomingBrief
 from omemo_content_factory.adapters.run_store import RunStore, RunStoreError
-from omemo_content_factory.application.brief_status import BriefStatusReporter, FailedReport
+from omemo_content_factory.application.brief_status import (
+    BriefStatusReporter,
+    FailedLocationReport,
+    FailedReport,
+)
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import EvaluationResult
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -120,6 +124,8 @@ class WatchingBoard:
         self.refuse = set() if refuse is None else refuse
         self._error = error
         self.stored_at_report: list[RunStatus | None] = []
+        self.refuse_locations = False
+        self.location_attempts = 0
 
     def fetch_brief(self, brief_ref: str, /) -> IncomingBrief | None:
         return self.inner.fetch_brief(brief_ref)
@@ -132,8 +138,17 @@ class WatchingBoard:
             raise self._error if self._error is not None else BriefBoardError("board is down")
         self.inner.report_status(brief_ref, run_id=run_id, status=status)
 
+    def report_review_location(self, brief_ref: str, /, *, run_id: str, location: str) -> None:
+        self.location_attempts += 1
+        if self.refuse_locations:
+            raise self._error if self._error is not None else BriefBoardError("board is down")
+        self.inner.report_review_location(brief_ref, run_id=run_id, location=location)
+
     def shown(self) -> list[RunStatus]:
         return [status for _, status in self.inner.reports(BRIEF.brief_ref)]
+
+    def links(self) -> list[str]:
+        return [location for _, location in self.inner.review_locations(BRIEF.brief_ref)]
 
 
 # --- Helpers ------------------------------------------------------------------------------
@@ -354,3 +369,68 @@ def test_bsr_07_load_is_the_wrapped_store_s() -> None:
 def test_bsr_08_the_reporter_is_a_run_store() -> None:
     reporter: RunStore = BriefStatusReporter(MemoryStore(), InMemoryBriefBoard())
     assert isinstance(reporter, BriefStatusReporter)
+
+
+# --- BSR-09: the review link (ADR-0047) ---------------------------------------------------
+
+
+def test_bsr_09_a_review_location_is_shown_once_per_location_and_nothing_is_saved() -> None:
+    store = MemoryStore()
+    board = WatchingBoard()
+    run, reporter = _produce(store, board, qa=Evaluator())
+    saved = store.snapshots[RUN_ID]
+    shown = board.shown()
+
+    reporter.show_review_location(run, "doc://1")
+    reporter.show_review_location(run, "doc://1")
+    reporter.show_review_location(run, "doc://2")
+
+    assert board.links() == ["doc://1", "doc://2"]
+    assert board.location_attempts == 2
+    assert reporter.shown_review_location(RUN_ID) == "doc://2"
+    assert store.snapshots[RUN_ID] is saved
+    assert board.shown() == shown
+    assert reporter.failed_location_reports == ()
+
+
+def test_bsr_09_a_refused_location_is_logged_kept_and_tried_again_by_the_next_call(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = MemoryStore()
+    board = WatchingBoard()
+    run, reporter = _produce(store, board, qa=Evaluator())
+    board.refuse_locations = True
+
+    with caplog.at_level(logging.WARNING, logger="omemo_content_factory.application.brief_status"):
+        reporter.show_review_location(run, "doc://1")
+
+    assert board.links() == []
+    assert reporter.shown_review_location(RUN_ID) is None
+    assert reporter.failed_location_reports == (
+        FailedLocationReport(RUN_ID, "doc://1", "board is down"),
+    )
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert RUN_ID in caplog.text
+    assert run.status is WH
+
+    board.refuse_locations = False
+    reporter.show_review_location(run, "doc://1")
+    assert board.links() == ["doc://1"]
+    assert len(reporter.failed_location_reports) == 1
+
+
+def test_bsr_09_any_other_board_exception_propagates_and_a_new_reporter_shows_it_again() -> None:
+    store = MemoryStore()
+    board = WatchingBoard(error=RuntimeError("bug"))
+    run, reporter = _produce(store, board, qa=Evaluator())
+    board.refuse_locations = True
+
+    with pytest.raises(RuntimeError, match="bug"):
+        reporter.show_review_location(run, "doc://1")
+    assert reporter.failed_location_reports == ()
+
+    board.refuse_locations = False
+    reporter.show_review_location(run, "doc://1")
+    BriefStatusReporter(store, board).show_review_location(run, "doc://1")
+    assert board.location_attempts == 3
+    assert board.links() == ["doc://1"]
