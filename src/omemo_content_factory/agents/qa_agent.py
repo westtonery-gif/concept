@@ -1,4 +1,5 @@
-"""``qa_agent@v1`` — the QA (quality and health-compliance) role definition (ADR-0035).
+"""``qa_agent@v1`` — the QA (quality and compliance) role definition (ADR-0035; v2 Prompt criteria
+per CLAUDE.md queue task 12).
 
 The static assets of the Stage 8 QA role, in the same shape as ``script_writer``: the
 :class:`Agent` descriptor and the ``qa-verdict`` :class:`Schema` whose ``required_fields`` are the
@@ -45,7 +46,8 @@ QA_AGENT = Agent(
     agent_id=AGENT_REF,
     name="QA Agent",
     prompt_ref=PROMPT_REF,
-    description="Checks candidate health content for quality and compliance; returns a verdict.",
+    description="Checks a candidate content artifact for uniqueness, quality and compliance; "
+    "returns a verdict.",
 )
 
 

@@ -29,7 +29,7 @@ def test_qar_02_agent_chains_to_its_prompt_and_schema_with_no_skills_or_tools() 
     assert qa.QA_AGENT.skill_refs == ()
     assert qa.QA_AGENT.tool_refs == ()
     prompt = load_prompt_catalogue()[qa.QA_AGENT.prompt_ref]
-    assert prompt.version == PromptVersion(1)
+    assert prompt.version == PromptVersion(2)
     assert prompt.schema_ref == qa.SCHEMA_REF
     assert qa.SCHEMAS[prompt.schema_ref] is qa.QA_VERDICT_SCHEMA
 

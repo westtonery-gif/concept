@@ -165,7 +165,7 @@ def test_qwr_01_the_qa_role_compiles_from_its_bundled_catalogue_entry_without_a_
 
     evaluator = build_qa_evaluator(qa_agent.QA_AGENT, None, client, qa_agent.SCHEMAS)
 
-    assert (evaluator.evaluator_ref, evaluator.prompt_ref) == ("qa_agent@v1", "qa-agent@v1")
+    assert (evaluator.evaluator_ref, evaluator.prompt_ref) == ("qa_agent@v1", "qa-agent@v2")
     assert evaluator.output_fields == QA_VERDICT_FIELDS
     assert (evaluator.system_prompt, evaluator.user_template) == (
         prompt.system,

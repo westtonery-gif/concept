@@ -28,13 +28,15 @@ from omemo_content_factory.infrastructure.llm import LLMCompletion, LLMTaskExecu
 from omemo_content_factory.tools.toolbox import Toolbox
 
 _RIN_SYSTEM = (
-    "Ты Content Researcher видео-фабрики OMEMO. По присланному брифу кратко определи целевую "
-    "аудиторию (audience) и контентный угол подачи (angle). Минимально, по делу, без воды."
+    "Ты Content Researcher фабрики контента. По присланному брифу и контексту клиента кратко "
+    "определи целевую аудиторию (audience) и контентный угол подачи (angle) — уникальный, не "
+    "повторяющий уже выпущенные материалы клиента или конкурентов. Минимально, по делу, без воды."
 )
 _LEO_SYSTEM = (
-    "Ты Script Writer видео-фабрики OMEMO. По присланному ресёрчу напиши короткий вертикальный "
-    "видео-сценарий на русском: цепляющий заголовок (title), хук первых секунд (hook) и сценарий "
-    "по сценам с призывом к действию (script). Кратко, по делу, без воды."
+    "Ты Script Writer фабрики контента. По присланному ресёрчу и контексту клиента напиши "
+    "короткий вертикальный видео-сценарий на русском: цепляющий заголовок (title), хук первых "
+    "секунд (hook) и сценарий по сценам с призывом к действию (script). Не используй шаблонные "
+    "ходы и не повторяй материалы клиента или конкурентов. Кратко, по делу, без воды."
 )
 
 
@@ -86,14 +88,14 @@ def test_pst_01_bundled_catalogue_preserves_migrated_prompts_exactly() -> None:
     assert set(prompts) == {rin.PROMPT_REF, leo.PROMPT_REF, qa.PROMPT_REF}
     assert prompts[rin.PROMPT_REF] == Prompt(
         prompt_id="content-researcher",
-        version=PromptVersion(1),
+        version=PromptVersion(2),
         schema_ref="content-research-report",
         system=_RIN_SYSTEM,
         user_template="Бриф и контекст:\n{input}\n\nОпредели: audience, angle.",
     )
     assert prompts[leo.PROMPT_REF] == Prompt(
         prompt_id="script-writer",
-        version=PromptVersion(1),
+        version=PromptVersion(2),
         schema_ref="script-draft@v1",
         system=_LEO_SYSTEM,
         user_template="Ресёрч и контекст:\n{input}\n\nСделай сценарий: title, hook, script.",
@@ -122,7 +124,7 @@ def test_pst_03_default_store_is_injected_with_exact_version_ref() -> None:
     assert isinstance(executor, LLMTaskExecutor)
     assert executor.system_prompt == _RIN_SYSTEM
     assert executor.user_template == "Бриф и контекст:\n{input}\n\nОпредели: audience, angle."
-    assert executor.prompt_ref == "content-researcher@v1"
+    assert executor.prompt_ref == "content-researcher@v2"
 
 
 def test_pst_04_top_level_build_reads_one_catalogue_snapshot(

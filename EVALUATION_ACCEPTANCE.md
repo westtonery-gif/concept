@@ -7,6 +7,7 @@
 >
 > **Статус:** Accepted. **Дата:** 2026-09-15. Дополнено `ADR-0036` (2026-09-16): EFL-07, §4.3.
 > Дополнено `ADR-0038` (2026-09-17): §4.4.
+> Дополнено `CLAUDE.md` задачей 12 (2026-09-17): `qa-agent` v2 — QAR-02, §4.4 (QWR-01).
 
 ---
 
@@ -76,7 +77,7 @@
 | ID | Сценарий | Ожидание |
 |---|---|---|
 | QAR-01 | Schema роли | `ACTIVE`; `required_fields == QA_VERDICT_FIELDS`; единственная запись каталога `qa-verdict@v1` |
-| QAR-02 | Agent → Prompt → Schema | `qa_agent@v1` → `qa-agent` v1 → `qa-verdict@v1` → та же Schema; нет `skill_refs` и `tool_refs` |
+| QAR-02 | Agent → Prompt → Schema | `qa_agent@v1` → `qa-agent` v2 → `qa-verdict@v1` → та же Schema; нет `skill_refs` и `tool_refs` |
 | QAR-03 | Текст Prompt | System называет оба поля, три токена вердикта, `JSON` и `[]`; User template содержит `{input}` ровно один раз и оба поля |
 | QAR-04 | `build_schema_map` для роли | `SchemaBinding("qa-verdict@v1", Schema роли)`; модель не вызывается |
 | QAR-05 | Ответ `passed` с `[]` | проходит проверку наличия Schema и декодируется в `PASSED` |
@@ -97,11 +98,12 @@
 
 ### 4.4 Подключение оценщика и исход ошибки QA (QWR, ADR-0038, `EVALUATION_SPEC.md` §8.4)
 
-Модель — детерминированный фейк порта `LLMClient`; Prompt и Schema — реальные ассеты `qa_agent@v1`.
+Модель — детерминированный фейк порта `LLMClient`; Prompt и Schema — реальные ассеты `qa_agent@v1`
+(Prompt — v2, CLAUDE.md задача 12).
 
 | ID | Сценарий | Ожидание |
 |---|---|---|
-| QWR-01 | `build_qa_evaluator(QA_AGENT, None, …)` | `evaluator_ref = qa_agent@v1`, `prompt_ref = qa-agent@v1`, `output_fields = QA_VERDICT_FIELDS`; System и User — из встроенного каталога; модель не вызвана |
+| QWR-01 | `build_qa_evaluator(QA_AGENT, None, …)` | `evaluator_ref = qa_agent@v1`, `prompt_ref = qa-agent@v2`, `output_fields = QA_VERDICT_FIELDS`; System и User — из встроенного каталога; модель не вызвана |
 | QWR-02 | Неизвестный Prompt / неизвестная Schema | `CompositionError` |
 | QWR-03 | Agent с `skill_refs` | `CompositionError` |
 | QWR-04 | Agent с `tool_refs` | модель видит ровно выданные Tools; недоступный Tool → `ToolGrantError` при сборке |

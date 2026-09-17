@@ -21,6 +21,18 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **The three production Prompts are retargeted to the business-agnostic domain (follow-up of
+  ADR-0037; CLAUDE.md queue task 12 — content, no new ADR).** `prompts/catalogue.toml` now holds version 2 of
+  `content-researcher`, `script-writer` and `qa-agent`, replacing each v1 record (the store holds
+  exactly one active record per `prompt_id`, `PROMPT_STORE_SPEC.md` §1 — v1's text stays recoverable
+  from git history, never edited in place). `qa-agent` v2 drops the health/medical-claim criteria for
+  the four already-charter-decided ones: uniqueness (not templated, not a repeat of the client's own
+  or a competitor's material), factual correctness, no unsubstantiated claims, the client's editorial
+  rules, regulated-niche rules only when a client profile supplies them. The ADR-0034 verdict grammar
+  is untouched. Because `Agent.prompt_ref` is the bare unversioned `prompt_id`, no role module needed
+  a code change to "point at" v2. Tests: version/`prompt_ref` assertions bumped in
+  `tests/test_prompt_store.py`, `tests/test_qa_agent.py`, `tests/test_qa_wiring.py`,
+  `tests/test_metrics_capture.py` (no new behavior, so the suite count is unchanged at 892).
 - **ROADMAP Stage 8 (QA Agent) is closed (ADR-0039).** `tests/test_stage8_acceptance.py` (`S8A`,
   `STAGE8_ACCEPTANCE.md`) runs Rin → Leo with the `qa_agent@v1` gate through `compile_runtime` on
   production assets only — bundled Prompts for all three roles, two real `AnthropicLLMClient`s
@@ -457,33 +469,41 @@ process at the time, not a pattern to keep copying.)
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop
        (ADR-0032) — covered with a realistic evaluator, not necessarily a live API call.
 
-12. **Retarget the Prompts to the new domain (follow-up of ADR-0037) — corrected mechanism.**
-    `qa-agent` v1 judges "материал о здоровье" on medical-claim criteria; `content-researcher` and
-    `script-writer` v1 both open with "Ты … видео-фабрики OMEMO". The charter no longer says
-    either. **Correction to how this was previously described here:** `PROMPT_STORE_SPEC.md`
-    §1/§3 allows **exactly one active record per `prompt_id`** in `catalogue.toml` (history/version
-    selection explicitly out of scope), and `agents/*.py` reference a Prompt by bare id
-    (`PROMPT_REF = "qa-agent"`, no version) — the version comes entirely from whatever is
-    currently in the catalogue. So there is no "add v2 alongside v1" and no "point the role at
-    it" step: **bumping the version is editing that one TOML record's `version` + `system` +
-    `user_template` fields in place.** A past Run's trace stays honest because it already recorded
-    `<prompt_id>@v<n>` at the time it ran (ADR-0029 §`_prompt_version_ref`), not because old text
-    is still loadable — that history lives in git, not in the live catalogue. No `agents/*.py`
-    change needed; no new ADR needed either (this is content, reviewed like code per PROJECT.md
-    §15, not an architectural decision — ADR-0035 was for introducing the *role*, not its wording).
+12. ~~**Retarget the Prompts to the new domain (follow-up of ADR-0037) — corrected mechanism.**~~ —
+    done, no new ADR (this is content, reviewed like code per `PROJECT.md` §15, not an
+    architectural decision — matches this section's own correction below). `prompts/catalogue.toml`
+    §1/§3 allows **exactly one active record per `prompt_id`**, and `agents/*.py` reference a
+    Prompt by bare id — so bumping the version was editing that one TOML record's `version` +
+    `system` (+, unchanged, `user_template`) fields in place; no `agents/*.py` change. A past Run's
+    trace stays honest because it already recorded `<prompt_id>@v<n>` at the time it ran, not
+    because old text is still loadable — that history lives in git, not the live catalogue.
     Subtasks:
-    1. **`qa-agent` → v2.** New criteria per `PROJECT.md` 1.3 §1/§4 п.9: uniqueness (not
-       templated, not a repeat of the client's own or a competitor's material), factual
-       correctness, no unsubstantiated claims, the client's editorial rules; regulated-niche rules
-       only when a client profile supplies them (none exists yet, so don't invent one). Must still
-       produce the exact `QA_VERDICT_FIELDS` grammar `decode_verdict` parses (ADR-0034) —
-       `tests/test_qa_agent.py` (`QAR`) pins Prompt/Schema *consistency*, not wording, so it
-       should stay green untouched, but re-run it.
-    2. **`content-researcher` + `script-writer` → v2.** Drop "видео-фабрики OMEMO" and the
-       health-adjacent framing; keep the shape (audience/angle; title/hook/script) since that's
-       still generically useful, not health-specific. Two role prompts, one coherent change.
-    3. **Verify end to end** — `demo_factory.py` (or a keyless test run) shows `@v2` in the
-       printed prompt_ref/trace for all three roles; full quality gate green.
+    1. ~~**`qa-agent` → v2.**~~ — done. Criteria per `PROJECT.md` 1.3 §1/§4 п.9 and
+       `ARCHITECTURE.md` §3.9: uniqueness (not templated, not a repeat of the client's own or a
+       competitor's material), factual correctness, no unsubstantiated claims (promised outcomes,
+       guarantees, unverifiable claims — generalized from v1's medical-claim list, same shape),
+       the client's editorial rules from the input context; regulated-niche rules only when a
+       client profile supplies them (none exists yet, so none was invented). The ADR-0034 verdict
+       grammar is unchanged; `tests/test_qa_agent.py` (`QAR`) needed only its `PromptVersion(1)` →
+       `(2)` assertion bumped, not a rewrite (it pins consistency, not wording, as expected).
+    2. ~~**`content-researcher` + `script-writer` → v2.**~~ — done. Dropped "видео-фабрики OMEMO"
+       and the health-adjacent framing; kept the shape (audience/angle; title/hook/script) and
+       added one line that the result must not repeat the client's own or a competitor's material
+       (`PROJECT.md` §1 value #1). `user_template` for all three roles was already domain-neutral
+       and is unchanged.
+    3. ~~**Verify end to end.**~~ — done. `tests/test_prompt_store.py` (PST-01/03),
+       `tests/test_qa_wiring.py` (QWR-01) and `tests/test_metrics_capture.py` (MTC) assert the real
+       bundled catalogue now resolves to `content-researcher@v2` / `script-writer@v2` /
+       `qa-agent@v2` through `build_executor_map`/`build_qa_evaluator`/`ContentDirector`, not just
+       the TOML file in isolation. Full quality gate green (892 passed, unchanged count — no new
+       behavior). Two small drive-by corrections, same file/section, plain non-versioned metadata
+       (not Prompt text): `qa_agent.py`'s stale "health-compliance"/"health content"
+       docstring/`Agent.description`, and `EVALUATION_SPEC.md` §1/§8.2's stale "домена
+       здоровья"/"медицинских утверждений" prose. `PROMPT_STORE_ACCEPTANCE.md` bumped to 1.2;
+       `EVALUATION_SPEC.md` / `EVALUATION_ACCEPTANCE.md` amended (§8.2, QAR-02, QWR-01). Left for
+       later, out of scope: the `omemo_content_factory` package name, `DOMAIN_MODEL.md`'s own
+       health mention, and `content_researcher.py`'s "омемо"→"OMEMO" terminology-glossary
+       invocation (a Skill invocation, not Prompt text).
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

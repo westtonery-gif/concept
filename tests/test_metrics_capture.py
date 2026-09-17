@@ -204,7 +204,7 @@ def test_mtc_05_06_09_composition_records_fake_call_and_exact_prompt_version() -
     assert (record.provider, record.model) == ("fake", "deterministic-placeholder@v1")
     assert record.token_usage.total_tokens == 0
     assert record.cost.amount == Decimal(0)
-    assert record.prompt_ref == "content-researcher@v1"
+    assert record.prompt_ref == "content-researcher@v2"
     assert record.retries == 0
     event_types = [type(event) for event in run.events]
     assert event_types.index(AnalyticsRecordCaptured) < event_types.index(TaskCompleted)
