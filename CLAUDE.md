@@ -722,40 +722,43 @@ process at the time, not a pattern to keep copying.)
        is the operator's manual check (needs real credentials, not available in this environment) —
        likely a `demo_notion.py`-style entrypoint, or an extension of it.
 
-15. **ROADMAP Stage 11 — n8n integration.** Next (ROADMAP order). Dependencies: Stages 9, 10 —
-    both done. **Different shape from tasks 13/14**: n8n is an external tool with its own UI/JSON
-    workflow config, entirely outside this repo — there is no "adapter contract" to implement for
-    it, and per `ARCHITECTURE.md` §12 the interaction is deliberately described **without an API
-    spec**. What the repo *does* owe (§3.2/§3.3): a real, externally-invokable entry point n8n can
-    call — today there is none; `demo_notion.py` is a script a human runs by hand, not something
-    an automation trigger reaches. Subtasks:
-    1. **Trigger-mechanism decision — needs an ADR, and probably the maintainer's input, not a
-       unilateral pick.** n8n can reach the core two ways: an **Execute Command** node shelling
-       out to a CLI (reuses `produce_brief`'s existing entrypoint shape, e.g. `demo_notion.py
-       <brief_ref>` on a host n8n can reach — no new dependency), or an **HTTP Request** node
-       hitting a webhook (needs a new web-framework dependency — `PROJECT.md` §5 explicitly gates
-       introducing a framework on "proven necessity", not by default). Recommendation to weigh,
-       not a decision made here: CLI is the smaller step and both `produce_brief` (idempotent via
-       `run_id`) and the QA/review resume paths already tolerate being invoked repeatedly/on a
-       schedule — but this is also a deployment question (where does n8n run relative to this
-       code?) the maintainer may have an opinion on.
-    2. **Status **and link** propagation — check for a real gap before building anything.**
-       ROADMAP's DoD says both statuses *and links* move automatically. `BriefStatusReporter`
-       (ADR-0041) already writes `RunStatus` back to Notion, but check whether the Google Docs
-       review location `ReviewDesk.publish` returns ever reaches Notion anywhere — if not (likely:
-       `report_status`'s signature is status-only, no location field), that's a real hole to close
-       (extend the reporting path, not necessarily the `BriefBoard` contract itself) before this
-       stage's DoD can be honestly called met.
-    3. **Document the n8n side (not pytest).** The actual "Notion event → n8n → trigger" wiring is
-       n8n's own workflow JSON, configured in its UI — not Python, not this repo's test suite.
-       What this subtask owes is documentation (a short ops doc or a README section) of exactly
-       what an n8n workflow needs to call, given subtask 1's chosen mechanism, plus confirmation
-       that the trigger entrypoint is safe to invoke unattended/on a schedule (idempotent, no
-       duplicate side effects — should already hold, verify rather than assume).
-    4. **Stage 11 "acceptance"** is therefore lighter than S9A/S10A's shape: a test proving the
-       chosen trigger entrypoint does the right thing when invoked repeatedly/concurrently-ish
-       against the same brief (CI-testable, no real n8n needed), not an end-to-end n8n round-trip.
-
+15. **ROADMAP Stage 11 — n8n integration.** (ROADMAP order.) Dependencies: Stages 9, 10 — both
+    done. (Supersedes the first breakdown of e31faa9, whose open trigger question is now answered;
+    its gap check — the Doc link never reaches Notion — is confirmed and became 15.1.) DoD: creating
+    a brief in Notion starts a `Run` through n8n automatically; business logic stays in the Content
+    Director, n8n is transport/triggers only (ARCHITECTURE §3.2, §12). Today
+    the core is reachable only from a CLI (`demo_notion.py`). Three decisions were **asked, not
+    guessed** — the maintainer chose (2026-09-17): (1) **the core exposes an HTTP service** (stdlib,
+    no new dependency, bearer token) that n8n calls, not an n8n *Execute Command* running the CLI;
+    (2) **n8n polls on a schedule** and asks the core to sweep Runs waiting for a human — a Google
+    Doc has no "decided" event, and n8n then needs no Google credentials; (3) **the core writes the
+    review Doc's link onto the Notion brief through the adapter**, next to the statuses it already
+    writes (ADR-0041) — one writer, no n8n write access to Notion. Found while designing: n8n's
+    Notion Trigger polls `last_edited_time`, so every core write to the page re-triggers it — a
+    trigger for a brief with nothing to do must write nothing, or the loop never stops. Subtasks:
+    1. **Review link on the brief.** Additive `BriefBoard.report_review_location(brief_ref, /, *,
+       run_id, location)`; `NotionBriefBoard` writes a `url` property named by a new required
+       `OMEMO_NOTION_REVIEW_LINK_PROPERTY`; `InMemoryBriefBoard` records it;
+       `BriefStatusReporter.show_review_location(run, location)` shows it once per location (a
+       refusal logged + kept, never fails the Run); `demo_notion.py` shows it after publishing. ADR.
+    2. **One brief invocation + the waiting-Run listing.** Extract `demo_notion.py`'s whole
+       per-brief flow (decision → produce → publish → link) into an application function returning
+       an outcome instead of printing, so the CLI and the service run the same code; an additive
+       `RunIndex` contract (Run ids by status) implemented by `SqliteRunStore`, and the sweep's
+       "which briefs wait for a human". ADR.
+    3. **HTTP production service + n8n workflows.** `infrastructure/` service: `POST /v1/briefs`
+       (`{"brief_ref"}`) and `POST /v1/reviews/sweep` answer `202` and queue work for **one**
+       background worker (a brief already queued is not queued twice), `GET /v1/health`; bearer
+       token `OMEMO_SERVICE_TOKEN`, host/port from env; entrypoint `factory_service.py`. Exported
+       n8n workflows in `n8n/` (Notion Trigger → HTTP Request; Schedule Trigger → HTTP Request) and
+       a static test that they hold only trigger + HTTP nodes calling the service's routes with a
+       credential, no inline token and no logic nodes. ADR.
+    4. **Stage 11 acceptance** (`S11A`, `STAGE11_ACCEPTANCE.md`): the real service over HTTP on
+       S10A's production path, driven by requests rendered from the committed n8n workflows — a
+       ready brief is produced and its link shown; an unready one does nothing; repeated triggers
+       cause no second model call and no extra board write; a desk decision is picked up by the
+       sweep; a wrong token is refused; a failing job does not stop the worker. A live n8n round
+       trip stays the operator's check. ADR.
 16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** **Blocked on
     task 15** — ROADMAP's own dependency list is Stages 1-11, and Stage 11 isn't done. Prepared
     ahead of time so there's no organizing pause once 15 lands, not to be started before it.
