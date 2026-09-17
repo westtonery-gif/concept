@@ -28,7 +28,8 @@ Review opened — a ``PASSED`` one for approval, a risk verdict as an escalation
 human reviewer with ``python demo_factory.py --approve``, which approves a passed candidate and
 completes the Run, or ``python demo_factory.py --request-changes "<instructions>"``: it requests
 changes on that Review and resumes, so Leo reworks the script from the model's flags and QA judges
-the new version (ADR-0032). A failed QA call leaves the Run at ``WAITING_QA``; running again asks
+the new version (ADR-0032); ``--reject "<reason>"`` reworks it the same way, carrying the reason
+(ADR-0045). A failed QA call leaves the Run at ``WAITING_QA``; running again asks
 QA again (ADR-0038 §1). Publication and external integrations are not involved.
 
 The Run is saved after every step to the Run store (`ADR-0026`; ``OMEMO_RUN_STORE_PATH``, default
@@ -53,6 +54,7 @@ from omemo_content_factory.application.qa_evaluation import (
     ArtifactEvaluator,
     MeasuredEvaluatorError,
 )
+from omemo_content_factory.application.review_publication import latest_qa
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.composition import (
     build_executor_map,
@@ -63,6 +65,7 @@ from omemo_content_factory.composition import (
     validate_qa_evaluator,
     validate_workflow_executors,
 )
+from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
@@ -162,7 +165,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def add_reviewer_arguments(parser: argparse.ArgumentParser) -> None:
-    """The two ways to play the human reviewer on the stored Run's pending Review."""
+    """The three ways to play the human reviewer on the stored Run's pending Review."""
     decision = parser.add_mutually_exclusive_group()
     decision.add_argument(
         "--request-changes",
@@ -176,21 +179,39 @@ def add_reviewer_arguments(parser: argparse.ArgumentParser) -> None:
         help="as the human reviewer, approve the stored Run's pending Review, then resume it; "
         "only a candidate that passed QA completes (ADR-0044)",
     )
+    decision.add_argument(
+        "--reject",
+        metavar="REASON",
+        help="as the human reviewer, reject the stored Run's pending Review with a reason, then "
+        "resume it; the candidate is reworked with that reason (ADR-0045)",
+    )
 
 
 def _play_reviewer(run: Run | None, args: argparse.Namespace) -> bool:
-    """Apply ``--approve`` / ``--request-changes`` to ``run``; whether a decision was submitted."""
+    """Apply ``--approve`` / ``--request-changes`` / ``--reject`` to ``run``; whether submitted."""
     if args.approve:
         return _approve(run)
     if args.request_changes is not None:
-        return _request_changes(run, args.request_changes)
+        return _decide(run, ReviewStatus.CHANGES_REQUESTED, args.request_changes)
+    if args.reject is not None:
+        return _decide(run, ReviewStatus.REJECTED, args.reject)
     return False
+
+
+def plays_reviewer(args: argparse.Namespace) -> bool:
+    """Whether a manual reviewer decision flag was given."""
+    return bool(args.approve) or args.request_changes is not None or args.reject is not None
 
 
 def _approve(run: Run | None) -> bool:
     """Submit ``APPROVED`` on the pending Review; whether it was submitted."""
     pending = _pending_review(run)
     if run is None or pending is None:
+        return False
+    evaluation = latest_qa(run, run.human_review(pending).artifact_ref)
+    if evaluation is None or evaluation.status is not EvaluationStatus.PASSED:
+        safe_print(f"{pending} is on a candidate QA did not pass; it cannot be approved.")
+        safe_print("Request changes or reject it instead (ADR-0045 §3).")
         return False
     run.submit_review(pending, ReviewStatus.APPROVED, by=Actor.HUMAN_REVIEWER)
     safe_print(f"Approved {pending}.")
@@ -209,15 +230,13 @@ def _pending_review(run: Run | None) -> str | None:
     return pending[-1].review_id
 
 
-def _request_changes(run: Run | None, instructions: str) -> bool:
-    """Submit ``CHANGES_REQUESTED`` on the pending Review; whether it was submitted."""
+def _decide(run: Run | None, decision: ReviewStatus, reason: str) -> bool:
+    """Submit ``CHANGES_REQUESTED`` / ``REJECTED`` with ``reason``; whether it was submitted."""
     pending = _pending_review(run)
     if run is None or pending is None:
         return False
-    run.submit_review(
-        pending, ReviewStatus.CHANGES_REQUESTED, by=Actor.HUMAN_REVIEWER, reason=instructions
-    )
-    safe_print(f"Requested changes on {pending}: {instructions}")
+    run.submit_review(pending, decision, by=Actor.HUMAN_REVIEWER, reason=reason)
+    safe_print(f"Decided {decision.value} on {pending}: {reason}")
     return True
 
 
@@ -251,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     safe_print("Rin -> Leo -> QA, the real catalogued roles, each on its own provider/model")
     safe_print("=" * 78)
     run = store.load(RUN_ID)
-    if args.approve or args.request_changes is not None:
+    if plays_reviewer(args):
         if not _play_reviewer(run, args):
             return
         assert run is not None
@@ -303,6 +322,7 @@ def _show_quality_gate(run: Run) -> None:
         safe_print(
             '  To request changes: python demo_factory.py --request-changes "<instructions>"'
         )
+        safe_print('  To reject:          python demo_factory.py --reject "<reason>"')
 
 
 def _show_model_calls(run: Run) -> None:

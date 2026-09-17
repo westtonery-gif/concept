@@ -117,7 +117,8 @@
 |---|---|---|
 | APG-01 | QA `PASSED` | Run `WAITING_HUMAN`; ровно один `PENDING` Review на кандидате (`CANDIDATE`); в store ровно один снимок `WAITING_HUMAN`, и в нём уже есть Review |
 | APG-02 | затем `APPROVED` и `resume` | артефакт `APPROVED`, Run `COMPLETED` — ровно один новый коммит; исполнитель и оценщик не вызваны |
-| APG-03 | `resume` при: `PASSED` + Review `PENDING`; `PASSED` + `REJECTED`; `FLAGGED`/`FAILED` + `APPROVED`; `FLAGGED` + `REJECTED` | снимок Run не изменён, коммитов нет, моделей нет |
+| APG-03 | `resume` при: `PASSED` + Review `PENDING`; `FLAGGED`/`FAILED` + `APPROVED` | снимок Run не изменён, коммитов нет, моделей нет |
+| APG-06 | `resume` при `PASSED` + `REJECTED` и `FLAGGED` + `REJECTED` (ADR-0045 §1) | доработка: одна новая Task производителя, версия 1 `SUPERSEDED`, версия 2 ждёт человека со свежим `PENDING` Review |
 | APG-04 | QA не подключён | Run `COMPLETED` без Review (прежний маршрут) |
 | APG-05 | `FLAGGED` → `CHANGES_REQUESTED` → версия 2 `PASSED` → `APPROVED` → `resume` | версия 2 ждёт человека со свежим Review; после одобрения — `APPROVED`, Run `COMPLETED`, версия 1 `SUPERSEDED` |
 

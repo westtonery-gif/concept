@@ -10,12 +10,14 @@
 
 This contract closes the application route:
 
-`QA risk -> WAITING_HUMAN -> CHANGES_REQUESTED -> RUNNING -> rework Task -> Artifact vNext -> WAITING_QA`.
+`QA risk -> WAITING_HUMAN -> CHANGES_REQUESTED | REJECTED -> RUNNING -> rework Task -> Artifact vNext -> WAITING_QA`.
+
+`REJECTED` joined the route in ADR-0045 §1.
 
 It changes no domain aggregate API. The Content Director composes existing operations and the
 existing executor, Schema, QA and RunStore ports.
 
-Out of scope: automatic pre-human rework, `REJECTED`, a real QA Agent, external ReviewDesk wiring,
+Out of scope: automatic pre-human rework, a terminal rejection (`ArtifactStatus.REJECTED`), a real QA Agent, external ReviewDesk wiring,
 replaying more than the current candidate's producer, and a typed replacement for string Task
 input.
 
@@ -28,8 +30,10 @@ of the current candidate.
 |---|---|
 | `PENDING` | stop and wait |
 | `APPROVED` | no rework; existing approval routing remains outside this slice |
-| `REJECTED` | no rework; rejected-version policy remains deferred |
-| `CHANGES_REQUESTED` | validate the plan, then request `WAITING_HUMAN -> RUNNING` |
+| `CHANGES_REQUESTED` / `REJECTED` | validate the plan, then request `WAITING_HUMAN -> RUNNING` (ADR-0045 §1) |
+
+A rejected candidate stays `CANDIDATE` until its successor supersedes it; it never becomes
+`ArtifactStatus.REJECTED` on this route.
 
 The triggering review must target the current live candidate. Older decided reviews never start a
 new iteration.
@@ -56,6 +60,7 @@ The stored Task input is canonical JSON produced with sorted keys and compact se
 | `artifact.version` | reviewed Artifact version |
 | `artifact.content` | reviewed immutable content |
 | `qa_flags` | flags of that Artifact's latest `qa` Evaluation, or `[]` |
+| `human_decision` | triggering Review's status value: `changes_requested` or `rejected` (ADR-0045 §1) |
 | `human_instructions` | triggering Review's reason/instructions, including `null` when absent |
 | `rework_iteration` | Run's rework count after re-entry |
 

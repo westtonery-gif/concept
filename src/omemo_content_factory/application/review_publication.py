@@ -18,7 +18,9 @@ from dataclasses import dataclass
 
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewPackage
 from omemo_content_factory.application.qa_evaluation import QA_KIND
-from omemo_content_factory.domain.human_review import ReviewId, ReviewStatus
+from omemo_content_factory.domain.artifact import ArtifactId
+from omemo_content_factory.domain.evaluation import EvaluationView
+from omemo_content_factory.domain.human_review import HumanReviewView, ReviewId, ReviewStatus
 from omemo_content_factory.domain.run import Run, RunStatus
 
 
@@ -30,6 +32,28 @@ class PublishedReview:
     location: str
 
 
+def pending_review(run: Run) -> HumanReviewView | None:
+    """The review ``run`` waits on: its latest ``PENDING`` Human Review at ``WAITING_HUMAN``.
+
+    ``None`` when the Run is not waiting for a human or every review is decided. Both publication
+    (ADR-0044 §3) and reading the decision back (ADR-0045 §2) address this one review.
+    """
+    if run.status is not RunStatus.WAITING_HUMAN:
+        return None
+    pending = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
+    return pending[-1] if pending else None
+
+
+def latest_qa(run: Run, artifact_id: ArtifactId) -> EvaluationView | None:
+    """The latest QA Evaluation of ``artifact_id`` (evaluations are kept in opening order)."""
+    evaluations = [
+        view
+        for view in run.evaluations
+        if view.artifact_ref == artifact_id and view.kind == QA_KIND
+    ]
+    return evaluations[-1] if evaluations else None
+
+
 def pending_review_package(run: Run) -> ReviewPackage | None:
     """The package a reviewer needs for ``run``'s pending review, or ``None`` if none is pending.
 
@@ -37,24 +61,17 @@ def pending_review_package(run: Run) -> ReviewPackage | None:
     review is taken (ADR-0044 §3). The brief is the first Task's stored input — exactly what the
     Run was produced from; the flags are those of the candidate's latest QA Evaluation, if any.
     """
-    if run.status is not RunStatus.WAITING_HUMAN:
+    review = pending_review(run)
+    if review is None or not run.tasks:
         return None
-    pending = [view for view in run.human_reviews if view.status is ReviewStatus.PENDING]
-    if not pending or not run.tasks:
-        return None
-    review = pending[-1]
     candidate = run.artifact(review.artifact_ref)
-    evaluations = [
-        view
-        for view in run.evaluations
-        if view.artifact_ref == candidate.artifact_id and view.kind == QA_KIND
-    ]
+    evaluation = latest_qa(run, candidate.artifact_id)
     return ReviewPackage(
         run_id=run.run_id,
         review_id=review.review_id,
         candidate=candidate,
         brief=run.tasks[0].task_input,
-        qa_flags=evaluations[-1].flags if evaluations else (),
+        qa_flags=evaluation.flags if evaluation is not None else (),
     )
 
 

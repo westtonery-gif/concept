@@ -229,6 +229,7 @@ def test_rwr_02_rework_task_persists_canonical_feedback_json() -> None:
     assert stored == json.dumps(
         {
             "artifact": {"content": "script v1", "ref": v1.artifact_id, "version": 1},
+            "human_decision": "changes_requested",
             "human_instructions": "Cite the randomized trial.",
             "qa_flags": ["risk in script v1"],
             "rework_iteration": 1,
@@ -267,11 +268,9 @@ def test_rwr_04_repeated_changes_form_a_linear_three_version_chain() -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    "decision", [ReviewStatus.PENDING, ReviewStatus.APPROVED, ReviewStatus.REJECTED]
-)
-def test_rwr_05_only_changes_requested_starts_rework(decision: ReviewStatus) -> None:
-    """RWR-05: pending/approved/rejected escalation Reviews cause no producer call."""
+@pytest.mark.parametrize("decision", [ReviewStatus.PENDING, ReviewStatus.APPROVED])
+def test_rwr_05_pending_or_approved_escalation_starts_no_rework(decision: ReviewStatus) -> None:
+    """RWR-05: pending/approved escalation Reviews cause no producer call."""
     executor = ScriptedExecutor([_success("unused")])
     evaluator = SequenceEvaluator([FLAGGED])
     director, run = _escalate(executor, evaluator)
@@ -284,6 +283,34 @@ def test_rwr_05_only_changes_requested_starts_rework(decision: ReviewStatus) -> 
 
     assert executor.calls == []
     assert run.snapshot == before
+
+
+def test_rwr_07_a_rejection_is_reworked_with_its_reason() -> None:
+    """RWR-07: REJECTED routes like CHANGES_REQUESTED; the rejected v1 is superseded (ADR-0045)."""
+    executor = ScriptedExecutor([_success("script v2")])
+    evaluator = SequenceEvaluator([FLAGGED, PASSED])
+    director, run = _escalate(executor, evaluator)
+    v1 = run.artifacts[-1]
+    run.submit_review(
+        run.human_reviews[-1].review_id, ReviewStatus.REJECTED, by=REVIEWER, reason="Off topic."
+    )
+
+    director.resume(run, REQUESTS)
+
+    assert run.rework_count == 1
+    assert len(run.tasks) == len(REQUESTS) + 1
+    rework_input = json.loads(run.tasks[-1].task_input)
+    assert rework_input["human_decision"] == "rejected"
+    assert rework_input["human_instructions"] == "Off topic."
+    assert run.artifact(v1.artifact_id).status is ArtifactStatus.SUPERSEDED
+    v2 = run.artifacts[-1]
+    assert (v2.version, v2.supersedes_ref, v2.status) == (
+        2,
+        v1.artifact_id,
+        ArtifactStatus.CANDIDATE,
+    )
+    assert run.status is RunStatus.WAITING_HUMAN
+    assert run.human_reviews[-1].artifact_ref == v2.artifact_id
 
 
 def test_rwr_06_rework_without_qa_stops_at_the_fresh_gate() -> None:

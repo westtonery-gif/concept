@@ -18,15 +18,21 @@ bindings as ``demo_factory.py``, plus the six ``OMEMO_NOTION_*`` variables
 (`infrastructure/notion_brief_board.py`); any missing configuration is explained and the demo
 exits cleanly. A brief that is not on the board, not marked ready, or has no text also exits
 cleanly (`BriefBoard.fetch_brief` returns ``None`` for all of these — deliberately
-indistinguishable, ADR-0040 §3). ``--approve`` / ``--request-changes "<instructions>"`` play the
-human reviewer, same as in ``demo_factory.py``.
+indistinguishable, ADR-0040 §3). ``--approve`` / ``--request-changes "<instructions>"`` /
+``--reject "<reason>"`` play the human reviewer, same as in ``demo_factory.py``.
 
 When both ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID`` are set, a Run
 waiting for a human has its pending review published as a Google Doc at the end of every invocation
 (ADR-0043/0044) and the Doc's link is printed; publishing again finds the same Doc. Without them the
 review stays in the Run store only; a half-configured desk is explained and the demo exits. A desk
 that refuses to publish never touches the Run — the refusal is printed and the next invocation
-tries again. Reading the reviewer's decision back from the Doc is not wired yet (queue task 14.3).
+tries again.
+
+With the desk configured and no reviewer flag given, a stored Run waiting for a human first has its
+review published (idempotent) and the reviewer's decision read from the Doc (ADR-0045): approved,
+changes requested or rejected is recorded, saved and routed by the resume that follows — a rework
+publishes the new version's review at the end. An approval of a candidate QA did not pass is not
+recorded; the demo says to change the Doc's decision instead. A reviewer flag wins over the Doc.
 """
 
 from __future__ import annotations
@@ -47,6 +53,7 @@ from demo_factory import (
     _show_model_calls,
     _show_quality_gate,
     add_reviewer_arguments,
+    plays_reviewer,
 )
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError
@@ -55,6 +62,7 @@ from omemo_content_factory.application.brief_intake import BriefIntakeError, pro
 from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
+from omemo_content_factory.application.review_decision import apply_review_decision
 from omemo_content_factory.application.review_publication import publish_pending_review
 from omemo_content_factory.composition import (
     build_brief_board,
@@ -132,7 +140,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     safe_print("=" * 78)
     safe_print(f"Notion brief '{args.brief_ref}' -> Rin -> Leo -> QA")
     safe_print("=" * 78)
-    if not _prepare_stored_run(store, run_id, args):
+    if not _prepare_stored_run(store, run_id, args, desk):
         return
     try:
         run = produce_brief(
@@ -162,10 +170,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     _publish_review(desk, run)
 
 
-def _prepare_stored_run(store: BriefStatusReporter, run_id: str, args: argparse.Namespace) -> bool:
+def _prepare_stored_run(
+    store: BriefStatusReporter, run_id: str, args: argparse.Namespace, desk: ReviewDesk | None
+) -> bool:
     """Apply a reviewer decision to the stored Run, or announce a resume; whether to go on."""
     stored = store.load(run_id)
-    if args.approve or args.request_changes is not None:
+    if plays_reviewer(args):
         if not _play_reviewer(stored, args):
             return False
         assert stored is not None
@@ -174,6 +184,36 @@ def _prepare_stored_run(store: BriefStatusReporter, run_id: str, args: argparse.
         location = run_store_path(os.environ)
         safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
         safe_print("committed steps are not run again. Delete that file to start over.")
+        if desk is not None and _read_decision(desk, stored):
+            store.save(stored)
+    return True
+
+
+def _read_decision(desk: ReviewDesk, run: Run) -> bool:
+    """Read the reviewer's decision from the desk into ``run``; whether it was recorded (ADR-0045).
+
+    The pending review is published first, so one a crash left unpublished can be read at all.
+    """
+    try:
+        publish_pending_review(run, desk)
+        fetched = apply_review_decision(run, desk)
+    except ReviewDeskError as exc:
+        safe_print(f"Google Docs refused to give the reviewer's decision: {exc}")
+        safe_print("The Run keeps waiting; run again to retry.")
+        return False
+    if fetched is None:
+        if run.status is RunStatus.WAITING_HUMAN:
+            safe_print("The reviewer has not decided yet; the Run keeps waiting.")
+        return False
+    if not fetched.applied:
+        safe_print(
+            f"The Doc approves {fetched.review_id}, but QA did not pass this candidate, so it "
+            "cannot be approved."
+        )
+        safe_print("Change the Doc's decision to 'доработать' or 'отклонено' (ADR-0045 §3).")
+        return False
+    reason = "" if fetched.reason is None else f": {fetched.reason}"
+    safe_print(f"The Doc decides {fetched.decision.value} on {fetched.review_id}{reason}")
     return True
 
 

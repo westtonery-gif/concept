@@ -172,3 +172,18 @@ Drive (BOM, `\r\n`). Рецензента играет правка текста
 | RPB-05 | площадка отказывает (`ReviewDeskError`), затем доступна | ошибка пробрасывается, Run не изменён; следующий вызов публикует |
 | RPB-06 | двойник площадки как `ReviewDesk` | проходит mypy --strict |
 | RPB-07 | `build_review_desk`: переменных нет; ключ сервисного аккаунта и папка заданы | `ReviewDeskError` с именами обеих переменных; `GoogleDocsReviewDesk` |
+
+## 12. Применение решения ревьюера (RDF) — `tests/test_review_decision.py` (ADR-0045)
+
+Настоящий `ContentDirector` с детерминированными исполнителями и оценщиком; площадка —
+`InMemoryReviewDesk` (решение ставит её управляющая сторона `decide`) или двойник, отказывающий по флагу.
+
+| ID | Сценарий | Ожидание |
+|---|---|---|
+| RDF-01 | Run ждёт, решение ещё не принято | `None`; снимок Run не изменён |
+| RDF-02 | `APPROVED` при QA `PASSED`; затем сохранить и `resume` | `FetchedDecision(..., applied=True)`; Review `APPROVED` от `human_reviewer`; после `resume` артефакт `APPROVED`, Run `COMPLETED` |
+| RDF-03 | `CHANGES_REQUESTED` / `REJECTED` с причиной; затем `resume` | Review решён с причиной; доработка: вход новой Task несёт `human_decision` и причину; версия 2 ждёт человека |
+| RDF-04 | `APPROVED` при QA `FLAGGED` | `applied=False`; снимок Run не изменён, Review `PENDING` |
+| RDF-05 | Run `COMPLETED`, `WAITING_QA`, `CREATED`; решённый Review без ожидающего | `None`; площадка не вызвана |
+| RDF-06 | площадка отказывает (`ReviewDeskError`) | ошибка пробрасывается, Run не изменён |
+| RDF-07 | решение, прочитанное после перезапуска (Run из store) | то же применение; повторный вызов после применения → `None` без обращения к площадке |

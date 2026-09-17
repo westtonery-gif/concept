@@ -225,7 +225,7 @@ Evaluation, без второй; первый полученный вердик�
 | вердикт `FLAGGED` / `FAILED` | Run → `WAITING_HUMAN`, открыт Human Review кандидата; Run **не** завершается |
 
 Оценивается только артефакт финального шага; промежуточные остаются `DRAFT`.
-Если человек отвечает `CHANGES_REQUESTED`, дальнейший маршрут определён
+Если человек отвечает `CHANGES_REQUESTED` или `REJECTED` (ADR-0045), дальнейший маршрут определён
 `REWORK_ROUTING_SPEC.md`: повторно исполняется producer текущего кандидата, а его Output создаёт
 новую версию Artifact. Сам QA-риск до решения человека по-прежнему только эскалируется.
 
@@ -239,7 +239,7 @@ Evaluation, без второй; первый полученный вердик�
 | `APPROVED` | `PASSED` | артефакт → `APPROVED`, Run → `COMPLETED`, **один** коммит |
 | `APPROVED` | `FLAGGED` / `FAILED` | ничего (отложено, ADR-0044 §2) |
 | `CHANGES_REQUESTED` | любая | доработка (`REWORK_ROUTING_SPEC.md`) |
-| `REJECTED` | любая | ничего (отложено, ADR-0044 §2) |
+| `REJECTED` | любая | доработка с причиной отказа (`REWORK_ROUTING_SPEC.md`, ADR-0045 §1) |
 
 Модель ни в одной строке не вызывается. Без `qa` и вне доработки маршрут прежний:
 `WAITING_HUMAN` → `COMPLETED` без Review.

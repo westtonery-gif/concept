@@ -184,19 +184,17 @@ def test_apg_02_an_approve_on_a_passed_candidate_approves_it_and_completes_in_on
     ("verdicts", "decision"),
     [
         ([PASSED], None),
-        ([PASSED], ReviewStatus.REJECTED),
         ([FLAGGED], ReviewStatus.APPROVED),
         ([FAILED], ReviewStatus.APPROVED),
-        ([FLAGGED], ReviewStatus.REJECTED),
     ],
-    ids=["pending", "rejected", "approved-flagged", "approved-failed", "rejected-flagged"],
+    ids=["pending", "approved-flagged", "approved-failed"],
 )
 def test_apg_03_any_other_state_of_the_gate_is_left_alone(
     verdicts: list[EvaluationStatus], decision: ReviewStatus | None
 ) -> None:
     run = _produced(Evaluator(verdicts))
     if decision is not None:
-        _decide(run, decision, reason="no" if decision is ReviewStatus.REJECTED else None)
+        _decide(run, decision)
     before = run.snapshot
     store, executor, qa = RecordingStore(), Executor(), Evaluator()
 
@@ -231,6 +229,27 @@ def test_apg_05_a_reworked_version_that_passes_waits_for_approval_then_completes
     assert run.status is RunStatus.COMPLETED
     assert run.artifact(v2.artifact_id).status is ArtifactStatus.APPROVED
     assert run.artifact(v1.artifact_id).status is ArtifactStatus.SUPERSEDED
+
+
+@pytest.mark.parametrize("verdict", [PASSED, FLAGGED], ids=["passed", "flagged"])
+def test_apg_06_a_rejection_is_reworked_into_a_new_version_waiting_for_a_human(
+    verdict: EvaluationStatus,
+) -> None:
+    store = RecordingStore()
+    run = _produced(Evaluator([verdict]), store)
+    v1 = run.artifacts[-1]
+    _decide(run, ReviewStatus.REJECTED, reason="not our tone")
+    executor = Executor()
+
+    _director(Evaluator(), store, executor).resume(run, REQUESTS)
+
+    assert executor.calls == 1
+    v2 = run.artifacts[-1]
+    assert run.artifact(v1.artifact_id).status is ArtifactStatus.SUPERSEDED
+    assert (v2.version, v2.status) == (2, ArtifactStatus.CANDIDATE)
+    assert run.status is RunStatus.WAITING_HUMAN
+    latest = run.human_reviews[-1]
+    assert (latest.artifact_ref, latest.status) == (v2.artifact_id, ReviewStatus.PENDING)
 
 
 # --- RPB: publishing the pending review ---------------------------------------------------

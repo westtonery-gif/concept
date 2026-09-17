@@ -20,10 +20,11 @@ Approval Gate (``WAITING_HUMAN``) with a Human Review opened for escalation, nev
 Without an evaluator the flow is unchanged. The Evaluation names the evaluator's role, and the
 evaluator's model calls are recorded against it — and committed even when it then fails (ADR-0036).
 
-Rework routing (ADR-0032): a QA risk still escalates to a Human Review. When its latest decision is
-``CHANGES_REQUESTED``, :meth:`ContentDirector.resume` re-executes only the current candidate's
-producer with the reviewed content and feedback, then creates a new Artifact version from the
-validated Output. The route is bounded by the Run's rework policy and starts fresh QA/review gates.
+Rework routing (ADR-0032/0045): a QA risk still escalates to a Human Review. When its latest
+decision is ``CHANGES_REQUESTED`` or ``REJECTED``, :meth:`ContentDirector.resume` re-executes only
+the current candidate's producer with the reviewed content, the decision and its feedback, then
+creates a new Artifact version from the validated Output. The route is bounded by the Run's rework
+policy and starts fresh QA/review gates.
 
 Contract errors (ADR-0033): an Output its Schema ruled ``INVALID`` stays recorded for audit, but it
 never becomes an Artifact or a new version and is never handed to the next step; the plan stops
@@ -74,6 +75,9 @@ NO_CANDIDATE_REASON = "QA gate: no candidate artifact to evaluate"
 
 RESUME_LIMIT_REASON = "interrupted before its result was committed; no attempts left to resume it"
 """Failure reason of a Task found ``RUNNING`` on restart with no attempts left (ADR-0026 §3)."""
+
+_REWORK_DECISIONS = frozenset({ReviewStatus.CHANGES_REQUESTED, ReviewStatus.REJECTED})
+"""Human decisions that send the candidate back to its producer (ADR-0032 §1, ADR-0045 §1)."""
 
 REWORK_LIMIT_REASON = "Rework requested but the configured iteration limit is exhausted"
 """Failure reason when a human-requested iteration exceeds ``ReworkPolicy`` (ADR-0032 §1)."""
@@ -163,8 +167,9 @@ class ContentDirector:
         ``RUNNING`` one is retried on its stored input, a missing one is started. The QA gate
         re-uses a ``PENDING`` Evaluation and routes a recorded verdict without asking again. A Run
         waiting for a human is left alone unless the current candidate's latest Review is
-        ``CHANGES_REQUESTED``; that decision starts one bounded, resumable rework of the
-        candidate's producer (ADR-0032). A terminal Run is left alone. A Run whose Tasks do not
+        ``CHANGES_REQUESTED`` or ``REJECTED``; that decision starts one bounded, resumable rework of
+        the candidate's producer (ADR-0032/0045), or its ``APPROVED`` on a ``PASSED`` candidate
+        completes the Run (ADR-0044). A terminal Run is left alone. A Run whose Tasks do not
         match ``tasks`` raises :class:`RunResumptionError` before anything changes. A freshly
         created Run is simply executed.
         """
@@ -212,7 +217,7 @@ class ContentDirector:
 
     def _drive(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
         """Advance ``run`` from its current state as far as the Director can take it."""
-        if self._changes_requested(run):
+        if self._rework_requested(run):
             self._begin_rework(run, tasks)
             if run.status is RunStatus.FAILED:
                 return
@@ -258,8 +263,9 @@ class ContentDirector:
         With QA wired (or in rework) the candidate never completes on its own (ADR-0044 §1): a
         candidate with no Review gets one and the Run stops; an ``APPROVED`` latest Review of a
         candidate whose latest QA is ``PASSED`` approves the Artifact and completes the Run in one
-        commit. Any other decision leaves the Run waiting (``CHANGES_REQUESTED`` is routed by
-        :meth:`_drive`; ``REJECTED`` and an approved escalation stay deferred, ADR-0044 §2).
+        commit. Any other decision leaves the Run waiting (``CHANGES_REQUESTED`` and ``REJECTED``
+        are routed by :meth:`_drive`, ADR-0045 §1; an approved escalation stays deferred, ADR-0044
+        §2).
         """
         if run.status is not RunStatus.WAITING_HUMAN:
             return
@@ -392,15 +398,15 @@ class ContentDirector:
         self._commit(run)
 
     def _rework_source(self, run: Run) -> tuple[ArtifactView, HumanReviewView]:
-        """Return the live candidate and its latest ``CHANGES_REQUESTED`` Review."""
+        """Return the live candidate and its latest rework-triggering Review (ADR-0032/0045)."""
         candidates = [view for view in run.artifacts if view.status is ArtifactStatus.CANDIDATE]
         if not candidates:
             raise RunResumptionError(f"run {run.run_id} has no live candidate to rework")
         source = candidates[-1]
         review = self._latest_review(run, source.artifact_id)
-        if review is None or review.status is not ReviewStatus.CHANGES_REQUESTED:
+        if review is None or review.status not in _REWORK_DECISIONS:
             raise RunResumptionError(
-                f"run {run.run_id} has no CHANGES_REQUESTED review for {source.artifact_id}"
+                f"run {run.run_id} has no review requesting a rework of {source.artifact_id}"
             )
         return source, review
 
@@ -414,6 +420,7 @@ class ContentDirector:
                     "ref": source.artifact_id,
                     "version": source.version,
                 },
+                "human_decision": review.status.value,
                 "human_instructions": review.reason,
                 "qa_flags": [] if evaluation is None else list(evaluation.flags),
                 "rework_iteration": run.rework_count,
@@ -424,15 +431,15 @@ class ContentDirector:
         )
 
     @classmethod
-    def _changes_requested(cls, run: Run) -> bool:
-        """Whether the current candidate's latest review requests a new iteration."""
+    def _rework_requested(cls, run: Run) -> bool:
+        """Whether the current candidate's latest review requests a new iteration (ADR-0045 §1)."""
         if run.status is not RunStatus.WAITING_HUMAN:
             return False
         candidate = cls._final_candidate(run)
         if candidate is None:
             return False
         review = cls._latest_review(run, candidate)
-        return review is not None and review.status is ReviewStatus.CHANGES_REQUESTED
+        return review is not None and review.status in _REWORK_DECISIONS
 
     def _run_steps(self, run: Run, tasks: Sequence[TaskRequest]) -> None:
         """Run requests in order, chaining Output and stopping at the first failed step.

@@ -233,7 +233,7 @@ JSON-ключу) и `OMEMO_GOOGLE_REVIEW_FOLDER_ID` — обязательны; 
 `ReviewDeskError` с их именами. Ключ читается сразу: нечитаем, не JSON-объект, `type` не
 `service_account`, пустые `client_email`/`private_key`/`token_uri`, ключ не RSA PEM →
 `ReviewDeskError` (путь назвать можно, ключ — никогда; в `repr` настроек ключа нет). Применение
-решения (`fetch_decision` → `Run.submit_review`) не подключено — задача 14.3. Приёмка —
+решения (`fetch_decision` → `Run.submit_review`) — ниже, ADR-0045. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §10.
 
 **Публикация ожидающего ревью (Этап 10, ADR-0044).** `application/review_publication.py`:
@@ -249,6 +249,23 @@ Run только читается. Точка входа вызывает пуб
 `GoogleDocsReviewDesk` (fail closed, как `google_docs_settings_from_env`). `demo_notion.py`
 публикует, если задана хотя бы одна переменная `OMEMO_GOOGLE_*` (неполная настройка — сообщение и
 выход до вызова моделей), и печатает ссылку или отказ. Приёмка — `ADAPTER_ACCEPTANCE.md` §11.
+
+**Применение решения ревьюера (Этап 10, ADR-0045).** `application/review_decision.py`
+`apply_review_decision(run, desk) -> FetchedDecision | None`:
+
+| Случай | Результат |
+|---|---|
+| Run не в `WAITING_HUMAN` или нет `PENDING` Review | `None`; площадка не вызывается |
+| `fetch_decision(review_id)` последнего ожидающего Review → `None` | `None`; Run не изменён |
+| `CHANGES_REQUESTED` / `REJECTED`; `APPROVED` при последней QA-оценке кандидата `PASSED` | `Run.submit_review(..., by=HUMAN_REVIEWER, reason=reason)`; `FetchedDecision(review_id, decision, applied=True)` |
+| `APPROVED` при последней QA-оценке не `PASSED` (или без неё) | ничего не записано, Review остаётся `PENDING`; `applied=False` (ADR-0045 §3) |
+| `ReviewDeskError` | пробрасывается; Run не изменён |
+
+Run меняется только в памяти: сохраняет его и вызывает `resume` вызывающий. `demo_notion.py` при
+настроенной площадке и без ручного флага решения для сохранённого Run: публикует ожидающий Review
+(идемпотентно), применяет решение, сохраняет, затем продолжает как прежде; отказ площадки печатается,
+запуск идёт дальше. Ручные `--approve` / `--request-changes` / `--reject` важнее площадки. Приёмка —
+`ADAPTER_ACCEPTANCE.md` §12.
 
 ## 7. `AnalyticsSink` (`adapters/analytics_sink.py`)
 

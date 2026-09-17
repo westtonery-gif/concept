@@ -21,6 +21,21 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **The reviewer's decision is read back from the desk, and a Reject is reworked (ROADMAP Stage 10,
+  ADR-0045; queue task 14.3).** Two domain calls **asked, not guessed** — the maintainer chose:
+  (1) `REJECTED` routes like `CHANGES_REQUESTED` (ARCHITECTURE §13 / DOMAIN_MODEL §2.14): rework of
+  the candidate's producer, the rejected version `SUPERSEDED` (never `ArtifactStatus.REJECTED`),
+  `ReworkPolicy` bound → `FAILED`; the rework input gained `human_decision`
+  (`changes_requested`/`rejected`); (2) an approved escalation stays deferred. Decided here: such an
+  approval is **not recorded** (`applied=False`), so the review stays `PENDING` and the reviewer can
+  still change the Doc — recording it would strand the Run with no pending review.
+  `application/review_decision.py` `apply_review_decision(run, desk) -> FetchedDecision | None`
+  (no pending review → no desk call; undecided → `None`; `ReviewDeskError` propagates; Run changed in
+  memory only — caller saves + resumes). `review_publication.py` now exposes `pending_review` /
+  `latest_qa`. `demo_notion.py` for a stored Run with a desk and no flag: publish (idempotent) →
+  apply → save → resume. Both demos gained `--reject "<reason>"`; manual `--approve` on a non-passed
+  candidate is refused too. APG-03/RWR-05 `REJECTED` rows became APG-06/RWR-07. Tests:
+  `tests/test_review_decision.py` (`RDF`, `ADAPTER_ACCEPTANCE.md` §12). Suite: 1040 passed.
 - **The Approval Gate now holds every QA-passed candidate, and a pending review is published
   (ROADMAP Stage 10, ADR-0044; queue task 14.2).** Found while wiring: `PASSED` used to go
   `WAITING_HUMAN → COMPLETED` with no Human Review, contradicting `PROJECT.md` §12 /
@@ -143,7 +158,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 44 ADRs (0001–0044) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 45 ADRs (0001–0045) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -675,7 +690,10 @@ process at the time, not a pattern to keep copying.)
        the Director or a `RunStore` decorator. Original brief: `WAITING_HUMAN` gets a real desk the
        way `WAITING_QA` got a real evaluator (ADR-0038): build the `ReviewPackage` from the Run's
        candidate Artifact, brief and the QA Evaluation's flags, and call `desk.publish`.
-    3. **Decision-fetch wiring.** Next. `desk.fetch_decision(review_id)` → `Run.submit_review(...,
+    3. ~~**Decision-fetch wiring.**~~ — done (ADR-0045, `application/review_decision.py`,
+       `REWORK_ROUTING_SPEC.md` §1–§3, `EVALUATION_SPEC.md` §9, `ADAPTER_SPEC.md` §6,
+       `ADAPTER_ACCEPTANCE.md` §12 `RDF`, `tests/test_review_decision.py`). The maintainer chose
+       Reject = rework with the reason, and kept the approved escalation deferred. Original brief: `desk.fetch_decision(review_id)` → `Run.submit_review(...,
        by=Actor.HUMAN_REVIEWER, reason=...)` for the pending review, then `resume` — the Director
        already routes `APPROVED` (ADR-0044 §1) and `CHANGES_REQUESTED` (ADR-0032), so this is the
        application/entrypoint side only, probably next to `publish_pending_review`. Replaces/
@@ -683,7 +701,7 @@ process at the time, not a pattern to keep copying.)
        testing). A pending decision (`None`) leaves the Run at `WAITING_HUMAN` for the next
        invocation to check again. Decide there what a fetched `REJECTED` does to the Run — still
        deferred (ADR-0032, ADR-0044 §2) and a domain decision: ask, don't guess.
-    4. **Stage 10 acceptance** — a test in the `test_stage9_acceptance.py` shape (`S10A`,
+    4. **Stage 10 acceptance** — next. a test in the `test_stage9_acceptance.py` shape (`S10A`,
        `STAGE10_ACCEPTANCE.md`) against `InMemoryReviewDesk` for CI; a live Google Docs round-trip
        is the operator's manual check (needs real credentials, not available in this environment) —
        likely a `demo_notion.py`-style entrypoint, or an extension of it.
