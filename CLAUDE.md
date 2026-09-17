@@ -601,12 +601,38 @@ process at the time, not a pattern to keep copying.)
        role `demo_factory.py` plays for live LLM calls.
 
 14. **ROADMAP Stage 10 — Google Docs integration.** Next (ROADMAP order). Dependencies: Stages 6, 7
-    — both done. Same split as Stage 9: the `ReviewDesk` contract (`adapters/review_desk.py`,
-    ADR-0023) and its in-memory stub (`InMemoryReviewDesk`, ADR-0025) exist; missing are a real
-    implementation, its wiring (publish the candidate at `WAITING_HUMAN`, fetch the decision into
-    `Run.submit_review` — today only `--request-changes` plays the reviewer) and routing of a human
-    `APPROVED` / `REJECTED` into the Run's state (deferred since ADR-0038). Break it into subtasks
-    first (read ROADMAP Stage 10's DoD), as task 13 was.
+    — both done. Same shape as Stage 9 (task 13): the `ReviewDesk` contract
+    (`adapters/review_desk.py`, ADR-0023: `publish(ReviewPackage) -> str`,
+    `fetch_decision(review_id) -> ReviewDecision | None`) and its in-memory stub
+    (`InMemoryReviewDesk`, ADR-0025) exist; missing are a real implementation and its wiring. Two
+    real design decisions Notion's adapter didn't have to make — flag them, don't guess:
+    - **Auth is heavier.** Notion needed one bearer token; Google Docs/Drive needs OAuth2 or a
+      service account (credentials JSON, scopes, token refresh). Decide the mechanism as part of
+      14.1, following the `client_for_role`/`OMEMO_NOTION_*` convention of explicit env-sourced
+      config, never hardcoded.
+    - **There is no "Approve" button in a Google Doc.** `ReviewPackage`/`ReviewDecision` assume
+      *some* way to read a terminal decision back from the desk, but neither `ARCHITECTURE.md`
+      §3.11/§12/§13 nor `ADAPTER_SPEC.md` specify the mechanism (a comment? a marker line the
+      reviewer types/selects? a suggestion?). This needs its own small ADR before 14.1 writes code,
+      not an improvised choice buried in the implementation.
+    Subtasks:
+    1. **Real `GoogleDocsReviewDesk`.** ADR first for the two decisions above, then the
+       implementation: `publish` creates/updates a Doc with the candidate content + brief + QA
+       flags (`ReviewPackage`'s existing fields) and returns its location; `fetch_decision` reads
+       whatever mechanism the ADR chose. Second non-Anthropic third-party surface after Notion —
+       decide the library (official `google-api-python-client` vs. raw REST) in this subtask.
+    2. **Publish wiring.** `WAITING_HUMAN` gets a real desk the way `WAITING_QA` got a real
+       evaluator (ADR-0038): `ContentDirector` (or an `application/` module analogous to
+       `qa_evaluation.py`) builds the `ReviewPackage` from the Run's candidate Artifact, brief and
+       the QA Evaluation's flags, and calls `desk.publish`.
+    3. **Decision-fetch wiring.** `desk.fetch_decision(review_id)` → `Run.submit_review(...)`,
+       replacing/complementing `demo_factory.py`'s manual `--request-changes` (which stays useful
+       for keyless/local testing). A pending decision (`None`) leaves the Run at `WAITING_HUMAN`
+       for the next invocation to check again — same shape as the QA-retry-on-resume pattern.
+    4. **Stage 10 acceptance** — a test in the `test_stage9_acceptance.py` shape (`S10A`,
+       `STAGE10_ACCEPTANCE.md`) against `InMemoryReviewDesk` for CI; a live Google Docs round-trip
+       is the operator's manual check (needs real credentials, not available in this environment) —
+       likely a `demo_notion.py`-style entrypoint, or an extension of it.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
