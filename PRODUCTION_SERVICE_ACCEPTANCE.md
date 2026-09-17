@@ -30,7 +30,7 @@
 
 | ID | Критерий |
 |---|---|
-| N8N-01 | В `n8n/` ровно два файла `*.workflow.json`; каждый — JSON-объект с `name`, `nodes`, `connections`, `active: false`. |
+| N8N-01 | В `n8n/` ровно два файла `*.workflow.json`; каждый — JSON-объект с `id` (разный у двух; без него `n8n import:workflow` падает на `NOT NULL constraint failed: workflow_entity.id`), `name`, `nodes`, `connections`, `active: false`. |
 | N8N-02 | Каждый воркфлоу — ровно два узла: триггер разрешённого типа (`notionTrigger` / `scheduleTrigger`) и `httpRequest`; соединение ровно триггер → запрос. |
 | N8N-03 | Запрос: `POST` на URL, чей путь — маршрут сервиса (`BRIEFS_ROUTE` / `SWEEP_ROUTE` из кода), авторизация — учётка Header Auth `Concept factory service`; в файле нет `Bearer`, `Authorization` и строк, похожих на токен. |
 | N8N-04 | `brief-ready`: Notion Trigger `pagedUpdatedInDatabase`, опрос `everyMinute`; тело — ровно параметр `brief_ref = ={{ $json.id }}`. `review-sweep`: Schedule Trigger по минутам с интервалом 5; тела нет. |

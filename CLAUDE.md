@@ -29,8 +29,11 @@ anything ahead of the queue below — see task 10.
   statuses + review link; an unready/unknown page → nothing; repeated polls after the core's own
   writes → no model call, no board write; an approval on the desk → sweep completes; changes
   requested → sweep reworks and links v2; a wrong credential → 401; a failing job does not stop the
-  worker; a restarted service sweeps a Run left waiting. No production code changed. A live n8n +
-  Notion round trip stays the operator's check (`n8n/README.md`).
+  worker; a restarted service sweeps a Run left waiting. No production code changed. **Checked once
+  against a real n8n 2.39.7** (local install, not CI): both files import and export back unchanged
+  (this found that `n8n import:workflow` needs a top-level workflow `id` — added, pinned by N8N-01),
+  and the activated sweep workflow called a live `factory_service.py` → `202` with the credential
+  resolved by name. A live Notion Trigger stays the operator's check (`n8n/README.md`).
 - **The core is an HTTP service n8n calls, and the n8n workflows are committed (ROADMAP Stage 11,
   ADR-0049; queue task 15.3).** `infrastructure/production_service.py` (stdlib `http.server`, no new
   dependency): `POST /v1/briefs {"brief_ref"}` and `POST /v1/reviews/sweep` answer `202` and queue

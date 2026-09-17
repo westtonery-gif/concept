@@ -38,10 +38,20 @@ write; an approval typed on the desk is picked up by the sweep; changes requeste
 sweep and the new link shown; a wrong credential is refused; a job that fails does not stop the
 worker; a restarted service's sweep finds a Run the previous process left waiting.
 
-A live n8n + Notion round trip, and importing both files into a real n8n, stay the operator's check
-(`n8n/README.md`); n8n is a Node application of several gigabytes and is not part of CI. The node
-parameter names in the files were taken from the `n8n-nodes-base` 2.15.1 sources (`notionTrigger`
-v1, `scheduleTrigger`, `httpRequest` V3 description), not guessed.
+The node parameter names were taken from the `n8n-nodes-base` sources, not guessed, and the files
+were then checked once against a real n8n 2.39.7 (a local install, not part of CI — several
+gigabytes):
+
+- `n8n import:workflow` of both files and `export:workflow` back: types, versions, parameters,
+  credentials by name and connections survive unchanged. This found that CLI import requires a
+  top-level workflow `id`; both files now carry one (`N8N-01`).
+- The sweep workflow, with only its port changed and its interval shortened to 10 s, was activated
+  under `n8n start` with a Header Auth credential named `Concept factory service`; n8n called a live
+  `factory_service.py` (fake model bindings), which logged `POST /v1/reviews/sweep` → `202`. The
+  credential resolves by name and the bearer token is accepted.
+
+A live Notion Trigger (needs a real Notion integration and database) stays the operator's check
+(`n8n/README.md`).
 
 ## Consequences
 

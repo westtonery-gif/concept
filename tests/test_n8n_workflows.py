@@ -46,8 +46,10 @@ def test_n8n_01_exactly_the_two_workflows_are_committed_inactive() -> None:
     assert sorted(N8N.glob("*.workflow.json")) == [BRIEF_READY, REVIEW_SWEEP]
     for path in (BRIEF_READY, REVIEW_SWEEP):
         workflow = _load(path)
-        assert {"name", "nodes", "connections", "active"} <= set(workflow)
+        assert {"id", "name", "nodes", "connections", "active"} <= set(workflow)
         assert workflow["active"] is False
+    ids = [_load(path)["id"] for path in (BRIEF_READY, REVIEW_SWEEP)]
+    assert len(set(ids)) == 2 and all(isinstance(i, str) and i.strip() for i in ids)
 
 
 @pytest.mark.parametrize("path", [BRIEF_READY, REVIEW_SWEEP], ids=lambda p: p.name)
