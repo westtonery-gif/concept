@@ -121,7 +121,8 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 `OMEMO_NOTION_READY_PROPERTY`, `OMEMO_NOTION_READY_VALUE`, `OMEMO_NOTION_RUN_STATUS_PROPERTY`,
 `OMEMO_NOTION_RUN_ID_PROPERTY` — все обязательны, без умолчаний; отсутствующие/пустые →
 `BriefBoardError` с их именами (значения и токен в сообщения и `repr` не попадают). Строится
-`composition.build_brief_board(environ)`; бриф → Run — `demo_notion.py`. Приёмка —
+`composition.build_brief_board(environ)`; бриф → Run — `application.brief_intake.produce_brief`
+(ADR-0042), вызываемый из `demo_notion.py`. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §8.
 
 **Обратная запись статусов (Этап 9, ADR-0041).** `BriefStatusReporter(store, board)`
@@ -144,9 +145,24 @@ Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без
 `omemo_content_factory.application.brief_status`, запись в `failed_reports`
 (`FailedReport(run_id, status, message)`), статус не считается показанным. Следующие `save` в том же
 статусе его **не** повторяют (иначе при отказе Notion каждый коммит ждал бы таймаут); его заменит
-отчёт о следующем статусе или повторит `sync`. Любое другое исключение доски пробрасывается. `demo_notion.py` оборачивает свой store и
-вызывает `sync(run)` в конце каждого запуска (в том числе после `MeasuredEvaluatorError`), печатая
-неудавшиеся отчёты. Приёмка — `ADAPTER_ACCEPTANCE.md` §9.
+отчёт о следующем статусе или повторит `sync`. Любое другое исключение доски пробрасывается. `demo_notion.py` оборачивает свой store, а
+`produce_brief` вызывает `sync(run)` в конце каждого запуска (в том числе после
+`MeasuredEvaluatorError`); демо печатает неудавшиеся отчёты. Приёмка — `ADAPTER_ACCEPTANCE.md` §9.
+
+**Приём брифа (Этап 9, ADR-0042).** `produce_brief(director, store, board, workflow, *, brief_ref,
+run_id) -> Run | None` (`application/brief_intake.py`), где `store` — `BriefStatusReporter`, через
+который коммитит `director`:
+
+| Случай | Поведение |
+|---|---|
+| Run под `run_id` не сохранён, `fetch_brief` → `None` | `None`: Run не создан, моделей и отчётов нет |
+| Run не сохранён, бриф есть | `Run.create(run_id, content_brief_ref=brief.brief_ref, workflow_version_ref=workflow.workflow_id)` + `execute_workflow(brief=brief.body)` |
+| сохранённый Run другого брифа | `BriefIntakeError`, Run не изменён |
+| сохранённый Run с Task | `resume_workflow` с входом первой Task |
+| сохранённый Run без Task (сбой до первой Task) | бриф запрашивается с доски заново; `None` → `BriefIntakeError`, Run не изменён |
+| конец: обычный возврат или `MeasuredEvaluatorError` | `store.sync(run)`, затем исключение (если было) пробрасывается; прочие исключения — без `sync` |
+
+Приёмка Этапа 9 — `STAGE9_ACCEPTANCE.md` (`S9A`).
 
 ## 6. `ReviewDesk` (`adapters/review_desk.py`)
 

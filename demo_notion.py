@@ -42,6 +42,7 @@ from demo_factory import (
 )
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError
+from omemo_content_factory.application.brief_intake import BriefIntakeError, produce_brief
 from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
@@ -108,38 +109,36 @@ def main(argv: Sequence[str] | None = None) -> None:
     safe_print("=" * 78)
     safe_print(f"Notion brief '{args.brief_ref}' -> Rin -> Leo -> QA")
     safe_print("=" * 78)
-    run = store.load(run_id)
+    stored = store.load(run_id)
     if args.request_changes is not None:
-        if not _request_changes(run, args.request_changes):
+        if not _request_changes(stored, args.request_changes):
             return
-        assert run is not None
-        store.save(run)
+        assert stored is not None
+        store.save(stored)
+    elif stored is not None:
+        location = run_store_path(os.environ)
+        safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
+        safe_print("committed steps are not run again. Delete that file to start over.")
     try:
-        if run is None:
-            brief = board.fetch_brief(args.brief_ref)
-            if brief is None:
-                safe_print(
-                    f"No producible brief '{args.brief_ref}' on the board — "
-                    "not found, not ready, or has no text."
-                )
-                return
-            run = Run.create(
-                run_id=run_id,
-                content_brief_ref=brief.brief_ref,
-                workflow_version_ref=WORKFLOW.workflow_id,
-            )
-            director.execute_workflow(run, WORKFLOW, brief=brief.body)
-        else:
-            location = run_store_path(os.environ)
-            safe_print(f"Resuming {run_id} from {location} at '{run.status.value}';")
-            safe_print("committed steps are not run again. Delete that file to start over.")
-            director.resume_workflow(run, WORKFLOW, brief="")
+        run = produce_brief(
+            director, store, board, WORKFLOW, brief_ref=args.brief_ref, run_id=run_id
+        )
+    except BriefIntakeError as exc:
+        safe_print(f"Cannot produce brief '{args.brief_ref}': {exc}")
+        return
     except MeasuredEvaluatorError as exc:
         safe_print(f"QA gave no verdict ({type(exc).__name__}: {exc}).")
         safe_print(
             "The Run stays at WAITING_QA with its Evaluation PENDING; run again to ask QA again."
         )
-    store.sync(run)
+        run = store.load(run_id)
+        assert run is not None
+    if run is None:
+        safe_print(
+            f"No producible brief '{args.brief_ref}' on the board — "
+            "not found, not ready, or has no text."
+        )
+        return
     show_run(run)
     _show_quality_gate(run)
     _show_model_calls(run)

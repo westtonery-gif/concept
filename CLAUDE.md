@@ -21,6 +21,18 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **ROADMAP Stage 9 (Notion) is closed (ADR-0042).** `tests/test_stage9_acceptance.py` (`S9A`,
+  `STAGE9_ACCEPTANCE.md`) files a brief on `InMemoryBriefBoard` and produces it only through the new
+  `application/brief_intake.py` `produce_brief(director, store, board, workflow, *, brief_ref,
+  run_id)` on Stage 8's production path (bundled Prompts, real `AnthropicLLMClient`s with scripted
+  transport, real `SqliteRunStore` under `BriefStatusReporter`, restarts): valid Run, every status on
+  the board, unproducible brief → nothing, rework across a restart, QA error parked + shown, board
+  outage never stops the Run and is caught up next invocation, foreign `run_id` refused. **Gap found
+  and fixed:** `demo_notion.py` used to resume with `brief=""`, so a crash between the `queued`
+  commit and the first Task's start would run Rin on an empty brief. `produce_brief` now resumes on
+  the first Task's stored input, or — no Task yet — fetches the brief from the board again
+  (unproducible → `BriefIntakeError`, Run untouched). `demo_notion.py` delegates to it. A live
+  Notion round-trip stays the operator's check. Suite: 958 passed.
 - **Run statuses are written back to the Notion brief (ROADMAP Stage 9, ADR-0041; queue task
   13.3).** `application/brief_status.py` `BriefStatusReporter(store, board)` is itself a
   `RunStore`: `save` saves through the wrapped store, **then** reports `run.status` on
@@ -92,7 +104,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 41 ADRs (0001–0041) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 42 ADRs (0001–0042) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -104,8 +116,8 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040) and the status write-back (0041) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (948 passed,
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040), the status write-back (0041) and the Stage 9 acceptance + brief intake (0042) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (958 passed,
   0 skipped).
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -532,7 +544,7 @@ process at the time, not a pattern to keep copying.)
        health mention, and `content_researcher.py`'s "омемо"→"OMEMO" terminology-glossary
        invocation (a Skill invocation, not Prompt text).
 
-13. **ROADMAP Stage 9 — Notion integration.** Next (ROADMAP order). Dependencies: Stages 6, 7 —
+13. ~~**ROADMAP Stage 9 — Notion integration.**~~ — done (closed by subtask 4 below, ADR-0042). (ROADMAP order.) Dependencies: Stages 6, 7 —
     both done. The `BriefBoard` contract already exists (`adapters/brief_board.py`, ADR-0023:
     `fetch_brief(brief_ref) -> IncomingBrief | None`, `report_status(brief_ref, *, run_id,
     status)`) and has an in-memory stub (`InMemoryBriefBoard`, ADR-0025) — what's missing is a
@@ -575,12 +587,26 @@ process at the time, not a pattern to keep copying.)
        retried by `sync`, not by every later commit. Original brief: decide which `Run` transitions
        get reported (every one, or only `QUEUED`/`WAITING_HUMAN`/`COMPLETED`/`FAILED`) and wire
        `report_status` into the entrypoint or `ContentDirector`.
-    4. **Stage 9 acceptance** — next. — a test in the `test_stage8_acceptance.py` shape proving the DoD
+    4. ~~**Stage 9 acceptance**~~ — done (ADR-0042, `STAGE9_ACCEPTANCE.md`,
+       `tests/test_stage9_acceptance.py` `S9A`, `application/brief_intake.py`). Unlike Stage 8 it
+       found a gap: the brief → Run flow lived untested in `demo_notion.py`'s `main` and resumed on
+       `brief=""`, so a crash before the first Task ran Rin on an empty brief. Extracted into
+       `produce_brief` (resume uses the first Task's input, or re-fetches the brief when no Task
+       exists). Storing the brief body in the Run was rejected (snapshot format bump for a
+       two-commit window). Original brief: a test in the `test_stage8_acceptance.py` shape proving the DoD
        (a filed brief produces a valid Run; statuses land back on the board), run against
        `InMemoryBriefBoard` for CI like Stage 8 used scripted transport under a real
        `AnthropicLLMClient`. A live Notion round-trip is the operator's manual check afterward
        (needs a real integration token + database — not available in this environment), the same
        role `demo_factory.py` plays for live LLM calls.
+
+14. **ROADMAP Stage 10 — Google Docs integration.** Next (ROADMAP order). Dependencies: Stages 6, 7
+    — both done. Same split as Stage 9: the `ReviewDesk` contract (`adapters/review_desk.py`,
+    ADR-0023) and its in-memory stub (`InMemoryReviewDesk`, ADR-0025) exist; missing are a real
+    implementation, its wiring (publish the candidate at `WAITING_HUMAN`, fetch the decision into
+    `Run.submit_review` — today only `--request-changes` plays the reviewer) and routing of a human
+    `APPROVED` / `REJECTED` into the Run's state (deferred since ADR-0038). Break it into subtasks
+    first (read ROADMAP Stage 10's DoD), as task 13 was.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
