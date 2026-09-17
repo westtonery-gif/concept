@@ -722,8 +722,39 @@ process at the time, not a pattern to keep copying.)
        is the operator's manual check (needs real credentials, not available in this environment) —
        likely a `demo_notion.py`-style entrypoint, or an extension of it.
 
-15. **ROADMAP Stage 11 — n8n integration.** Next (ROADMAP order). Not broken into subtasks yet —
-    read ROADMAP.md Stage 11 and break it down (a `docs:` commit, as task 14 was) before writing code.
+15. **ROADMAP Stage 11 — n8n integration.** Next (ROADMAP order). Dependencies: Stages 9, 10 —
+    both done. **Different shape from tasks 13/14**: n8n is an external tool with its own UI/JSON
+    workflow config, entirely outside this repo — there is no "adapter contract" to implement for
+    it, and per `ARCHITECTURE.md` §12 the interaction is deliberately described **without an API
+    spec**. What the repo *does* owe (§3.2/§3.3): a real, externally-invokable entry point n8n can
+    call — today there is none; `demo_notion.py` is a script a human runs by hand, not something
+    an automation trigger reaches. Subtasks:
+    1. **Trigger-mechanism decision — needs an ADR, and probably the maintainer's input, not a
+       unilateral pick.** n8n can reach the core two ways: an **Execute Command** node shelling
+       out to a CLI (reuses `produce_brief`'s existing entrypoint shape, e.g. `demo_notion.py
+       <brief_ref>` on a host n8n can reach — no new dependency), or an **HTTP Request** node
+       hitting a webhook (needs a new web-framework dependency — `PROJECT.md` §5 explicitly gates
+       introducing a framework on "proven necessity", not by default). Recommendation to weigh,
+       not a decision made here: CLI is the smaller step and both `produce_brief` (idempotent via
+       `run_id`) and the QA/review resume paths already tolerate being invoked repeatedly/on a
+       schedule — but this is also a deployment question (where does n8n run relative to this
+       code?) the maintainer may have an opinion on.
+    2. **Status **and link** propagation — check for a real gap before building anything.**
+       ROADMAP's DoD says both statuses *and links* move automatically. `BriefStatusReporter`
+       (ADR-0041) already writes `RunStatus` back to Notion, but check whether the Google Docs
+       review location `ReviewDesk.publish` returns ever reaches Notion anywhere — if not (likely:
+       `report_status`'s signature is status-only, no location field), that's a real hole to close
+       (extend the reporting path, not necessarily the `BriefBoard` contract itself) before this
+       stage's DoD can be honestly called met.
+    3. **Document the n8n side (not pytest).** The actual "Notion event → n8n → trigger" wiring is
+       n8n's own workflow JSON, configured in its UI — not Python, not this repo's test suite.
+       What this subtask owes is documentation (a short ops doc or a README section) of exactly
+       what an n8n workflow needs to call, given subtask 1's chosen mechanism, plus confirmation
+       that the trigger entrypoint is safe to invoke unattended/on a schedule (idempotent, no
+       duplicate side effects — should already hold, verify rather than assume).
+    4. **Stage 11 "acceptance"** is therefore lighter than S9A/S10A's shape: a test proving the
+       chosen trigger entrypoint does the right thing when invoked repeatedly/concurrently-ish
+       against the same brief (CI-testable, no real n8n needed), not an end-to-end n8n round-trip.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
