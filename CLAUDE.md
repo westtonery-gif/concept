@@ -457,15 +457,33 @@ process at the time, not a pattern to keep copying.)
        `WAITING_HUMAN` with escalation and, on `CHANGES_REQUESTED`, drives a real rework loop
        (ADR-0032) — covered with a realistic evaluator, not necessarily a live API call.
 
-12. **Retarget the v1 Prompts to the new domain (follow-up of ADR-0037).** `qa-agent` v1 judges
-    "материал о здоровье" on medical-claim criteria; `content-researcher` and `script-writer` v1
-    both open with "Ты … видео-фабрики OMEMO". The charter no longer says either. Add **v2** of each
-    in `prompts/catalogue.toml` — never edit a v1 (ADR-0030/0035 immutability: past Runs must stay
-    reproducible) — and point the roles at them. Criteria for `qa-agent` v2 are now decidable without
-    domain expertise: uniqueness (not templated, not a repeat of the client's own or a competitor's
-    material), factual correctness, no unsubstantiated claims, the client's editorial rules;
-    regulated-niche rules only when a client profile supplies them. This is also the **first real
-    Prompt-version bump**, so it exercises the store's versioning path end to end.
+12. **Retarget the Prompts to the new domain (follow-up of ADR-0037) — corrected mechanism.**
+    `qa-agent` v1 judges "материал о здоровье" on medical-claim criteria; `content-researcher` and
+    `script-writer` v1 both open with "Ты … видео-фабрики OMEMO". The charter no longer says
+    either. **Correction to how this was previously described here:** `PROMPT_STORE_SPEC.md`
+    §1/§3 allows **exactly one active record per `prompt_id`** in `catalogue.toml` (history/version
+    selection explicitly out of scope), and `agents/*.py` reference a Prompt by bare id
+    (`PROMPT_REF = "qa-agent"`, no version) — the version comes entirely from whatever is
+    currently in the catalogue. So there is no "add v2 alongside v1" and no "point the role at
+    it" step: **bumping the version is editing that one TOML record's `version` + `system` +
+    `user_template` fields in place.** A past Run's trace stays honest because it already recorded
+    `<prompt_id>@v<n>` at the time it ran (ADR-0029 §`_prompt_version_ref`), not because old text
+    is still loadable — that history lives in git, not in the live catalogue. No `agents/*.py`
+    change needed; no new ADR needed either (this is content, reviewed like code per PROJECT.md
+    §15, not an architectural decision — ADR-0035 was for introducing the *role*, not its wording).
+    Subtasks:
+    1. **`qa-agent` → v2.** New criteria per `PROJECT.md` 1.3 §1/§4 п.9: uniqueness (not
+       templated, not a repeat of the client's own or a competitor's material), factual
+       correctness, no unsubstantiated claims, the client's editorial rules; regulated-niche rules
+       only when a client profile supplies them (none exists yet, so don't invent one). Must still
+       produce the exact `QA_VERDICT_FIELDS` grammar `decode_verdict` parses (ADR-0034) —
+       `tests/test_qa_agent.py` (`QAR`) pins Prompt/Schema *consistency*, not wording, so it
+       should stay green untouched, but re-run it.
+    2. **`content-researcher` + `script-writer` → v2.** Drop "видео-фабрики OMEMO" and the
+       health-adjacent framing; keep the shape (audience/angle; title/hook/script) since that's
+       still generically useful, not health-specific. Two role prompts, one coherent change.
+    3. **Verify end to end** — `demo_factory.py` (or a keyless test run) shows `@v2` in the
+       printed prompt_ref/trace for all three roles; full quality gate green.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
