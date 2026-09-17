@@ -50,3 +50,20 @@ writes nothing (ADR-0047, ADR-0048).
   queue.
 - The service log has one line per produced brief. In Notion, the brief's *Run status* moves through
   `queued` … `waiting_human`, and its review link property points at the Google Doc.
+
+## Operator verification log
+
+`CLAUDE.md`'s Stage 11 note ("A live Notion Trigger stays the operator's check") is tracked here as
+it's actually done, step by step against the Setup list above — not all at once.
+
+- **2026-09-17 — step 2 (Notion API credential), partially done.** Created the Notion integration
+  `concept` (Internal Integration Secret) at `notion.com/my-integrations` and granted its Content
+  access to the brief database `New database` (id `3de64b74a905809daaa5f749653c1f29`, workspace
+  `Immiray's Space`). Created a **Notion API** credential in n8n with that token; n8n's own
+  credential test reported "Connection tested successfully" and the credential was saved.
+  **Deviation from the Setup steps:** the credential is currently named `Notion account`, not
+  `Concept Notion (read)` — rename it (or recreate it under that name) before importing the
+  workflow files, since both JSON files reference the credential **by name**. The Header Auth
+  credential (`Concept factory service`), `factory_service.py`, the workflow import/placeholder
+  edits, activation and an actual triggered request are **not done yet** — still open for the next
+  pass at this same list.
