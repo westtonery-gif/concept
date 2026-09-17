@@ -35,6 +35,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TypeAlias
 
+from omemo_content_factory.adapters.brief_board import BriefBoard
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
@@ -52,6 +53,10 @@ from omemo_content_factory.infrastructure.llm import (
     LLMArtifactEvaluator,
     LLMClient,
     LLMTaskExecutor,
+)
+from omemo_content_factory.infrastructure.notion_brief_board import (
+    NotionBriefBoard,
+    notion_settings_from_env,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 from omemo_content_factory.tools.contract import Tool
@@ -201,6 +206,16 @@ def build_run_store(environ: Mapping[str, str]) -> RunStore:
     path = run_store_path(environ)
     path.parent.mkdir(parents=True, exist_ok=True)
     return SqliteRunStore(path)
+
+
+def build_brief_board(environ: Mapping[str, str]) -> BriefBoard:
+    """Build the ``BriefBoard`` a real entrypoint reads briefs from (ROADMAP Stage 9, ADR-0040).
+
+    Reads the six ``OMEMO_NOTION_*`` variables (:func:`notion_settings_from_env`); a missing or
+    blank one fails closed with ``BriefBoardError`` before any request is made, same shape as
+    :func:`client_for_role`'s fail-closed binding.
+    """
+    return NotionBriefBoard(notion_settings_from_env(environ))
 
 
 def build_executor_map(

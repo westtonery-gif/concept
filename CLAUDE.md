@@ -540,10 +540,19 @@ process at the time, not a pattern to keep copying.)
        package or do network I/O, per `tests/test_adapter_contract.py`'s boundary). Needs its own
        ADR + spec/acceptance, mirroring ADR-0024's realization pattern; auth via env vars
        following the `client_for_role`/`OMEMO_PROVIDER__` convention, not hardcoded.
-    2. **Brief → Run entrypoint.** `board.fetch_brief(ref)` → `Run.create(content_brief_ref=…)` →
-       through `ContentDirector`, the way `demo_factory.py` does today with a hardcoded `BRIEF` —
-       except the brief now comes from Notion. Could extend `demo_factory.py` or add a dedicated
-       entrypoint; either way it's the first real "core reads its input from the outside" path.
+    2. ~~**Brief → Run entrypoint**~~ — done. `composition.build_brief_board(environ)` (mirrors
+       `build_run_store`) plus a dedicated `demo_notion.py` (not a `demo_factory.py` edit — kept
+       the hardcoded-brief demo intact, imported its executor/QA-building/reviewer-request
+       helpers instead of duplicating them): `board.fetch_brief(brief_ref)` → `Run.create` →
+       `execute_workflow`/`resume_workflow`, exactly `demo_factory.py`'s shape with the brief
+       sourced from Notion (a missing/not-ready/textless brief is the same `None`, printed and a
+       clean exit). `run_id = f"run-notion-{brief_ref}"` keyed by brief so a re-run resumes the
+       same Run. Verified end to end against a local fake-Notion HTTP server with
+       `OMEMO_PROVIDER__*=fake` for all three roles (throwaway script, not committed): brief
+       fetched over real HTTP → Rin/Leo executed → QA correctly rejected `FakeLLMClient`'s
+       non-grammar verdict and parked at `WAITING_QA` (fail-closed, ADR-0038) → second run resumed
+       without re-executing Rin/Leo, asked QA again. README documents the new entrypoint.
+       Status write-back is explicitly out of scope here — that's 13.3, next.
     3. **Status write-back — needs a design decision.** Decide which `Run` transitions get
        reported to Notion (every one, like Storage's per-step commits, ADR-0026 §2? or only
        terminal/human-facing states — `QUEUED`/`WAITING_HUMAN`/`COMPLETED`/`FAILED`?) and wire

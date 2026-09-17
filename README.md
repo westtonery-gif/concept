@@ -197,6 +197,32 @@ A role with no `OMEMO_PROVIDER__<ROLE>` binding fails closed
 (`ProviderModelSelectionError`) — the demo prints the exact exports each role still needs and
 exits cleanly, same as it does when `ANTHROPIC_API_KEY` is missing.
 
+## Running the Notion demo
+
+`demo_notion.py` runs the same real Rin → Leo → QA Workflow, but the brief comes from a real
+Notion database instead of a hardcoded string — the first real "core reads its input from the
+outside" path (ROADMAP Stage 9, ADR-0040). Everything else (roles, QA gate, rework, Run store) is
+exactly `demo_factory.py`, reused rather than duplicated.
+
+```bash
+# same ANTHROPIC_API_KEY / OMEMO_PROVIDER__* / pricing exports as demo_factory.py, plus:
+export OMEMO_NOTION_TOKEN=secret_...
+export OMEMO_NOTION_DATABASE_ID=...
+export OMEMO_NOTION_READY_PROPERTY=Stage
+export OMEMO_NOTION_READY_VALUE="Ready for production"
+export OMEMO_NOTION_RUN_STATUS_PROPERTY="Run status"
+export OMEMO_NOTION_RUN_ID_PROPERTY="Run id"
+python demo_notion.py <notion-page-id>
+```
+
+A brief that is not on the board, not marked ready, or has no text all print the same message and
+exit cleanly (`BriefBoard.fetch_brief` returns `None` for each, deliberately indistinguishable —
+ADR-0040 §3). `--request-changes "<instructions>"` works the same as in `demo_factory.py`.
+
+**Not done here:** writing the Run's status back onto the Notion page (`BriefBoard.report_status`
+exists and is tested, ADR-0040, but nothing calls it yet — which transitions to report is its own
+design decision, CLAUDE.md queue subtask 13.3).
+
 ## Project layout
 
 ```
@@ -232,6 +258,7 @@ omemo-content-factory/
 │       └── infrastructure/     # LLM executor + SQLite RunStore + in-memory adapter stubs
 ├── demo.py                     # End-to-end demo of the domain via ContentDirector
 ├── demo_factory.py             # Same, but through the real catalogued Rin -> Leo roles
+├── demo_notion.py              # Same, but the brief is fetched from a real Notion database
 └── tests/                      # pytest suite
 ```
 
