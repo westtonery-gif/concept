@@ -62,8 +62,11 @@ from omemo_content_factory.application.brief_intake import BriefIntakeError, pro
 from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
-from omemo_content_factory.application.review_decision import apply_review_decision
-from omemo_content_factory.application.review_publication import publish_pending_review
+from omemo_content_factory.application.review_decision import take_review_decision
+from omemo_content_factory.application.review_publication import (
+    pending_review,
+    publish_pending_review,
+)
 from omemo_content_factory.composition import (
     build_brief_board,
     build_review_desk,
@@ -184,37 +187,32 @@ def _prepare_stored_run(
         location = run_store_path(os.environ)
         safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
         safe_print("committed steps are not run again. Delete that file to start over.")
-        if desk is not None and _read_decision(desk, stored):
-            store.save(stored)
+        if desk is not None:
+            _read_decision(store, desk, stored)
     return True
 
 
-def _read_decision(desk: ReviewDesk, run: Run) -> bool:
-    """Read the reviewer's decision from the desk into ``run``; whether it was recorded (ADR-0045).
-
-    The pending review is published first, so one a crash left unpublished can be read at all.
-    """
+def _read_decision(store: BriefStatusReporter, desk: ReviewDesk, stored: Run) -> None:
+    """Read the reviewer's decision from the desk into the stored Run and save it (ADR-0046)."""
     try:
-        publish_pending_review(run, desk)
-        fetched = apply_review_decision(run, desk)
+        fetched = take_review_decision(store, desk, stored.run_id)
     except ReviewDeskError as exc:
         safe_print(f"Google Docs refused to give the reviewer's decision: {exc}")
         safe_print("The Run keeps waiting; run again to retry.")
-        return False
+        return
     if fetched is None:
-        if run.status is RunStatus.WAITING_HUMAN:
+        if pending_review(stored) is not None:
             safe_print("The reviewer has not decided yet; the Run keeps waiting.")
-        return False
+        return
     if not fetched.applied:
         safe_print(
             f"The Doc approves {fetched.review_id}, but QA did not pass this candidate, so it "
             "cannot be approved."
         )
         safe_print("Change the Doc's decision to 'доработать' or 'отклонено' (ADR-0045 §3).")
-        return False
+        return
     reason = "" if fetched.reason is None else f": {fetched.reason}"
     safe_print(f"The Doc decides {fetched.decision.value} on {fetched.review_id}{reason}")
-    return True
 
 
 def _publish_review(desk: ReviewDesk | None, run: Run) -> None:

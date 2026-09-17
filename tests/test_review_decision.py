@@ -22,6 +22,7 @@ from omemo_content_factory.application.qa_evaluation import EvaluationResult
 from omemo_content_factory.application.review_decision import (
     FetchedDecision,
     apply_review_decision,
+    take_review_decision,
 )
 from omemo_content_factory.application.review_publication import publish_pending_review
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -235,3 +236,74 @@ def test_rdf_07_a_decision_is_read_after_a_restart_and_only_once() -> None:
 
     assert apply_review_decision(restored, desk) is None
     assert desk.fetches == fetches
+
+
+def _stored_waiting(verdict: EvaluationStatus = PASSED) -> tuple[RecordingStore, ReviewId]:
+    """A stored Run waiting at the Approval Gate whose review was never published (a crash)."""
+    store = RecordingStore()
+    run = Run.create(run_id=RUN_ID, content_brief_ref="brief-rdf", workflow_version_ref="rdf@v1")
+    binding = SchemaBinding("s@v1", _schema())
+    ContentDirector(
+        Executor(),
+        {"researcher@v1": binding, "writer@v1": binding},
+        qa=Evaluator([verdict]),
+        store=store,
+    ).execute(run, REQUESTS)
+    return store, run.human_reviews[-1].review_id
+
+
+def test_rdf_08_taking_a_decision_without_a_stored_run_never_calls_the_desk() -> None:
+    store, desk = RecordingStore(), CountingDesk()
+
+    assert take_review_decision(store, desk, RUN_ID) is None
+    assert (desk.fetches, store.snapshots) == (0, [])
+
+
+def test_rdf_08_taking_a_decision_publishes_first_and_saves_nothing_while_undecided() -> None:
+    store, review_id = _stored_waiting()
+    desk = CountingDesk()
+    saves = len(store.snapshots)
+
+    assert take_review_decision(store, desk, RUN_ID) is None
+    assert desk.inner.published(review_id) is not None
+    assert desk.fetches == 1
+    assert len(store.snapshots) == saves
+
+
+def test_rdf_08_a_recorded_decision_is_saved_once_and_a_refused_one_is_not() -> None:
+    store, review_id = _stored_waiting()
+    desk = CountingDesk()
+    take_review_decision(store, desk, RUN_ID)
+    desk.inner.decide(review_id, ReviewDecision(ReviewStatus.APPROVED))
+    saves = len(store.snapshots)
+
+    fetched = take_review_decision(store, desk, RUN_ID)
+
+    assert fetched == FetchedDecision(review_id, ReviewStatus.APPROVED, None, True)
+    assert len(store.snapshots) == saves + 1
+    saved = store.load(RUN_ID)
+    assert saved is not None and saved.human_review(review_id).status is ReviewStatus.APPROVED
+
+    flagged_store, flagged_review = _stored_waiting(FLAGGED)
+    flagged_desk = CountingDesk()
+    take_review_decision(flagged_store, flagged_desk, RUN_ID)
+    flagged_desk.inner.decide(flagged_review, ReviewDecision(ReviewStatus.APPROVED))
+    before = list(flagged_store.snapshots)
+
+    refused = take_review_decision(flagged_store, flagged_desk, RUN_ID)
+
+    assert refused is not None and not refused.applied
+    assert flagged_store.snapshots == before
+
+
+def test_rdf_08_a_desk_outage_while_taking_a_decision_saves_nothing() -> None:
+    store, review_id = _stored_waiting()
+    desk = CountingDesk()
+    take_review_decision(store, desk, RUN_ID)
+    desk.inner.decide(review_id, ReviewDecision(ReviewStatus.APPROVED))
+    desk.down = True
+    before = list(store.snapshots)
+
+    with pytest.raises(ReviewDeskError, match="desk is down"):
+        take_review_decision(store, desk, RUN_ID)
+    assert store.snapshots == before

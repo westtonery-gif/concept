@@ -11,7 +11,8 @@ fail-closed gate would refuse it, and a recorded approval would leave the Run wi
 for the reviewer to change their mind on (ADR-0045 §3). The review stays ``PENDING``.
 
 The Run is changed in memory only; the caller saves it and resumes. A ``ReviewDeskError`` propagates
-with the Run untouched. Nothing here is specific to Google Docs.
+with the Run untouched. ``take_review_decision`` is that caller's first half for a stored Run —
+publish, apply, save (ADR-0046). Nothing here is specific to Google Docs.
 """
 
 from __future__ import annotations
@@ -19,7 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from omemo_content_factory.adapters.review_desk import ReviewDesk
-from omemo_content_factory.application.review_publication import latest_qa, pending_review
+from omemo_content_factory.adapters.run_store import RunStore
+from omemo_content_factory.application.review_publication import (
+    latest_qa,
+    pending_review,
+    publish_pending_review,
+)
 from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewId, ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run
@@ -58,3 +64,21 @@ def apply_review_decision(run: Run, desk: ReviewDesk) -> FetchedDecision | None:
         review.review_id, fetched.decision, by=Actor.HUMAN_REVIEWER, reason=fetched.reason
     )
     return FetchedDecision(review.review_id, fetched.decision, fetched.reason, True)
+
+
+def take_review_decision(store: RunStore, desk: ReviewDesk, run_id: str) -> FetchedDecision | None:
+    """Read the desk's decision into the stored Run ``run_id`` and save it (ADR-0046 §1).
+
+    No stored Run → ``None`` without calling the desk. Otherwise the pending review is published
+    first — idempotent, and it makes a review a crash left unpublished readable (ADR-0045 §4) — then
+    ``apply_review_decision``; the Run is saved only when the decision was recorded. The caller
+    resumes the Run afterwards. A ``ReviewDeskError`` propagates and nothing is saved.
+    """
+    run = store.load(run_id)
+    if run is None:
+        return None
+    publish_pending_review(run, desk)
+    fetched = apply_review_decision(run, desk)
+    if fetched is not None and fetched.applied:
+        store.save(run)
+    return fetched

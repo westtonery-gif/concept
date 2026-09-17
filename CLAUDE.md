@@ -21,6 +21,19 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **ROADMAP Stage 10 (Google Docs) is closed (ADR-0046).** `tests/test_stage10_acceptance.py`
+  (`S10A`, `STAGE10_ACCEPTANCE.md`) reuses S9A's production path and adds a review desk
+  (`InMemoryReviewDesk` subclassed to play a Doc: the decision line can be retyped, the desk can go
+  down). Every invocation does what `demo_notion.py` does: `take_review_decision` → `produce_brief` →
+  `publish_pending_review`. Covered: publication with brief/flags/version; undecided; approve →
+  `COMPLETED`; changes/reject → rework, v2 published with `supersedes_ref`; an approval QA did not
+  pass, then retyped; lost publication; desk outage while reading; crash after the decision is saved;
+  rejections past the rework bound → `FAILED`. **Extracted:** the entrypoint's "publish → apply →
+  save only when applied" step is now `application/review_decision.py`
+  `take_review_decision(store, desk, run_id)` (`RDF-08`); `demo_notion.py` delegates and no longer
+  says "not decided yet" after a crash left a recorded decision unresumed. **Noted, kept:** the
+  in-memory stub's "first decision is final" (ADR-0025 §3) cannot model ADR-0045 §3's retyped Doc.
+  A live Google Docs round-trip is the operator's check. Suite: 1055 passed.
 - **The reviewer's decision is read back from the desk, and a Reject is reworked (ROADMAP Stage 10,
   ADR-0045; queue task 14.3).** Two domain calls **asked, not guessed** — the maintainer chose:
   (1) `REJECTED` routes like `CHANGES_REQUESTED` (ARCHITECTURE §13 / DOMAIN_MODEL §2.14): rework of
@@ -158,7 +171,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 45 ADRs (0001–0045) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 46 ADRs (0001–0046) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -654,7 +667,7 @@ process at the time, not a pattern to keep copying.)
        (needs a real integration token + database — not available in this environment), the same
        role `demo_factory.py` plays for live LLM calls.
 
-14. **ROADMAP Stage 10 — Google Docs integration.** Next (ROADMAP order). Dependencies: Stages 6, 7
+14. ~~**ROADMAP Stage 10 — Google Docs integration.**~~ — done (closed by subtask 4 below, ADR-0046). (ROADMAP order.) Dependencies: Stages 6, 7
     — both done. Same shape as Stage 9 (task 13): the `ReviewDesk` contract
     (`adapters/review_desk.py`, ADR-0023: `publish(ReviewPackage) -> str`,
     `fetch_decision(review_id) -> ReviewDecision | None`) and its in-memory stub
@@ -701,10 +714,16 @@ process at the time, not a pattern to keep copying.)
        testing). A pending decision (`None`) leaves the Run at `WAITING_HUMAN` for the next
        invocation to check again. Decide there what a fetched `REJECTED` does to the Run — still
        deferred (ADR-0032, ADR-0044 §2) and a domain decision: ask, don't guess.
-    4. **Stage 10 acceptance** — next. a test in the `test_stage9_acceptance.py` shape (`S10A`,
+    4. ~~**Stage 10 acceptance**~~ — done (ADR-0046, `STAGE10_ACCEPTANCE.md`,
+       `tests/test_stage10_acceptance.py` `S10A`, `take_review_decision`). Found: the entrypoint's
+       decision step was untested demo code (extracted), and a wrong "not decided yet" message after
+       a crash. Original brief: a test in the `test_stage9_acceptance.py` shape (`S10A`,
        `STAGE10_ACCEPTANCE.md`) against `InMemoryReviewDesk` for CI; a live Google Docs round-trip
        is the operator's manual check (needs real credentials, not available in this environment) —
        likely a `demo_notion.py`-style entrypoint, or an extension of it.
+
+15. **ROADMAP Stage 11 — n8n integration.** Next (ROADMAP order). Not broken into subtasks yet —
+    read ROADMAP.md Stage 11 and break it down (a `docs:` commit, as task 14 was) before writing code.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
