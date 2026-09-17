@@ -21,6 +21,21 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **A real Notion `BriefBoard` exists (ROADMAP Stage 9, ADR-0040; queue task 13.1) — not wired
+  yet.** `infrastructure/notion_brief_board.py` `NotionBriefBoard` speaks the Notion REST API
+  through stdlib `urllib` (**no new dependency** — `notion-client` was rejected: three endpoints,
+  and it would drag in `httpx`), `Notion-Version: 2022-06-28` pinned. A brief is a page of the
+  configured database; ready = a `status`/`select` property holds the configured option; `body` =
+  text of top-level `rich_text` blocks (all listing pages; nested children deferred);
+  `report_status` overwrites two `rich_text` properties (status value + run id), so a repeat is
+  harmless. Not producible (blank ref, `404`, archived/trashed, other database, not ready, no text)
+  → `None`; misconfigured property, other non-2xx, network/timeout, bad JSON shape →
+  `BriefBoardError`; a report on a page not on the board / with bad properties is refused **before**
+  any `PATCH`. Refs are percent-encoded incl. dots (no path injection). `notion_settings_from_env`
+  needs all six `OMEMO_NOTION_*` variables (token, database id, ready property + value, run status +
+  run id properties) — no default property names; missing ones are named, the token never appears in
+  `repr`/messages. Tests: `tests/test_notion_brief_board.py` (`NBB`, `ADAPTER_ACCEPTANCE.md` §8)
+  run the real HTTP code against a local `ThreadingHTTPServer` playing Notion. Suite: 936 passed.
 - **The three production Prompts are retargeted to the business-agnostic domain (follow-up of
   ADR-0037; CLAUDE.md queue task 12 — content, no new ADR).** `prompts/catalogue.toml` now holds version 2 of
   `content-researcher`, `script-writer` and `qa-agent`, replacing each v1 record (the store holds
@@ -65,7 +80,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 39 ADRs (0001–0039) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 40 ADRs (0001–0040) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -77,8 +92,8 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038) and the Stage 8 acceptance (0039) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (892 passed,
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039) and the Notion `BriefBoard` (0040) are all
+  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (936 passed,
   0 skipped).
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -512,7 +527,12 @@ process at the time, not a pattern to keep copying.)
     **real** implementation and its wiring, the same split Storage went through (ADR-0024 real
     impl, then ADR-0026 wiring). No n8n at this stage (Stage 11) — a manual/direct trigger is
     fine. Subtasks:
-    1. **Real `NotionBriefBoard`.** First non-Anthropic third-party dependency (`pyproject.toml`
+    1. ~~**Real `NotionBriefBoard`.**~~ — done (ADR-0040, `infrastructure/notion_brief_board.py`,
+       `ADAPTER_SPEC.md` §5 "Реализация (Этап 9)", `ADAPTER_ACCEPTANCE.md` §8 `NBB`,
+       `tests/test_notion_brief_board.py`). Decided: **stdlib `urllib`, no new dependency**; body from
+       page blocks, readiness from a `status`/`select` property, statuses into two `rich_text`
+       properties; six required `OMEMO_NOTION_*` variables, no defaults. No Composition Root builder
+       yet — `build_brief_board(environ)` belongs to 13.2. Original brief: First non-Anthropic third-party dependency (`pyproject.toml`
        `dependencies` currently has only `anthropic`) — decide the Notion client library (official
        `notion-client` vs. raw HTTP) as part of this subtask, not before. Maps a Notion
        database entry to `IncomingBrief` (`brief_ref`, `body`) and writes `RunStatus` back to a

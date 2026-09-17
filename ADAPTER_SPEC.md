@@ -102,6 +102,27 @@ Evaluation, Analytics Record и их счётчиками (RUN_RESTORE_SPEC 1.1)
 ничего не записано; повтор последнего отчёта `(run_id, status)` не дублируется. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §6.
 
+**Реализация (Этап 9, ADR-0040).** `NotionBriefBoard` (`infrastructure/notion_brief_board.py`):
+Notion REST API через stdlib `urllib`, `Notion-Version: 2022-06-28`; без новой зависимости.
+`brief_ref` — id страницы (кодируется в путь целиком). «На доске» — неархивная, не удалённая
+страница настроенной базы; «готов» — свойство `status`/`select` равно настроенному значению;
+`body` — текст верхнеуровневых блоков с `rich_text`, по строке на блок, со всех страниц выдачи.
+`report_status` пишет `status.value` и `run_id` в два настроенных свойства `rich_text`
+(перезапись, поэтому повтор безвреден).
+
+| Случай | `fetch_brief` | `report_status` |
+|---|---|---|
+| пустой ref; `404`; архив/корзина; другая база | `None` | `BriefBoardError`, `PATCH` не отправлен |
+| не готов (пусто / другое значение); пустое тело | `None` | — |
+| свойство готовности/статуса отсутствует или не того типа | `BriefBoardError` | `BriefBoardError`, `PATCH` не отправлен |
+| иной не-2xx; сбой соединения/таймаут; ответ не JSON-объект или не той формы | `BriefBoardError` | `BriefBoardError` |
+
+Настройки — `notion_settings_from_env(environ)`: `OMEMO_NOTION_TOKEN`, `OMEMO_NOTION_DATABASE_ID`,
+`OMEMO_NOTION_READY_PROPERTY`, `OMEMO_NOTION_READY_VALUE`, `OMEMO_NOTION_RUN_STATUS_PROPERTY`,
+`OMEMO_NOTION_RUN_ID_PROPERTY` — все обязательны, без умолчаний; отсутствующие/пустые →
+`BriefBoardError` с их именами (значения и токен в сообщения и `repr` не попадают). Не проведён —
+задача 13.2. Приёмка — `ADAPTER_ACCEPTANCE.md` §8.
+
 ## 6. `ReviewDesk` (`adapters/review_desk.py`)
 
 | Метод | Поведение |
