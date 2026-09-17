@@ -21,6 +21,16 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **ROADMAP Stage 11 (n8n) is closed (ADR-0050).** `tests/test_stage11_acceptance.py` (`S11A`,
+  `STAGE11_ACCEPTANCE.md`) runs the real `ProductionService` over S10A's production path assembled as
+  `BriefProduction` + `build_run_index`, and **renders every request from the committed n8n workflow
+  files** (HTTP Request node's method/route/body; `={{ $json.id }}` from a Notion-Trigger-shaped
+  item; an unknown expression fails instead of being guessed). Covered: a ready page → Run +
+  statuses + review link; an unready/unknown page → nothing; repeated polls after the core's own
+  writes → no model call, no board write; an approval on the desk → sweep completes; changes
+  requested → sweep reworks and links v2; a wrong credential → 401; a failing job does not stop the
+  worker; a restarted service sweeps a Run left waiting. No production code changed. A live n8n +
+  Notion round trip stays the operator's check (`n8n/README.md`).
 - **The core is an HTTP service n8n calls, and the n8n workflows are committed (ROADMAP Stage 11,
   ADR-0049; queue task 15.3).** `infrastructure/production_service.py` (stdlib `http.server`, no new
   dependency): `POST /v1/briefs {"brief_ref"}` and `POST /v1/reviews/sweep` answer `202` and queue
@@ -208,7 +218,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 46 ADRs (0001–0046) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 50 ADRs (0001–0050) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -220,9 +230,11 @@ anything ahead of the queue below — see task 10.
   Schema bindings (0031), resumable QA/human rework routing (0032), invalid-Output contract
   errors + the Milestone M2 acceptance (0033), the QA verdict field contract (0034), the QA
   Agent role definition (0035) and QA call metrics attributed to the Evaluation +
-  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040), the status write-back (0041) and the Stage 9 acceptance + brief intake (0042) are all
-  implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest (958 passed,
-  0 skipped).
+  `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040), the status write-back (0041), the Stage 9 acceptance + brief intake (0042), the Google Docs desk
+  (0043), the held Approval Gate + publication (0044), the decision fetch + Reject routing (0045),
+  the Stage 10 acceptance (0046), the review link on the brief (0047), the brief invocation + Run
+  index (0048), the HTTP production service + n8n workflows (0049) and the Stage 11 acceptance
+  (0050) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
   `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
@@ -759,7 +771,7 @@ process at the time, not a pattern to keep copying.)
        is the operator's manual check (needs real credentials, not available in this environment) —
        likely a `demo_notion.py`-style entrypoint, or an extension of it.
 
-15. **ROADMAP Stage 11 — n8n integration.** (ROADMAP order.) Dependencies: Stages 9, 10 — both
+15. ~~**ROADMAP Stage 11 — n8n integration.**~~ — done (closed by subtask 4 below, ADR-0050). (ROADMAP order.) Dependencies: Stages 9, 10 — both
     done. (Supersedes the first breakdown of e31faa9, whose open trigger question is now answered;
     its gap check — the Doc link never reaches Notion — is confirmed and became 15.1.) DoD: creating
     a brief in Notion starts a `Run` through n8n automatically; business logic stays in the Content
@@ -790,15 +802,15 @@ process at the time, not a pattern to keep copying.)
        n8n workflows in `n8n/` (Notion Trigger → HTTP Request; Schedule Trigger → HTTP Request) and
        a static test that they hold only trigger + HTTP nodes calling the service's routes with a
        credential, no inline token and no logic nodes. ADR.
-    4. **Stage 11 acceptance** (`S11A`, `STAGE11_ACCEPTANCE.md`): the real service over HTTP on
+    4. ~~**Stage 11 acceptance**~~ — done (ADR-0050). (`S11A`, `STAGE11_ACCEPTANCE.md`): the real service over HTTP on
        S10A's production path, driven by requests rendered from the committed n8n workflows — a
        ready brief is produced and its link shown; an unready one does nothing; repeated triggers
        cause no second model call and no extra board write; a desk decision is picked up by the
        sweep; a wrong token is refused; a failing job does not stop the worker. A live n8n round
        trip stays the operator's check. ADR.
-16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** **Blocked on
-    task 15** — ROADMAP's own dependency list is Stages 1-11, and Stage 11 isn't done. Prepared
-    ahead of time so there's no organizing pause once 15 lands, not to be started before it.
+16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** Next —
+    task 15 (Stage 11) is closed (ADR-0050); the trigger mechanism 16.1 waits for is the HTTP
+    `factory_service.py` + the `n8n/` workflows, and S11A already drives it with production assets.
     **Audit finding (checked against the actual test files, not assumed):** `tests/test_
     stage10_acceptance.py` already runs the **entire** chain in one process per invocation — Notion
     brief intake → Rin → Leo → real QA → Google Docs publish → decision → completion/rework,
