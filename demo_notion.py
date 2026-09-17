@@ -28,18 +28,20 @@ again finds the same Doc. Without them the review stays in the Run store only; a
 desk is explained and the demo exits. A desk that refuses to publish never touches the Run — the
 refusal is printed and the next invocation tries again.
 
-With the desk configured and no reviewer flag given, a stored Run waiting for a human first has its
-review published (idempotent) and the reviewer's decision read from the Doc (ADR-0045): approved,
-changes requested or rejected is recorded, saved and routed by the resume that follows — a rework
-publishes the new version's review at the end. An approval of a candidate QA did not pass is not
-recorded; the demo says to change the Doc's decision instead. A reviewer flag wins over the Doc.
+Each invocation is ``BriefProduction.invoke`` (ADR-0048) — the same code ``factory_service.py``
+runs when n8n triggers a brief. With the desk configured, a stored Run waiting for a human first
+has its review published (idempotent) and the reviewer's decision read from the Doc (ADR-0045):
+approved, changes requested or rejected is recorded, saved and routed by the resume that follows —
+a rework publishes the new version's review at the end. An approval of a candidate QA did not pass
+is not recorded; the demo says to change the Doc's decision instead. A reviewer flag wins over the
+Doc.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from demo import print_final_article, safe_print, show_run
 from demo_factory import (
@@ -58,18 +60,19 @@ from demo_factory import (
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
-from omemo_content_factory.application.brief_intake import BriefIntakeError, produce_brief
+from omemo_content_factory.application.brief_intake import BriefIntakeError
+from omemo_content_factory.application.brief_production import (
+    BriefInvocation,
+    BriefProduction,
+    run_id_for_brief,
+)
 from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
-from omemo_content_factory.application.qa_evaluation import MeasuredEvaluatorError
-from omemo_content_factory.application.review_decision import take_review_decision
-from omemo_content_factory.application.review_publication import (
-    pending_review,
-    publish_pending_review,
-)
+from omemo_content_factory.application.review_publication import pending_review
 from omemo_content_factory.composition import (
     build_brief_board,
     build_review_desk,
+    build_run_index,
     build_run_store,
     build_schema_map,
     run_store_path,
@@ -82,11 +85,6 @@ from omemo_content_factory.infrastructure.provider_model import ProviderModelSel
 _GOOGLE_VARS = ("OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE", "OMEMO_GOOGLE_REVIEW_FOLDER_ID")
 
 
-def _run_id_for(brief_ref: str) -> str:
-    """Derive a stable Run id from the brief reference, so a re-run resumes the same Run."""
-    return f"run-notion-{brief_ref}"
-
-
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("brief_ref", help="the Notion page id of the brief to produce")
@@ -94,14 +92,48 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _build_review_desk() -> ReviewDesk | None:
+def _build_review_desk(environ: Mapping[str, str]) -> ReviewDesk | None:
     """The Google Docs desk when configured, ``None`` when not configured at all (ADR-0044 §5).
 
     A partly or wrongly configured desk raises ``ReviewDeskError`` naming what is wrong.
     """
-    if not any(os.environ.get(name, "").strip() for name in _GOOGLE_VARS):
+    if not any(environ.get(name, "").strip() for name in _GOOGLE_VARS):
         return None
-    return build_review_desk(os.environ)
+    return build_review_desk(environ)
+
+
+def build_brief_production(environ: Mapping[str, str]) -> BriefProduction:
+    """Assemble the production path for Notion briefs (ADR-0048): board, desk, roles, QA, store.
+
+    Raises ``BriefBoardError`` / ``ReviewDeskError`` / ``ProviderModelSelectionError`` for missing
+    configuration. ``factory_service.py`` builds the same path.
+    """
+    board = build_brief_board(environ)
+    desk = _build_review_desk(environ)
+    executors = _build_executors()
+    qa = _build_qa_evaluator()
+    validate_workflow_executors(WORKFLOW, executors)
+    validate_qa_evaluator(WORKFLOW, qa)
+    store = BriefStatusReporter(build_run_store(environ), board)
+    director = ContentDirector(
+        executors, build_schema_map(AGENTS, None, SCHEMAS), qa=qa, store=store
+    )
+    return BriefProduction(
+        director, store, board, WORKFLOW, desk=desk, index=build_run_index(environ)
+    )
+
+
+def explain_configuration_error(exc: Exception) -> None:
+    """Print what a configuration error from :func:`build_brief_production` means."""
+    if isinstance(exc, BriefBoardError):
+        safe_print(f"The Notion board is not configured: {exc}")
+    elif isinstance(exc, ReviewDeskError):
+        safe_print(f"The Google Docs review desk is not configured: {exc}")
+        safe_print(f"Set both {' and '.join(_GOOGLE_VARS)}, or neither to keep reviews local.")
+    else:
+        safe_print(f"Provider/model selection failed: {exc}")
+        safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")
+        _print_binding_instructions()
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -113,52 +145,38 @@ def main(argv: Sequence[str] | None = None) -> None:
         safe_print('  PowerShell:  $env:ANTHROPIC_API_KEY = "sk-ant-..."')
         safe_print("  bash:        export ANTHROPIC_API_KEY=sk-ant-...")
         return
-
     try:
-        board = build_brief_board(os.environ)
-        desk = _build_review_desk()
-        executors = _build_executors()
-        qa = _build_qa_evaluator()
-    except BriefBoardError as exc:
-        safe_print(f"The Notion board is not configured: {exc}")
-        return
-    except ReviewDeskError as exc:
-        safe_print(f"The Google Docs review desk is not configured: {exc}")
-        safe_print(f"Set both {' and '.join(_GOOGLE_VARS)}, or neither to keep reviews local.")
-        return
-    except ProviderModelSelectionError as exc:
-        safe_print(f"Provider/model selection failed: {exc}")
-        safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")
-        _print_binding_instructions()
+        production = build_brief_production(os.environ)
+    except (BriefBoardError, ReviewDeskError, ProviderModelSelectionError) as exc:
+        explain_configuration_error(exc)
         return
 
-    validate_workflow_executors(WORKFLOW, executors)
-    validate_qa_evaluator(WORKFLOW, qa)
-    store = BriefStatusReporter(build_run_store(os.environ), board)
-    director = ContentDirector(
-        executors, build_schema_map(AGENTS, None, SCHEMAS), qa=qa, store=store
-    )
-
-    run_id = _run_id_for(args.brief_ref)
+    run_id = run_id_for_brief(args.brief_ref)
     safe_print("=" * 78)
     safe_print(f"Notion brief '{args.brief_ref}' -> Rin -> Leo -> QA")
     safe_print("=" * 78)
-    if not _prepare_stored_run(store, run_id, args, desk):
-        return
+    stored = production.store.load(run_id)
+    if plays_reviewer(args):
+        if not _play_reviewer(stored, args):
+            return
+        assert stored is not None
+        production.store.save(stored)
+    elif stored is not None:
+        location = run_store_path(os.environ)
+        safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
+        safe_print("committed steps are not run again. Delete that file to start over.")
     try:
-        run = produce_brief(
-            director, store, board, WORKFLOW, brief_ref=args.brief_ref, run_id=run_id
-        )
+        invocation = production.invoke(args.brief_ref)
     except BriefIntakeError as exc:
         safe_print(f"Cannot produce brief '{args.brief_ref}': {exc}")
         return
-    except MeasuredEvaluatorError as exc:
-        safe_print(f"QA gave no verdict ({type(exc).__name__}: {exc}).")
+    _show_decision(invocation, waited=stored is not None and pending_review(stored) is not None)
+    if invocation.qa_error is not None:
+        safe_print(f"QA gave no verdict ({invocation.qa_error}).")
         safe_print(
             "The Run stays at WAITING_QA with its Evaluation PENDING; run again to ask QA again."
         )
-        run = store.load(run_id)
-        assert run is not None
+    run = invocation.run
     if run is None:
         safe_print(
             f"No producible brief '{args.brief_ref}' on the board — "
@@ -169,39 +187,21 @@ def main(argv: Sequence[str] | None = None) -> None:
     _show_quality_gate(run)
     _show_model_calls(run)
     print_final_article(run)
-    _show_board_reports(store, run)
-    _publish_review(desk, run, store)
+    _show_board_reports(production.store, run)
+    _show_publication(production, invocation, run)
 
 
-def _prepare_stored_run(
-    store: BriefStatusReporter, run_id: str, args: argparse.Namespace, desk: ReviewDesk | None
-) -> bool:
-    """Apply a reviewer decision to the stored Run, or announce a resume; whether to go on."""
-    stored = store.load(run_id)
-    if plays_reviewer(args):
-        if not _play_reviewer(stored, args):
-            return False
-        assert stored is not None
-        store.save(stored)
-    elif stored is not None:
-        location = run_store_path(os.environ)
-        safe_print(f"Resuming {run_id} from {location} at '{stored.status.value}';")
-        safe_print("committed steps are not run again. Delete that file to start over.")
-        if desk is not None:
-            _read_decision(store, desk, stored)
-    return True
-
-
-def _read_decision(store: BriefStatusReporter, desk: ReviewDesk, stored: Run) -> None:
-    """Read the reviewer's decision from the desk into the stored Run and save it (ADR-0046)."""
-    try:
-        fetched = take_review_decision(store, desk, stored.run_id)
-    except ReviewDeskError as exc:
-        safe_print(f"Google Docs refused to give the reviewer's decision: {exc}")
+def _show_decision(invocation: BriefInvocation, *, waited: bool) -> None:
+    """Say what the desk decided on the stored Run's review (ADR-0045, ADR-0046)."""
+    if invocation.decision_error is not None:
+        safe_print(
+            f"Google Docs refused to give the reviewer's decision: {invocation.decision_error}"
+        )
         safe_print("The Run keeps waiting; run again to retry.")
         return
+    fetched = invocation.decision
     if fetched is None:
-        if pending_review(stored) is not None:
+        if waited:
             safe_print("The reviewer has not decided yet; the Run keeps waiting.")
         return
     if not fetched.applied:
@@ -215,23 +215,21 @@ def _read_decision(store: BriefStatusReporter, desk: ReviewDesk, stored: Run) ->
     safe_print(f"The Doc decides {fetched.decision.value} on {fetched.review_id}{reason}")
 
 
-def _publish_review(desk: ReviewDesk | None, run: Run, store: BriefStatusReporter) -> None:
-    """Put the Run's pending review on the desk, show where it is on the brief (ADR-0044, 0047)."""
-    if desk is None:
+def _show_publication(production: BriefProduction, invocation: BriefInvocation, run: Run) -> None:
+    """Say where the pending review is and whether the brief links to it (ADR-0044, ADR-0047)."""
+    if not production.has_desk:
         if run.status is RunStatus.WAITING_HUMAN:
             safe_print("No review desk is configured; the review stays in the Run store.")
         return
-    try:
-        published = publish_pending_review(run, desk)
-    except ReviewDeskError as exc:
-        safe_print(f"Google Docs refused to publish the review: {exc}")
+    if invocation.publish_error is not None:
+        safe_print(f"Google Docs refused to publish the review: {invocation.publish_error}")
         safe_print("The Run is unchanged; run again to retry the publication.")
         return
+    published = invocation.published
     if published is None:
         return
     safe_print(f"Review {published.review_id} is on Google Docs: {published.location}")
-    store.show_review_location(run, published.location)
-    if store.shown_review_location(run.run_id) == published.location:
+    if production.store.shown_review_location(run.run_id) == published.location:
         safe_print("The Notion page links to it.")
     else:
         safe_print("Notion refused the review link; run again to retry.")

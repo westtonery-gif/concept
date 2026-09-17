@@ -37,7 +37,7 @@ from typing import TypeAlias
 
 from omemo_content_factory.adapters.brief_board import BriefBoard
 from omemo_content_factory.adapters.review_desk import ReviewDesk
-from omemo_content_factory.adapters.run_store import RunStore
+from omemo_content_factory.adapters.run_store import RunIndex, RunStore
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -213,10 +213,17 @@ def build_run_store(environ: Mapping[str, str]) -> RunStore:
     return SqliteRunStore(path)
 
 
+def build_run_index(environ: Mapping[str, str]) -> RunIndex:
+    """Build the ``RunIndex`` over the same file :func:`build_run_store` uses (ADR-0048 §2)."""
+    path = run_store_path(environ)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return SqliteRunStore(path)
+
+
 def build_brief_board(environ: Mapping[str, str]) -> BriefBoard:
     """Build the ``BriefBoard`` a real entrypoint reads briefs from (ROADMAP Stage 9, ADR-0040).
 
-    Reads the six ``OMEMO_NOTION_*`` variables (:func:`notion_settings_from_env`); a missing or
+    Reads the seven ``OMEMO_NOTION_*`` variables (:func:`notion_settings_from_env`); a missing or
     blank one fails closed with ``BriefBoardError`` before any request is made, same shape as
     :func:`client_for_role`'s fail-closed binding.
     """

@@ -21,6 +21,18 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **One brief invocation is application code, and stored Runs can be listed by status (ROADMAP
+  Stage 11, ADR-0048; queue task 15.2).** `application/brief_production.py` `BriefProduction(director,
+  store, board, workflow, *, desk=None, index=None)`: `invoke(brief_ref) -> BriefInvocation` runs
+  `take_review_decision` → `produce_brief` → `publish_pending_review` → `show_review_location`,
+  turning desk refusals / QA-without-verdict into `decision_error` / `publish_error` / `qa_error`
+  fields (everything else propagates); `waiting_briefs()` = briefs of intake Runs (id is
+  `run_id_for_brief(ref)` = `run-notion-<ref>`) stored at `waiting_human`. New additive contract
+  `adapters/run_store.py` `RunIndex.run_ids(*, status)` — `RunStore` unchanged; `SqliteRunStore`
+  implements it by decoding every row (no column, no migration); `composition.build_run_index`.
+  `demo_notion.py` now delegates to `invoke` and exposes `build_brief_production(environ)` for the
+  service. Tests: `tests/test_brief_production.py` (`BPR`, `ADAPTER_ACCEPTANCE.md` §13), STO-12.
+  Suite: 1090 passed.
 - **The review Doc's link is shown on the Notion brief (ROADMAP Stage 11, ADR-0047; queue task
   15.1).** Additive `BriefBoard.report_review_location(brief_ref, /, *, run_id, location)`;
   `NotionBriefBoard` writes it into a `url` property named by the **new required seventh variable
@@ -750,7 +762,7 @@ process at the time, not a pattern to keep copying.)
        `OMEMO_NOTION_REVIEW_LINK_PROPERTY`; `InMemoryBriefBoard` records it;
        `BriefStatusReporter.show_review_location(run, location)` shows it once per location (a
        refusal logged + kept, never fails the Run); `demo_notion.py` shows it after publishing. ADR.
-    2. **One brief invocation + the waiting-Run listing.** Extract `demo_notion.py`'s whole
+    2. ~~**One brief invocation + the waiting-Run listing.**~~ — done (ADR-0048). Extract `demo_notion.py`'s whole
        per-brief flow (decision → produce → publish → link) into an application function returning
        an outcome instead of printing, so the CLI and the service run the same code; an additive
        `RunIndex` contract (Run ids by status) implemented by `SqliteRunStore`, and the sweep's

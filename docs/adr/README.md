@@ -71,3 +71,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0045](0045-review-decision-fetch-and-rejection-routing.md) | The reviewer's decision is read from the desk, and a rejection is reworked with its reason | Accepted |
 | [0046](0046-stage-10-acceptance-and-review-decision-intake.md) | The ROADMAP Stage 10 (Google Docs) acceptance, and taking a review decision into the store | Accepted |
 | [0047](0047-review-link-on-the-brief.md) | The review Doc's link is shown on the brief | Accepted |
+| [0048](0048-brief-production-and-run-index.md) | One brief invocation as application code, and listing stored Runs by status | Accepted |

@@ -26,7 +26,7 @@ import omemo_content_factory.adapters as adapters_pkg
 from omemo_content_factory.adapters.analytics_sink import AnalyticsSink
 from omemo_content_factory.adapters.brief_board import BriefBoard, IncomingBrief
 from omemo_content_factory.adapters.review_desk import ReviewDecision, ReviewDesk, ReviewPackage
-from omemo_content_factory.adapters.run_store import RunStore
+from omemo_content_factory.adapters.run_store import RunIndex, RunStore
 from omemo_content_factory.domain.analytics import AnalyticsRecord
 from omemo_content_factory.domain.artifact import ArtifactStatus, ArtifactView
 from omemo_content_factory.domain.human_review import ReviewId, ReviewStatus
@@ -65,6 +65,11 @@ class _NullStore:
         return None
 
 
+class _NullIndex:
+    def run_ids(self, /, *, status: RunStatus) -> tuple[str, ...]:
+        return ()
+
+
 class _NullBoard:
     def __init__(self) -> None:
         self.reported: list[tuple[str, str, RunStatus]] = []
@@ -96,6 +101,7 @@ class _NullSink:
 
 
 _STORE: RunStore = _NullStore()
+_INDEX: RunIndex = _NullIndex()
 _BOARD: BriefBoard = _NullBoard()
 _DESK: ReviewDesk = _NullDesk()
 _SINK: AnalyticsSink = _NullSink()
@@ -168,6 +174,7 @@ _POS = "POSITIONAL_ONLY"
 _KW = "KEYWORD_ONLY"
 _CONTRACT_METHODS: dict[Any, dict[str, list[tuple[str, str]]]] = {
     RunStore: {"save": [("run", _POS)], "load": [("run_id", _POS)]},
+    RunIndex: {"run_ids": [("status", _KW)]},
     BriefBoard: {
         "fetch_brief": [("brief_ref", _POS)],
         "report_status": [("brief_ref", _POS), ("run_id", _KW), ("status", _KW)],

@@ -25,7 +25,7 @@ from typing import Any
 import pytest
 
 import omemo_content_factory.domain as domain_pkg
-from omemo_content_factory.adapters.run_store import RunStore, RunStoreError
+from omemo_content_factory.adapters.run_store import RunIndex, RunStore, RunStoreError
 from omemo_content_factory.domain.analytics import InvalidAnalyticsRecordError
 from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
@@ -317,3 +317,51 @@ def test_sto_11_an_unregistered_event_fails_the_save_not_the_load(db: Path) -> N
     with pytest.raises(RunStoreError, match="could not be encoded"):
         SqliteRunStore(db).save(stray)
     assert SqliteRunStore(db).load(RUN_ID) is None
+
+
+# --- Listing by status (ADR-0048) ---------------------------------------------------------
+
+
+def _run_at(run_id: str, *path: RunStatus) -> Run:
+    run = Run.create(run_id=run_id, content_brief_ref="brief", workflow_version_ref="wf@v1")
+    for status in path:
+        run.transition(status, by=CD)
+    return run
+
+
+def test_sto_12_run_ids_lists_the_stored_runs_at_a_status_in_id_order(db: Path) -> None:
+    index: RunIndex = SqliteRunStore(db)
+    assert index.run_ids(status=RunStatus.WAITING_HUMAN) == ()
+
+    store = SqliteRunStore(db)
+    store.save(busy_run())
+    store.save(_run_at("run-b", RunStatus.QUEUED))
+    store.save(_run_at("run-a", RunStatus.QUEUED))
+    store.save(_run_at("run-c", RunStatus.QUEUED, RunStatus.RUNNING))
+
+    restarted = SqliteRunStore(db)
+    assert restarted.run_ids(status=RunStatus.QUEUED) == ("run-a", "run-b")
+    assert restarted.run_ids(status=RunStatus.WAITING_HUMAN) == (RUN_ID,)
+    assert restarted.run_ids(status=RunStatus.COMPLETED) == ()
+
+    moved = _run_at("run-a", RunStatus.QUEUED, RunStatus.RUNNING)
+    store.save(moved)
+    assert restarted.run_ids(status=RunStatus.RUNNING) == ("run-a", "run-c")
+
+
+def test_sto_12_a_malformed_or_foreign_row_fails_the_listing(db: Path) -> None:
+    store = SqliteRunStore(db)
+    store.save(busy_run())
+    [(_, text)] = stored_rows(db)
+    write_row(db, "run-copy", text)
+    with pytest.raises(RunStoreError, match="holds run"):
+        store.run_ids(status=RunStatus.WAITING_HUMAN)
+
+    write_row(db, "run-copy", "{not json")
+    with pytest.raises(RunStoreError, match="malformed"):
+        store.run_ids(status=RunStatus.WAITING_HUMAN)
+
+
+def test_sto_12_a_store_that_cannot_be_opened_cannot_be_listed(tmp_path: Path) -> None:
+    with pytest.raises(RunStoreError, match="listed"):
+        SqliteRunStore(tmp_path).run_ids(status=RunStatus.QUEUED)

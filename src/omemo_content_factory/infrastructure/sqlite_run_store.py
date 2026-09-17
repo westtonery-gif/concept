@@ -11,11 +11,13 @@ It is atomic, and a failed save leaves the previous truth as it was.
 - ``load`` returns ``None`` for an unknown id, otherwise ``Run.restore`` of the stored snapshot. A
   snapshot the Run refuses raises ``RunRestorationError`` unmasked, as does any other domain error
   raised while the snapshot is rebuilt.
+- ``run_ids(status=...)`` (``RunIndex``, ADR-0048) reads every row in id order and decodes its
+  snapshot without restoring the Run; an undecodable row fails the listing.
 - A database that cannot be opened, read or written, and a stored row that is not a well-formed
   document, raise ``RunStoreError``.
 
 Each call opens and closes its own connection, so the store holds no handle between calls.
-Concurrent writers, listing stored Runs and format migrations are deferred (ADR-0024 "Deferred").
+Concurrent writers and format migrations are deferred (ADR-0024 "Deferred").
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from contextlib import closing
 from pathlib import Path
 
 from omemo_content_factory.adapters.run_store import RunStoreError
-from omemo_content_factory.domain.run import Run
+from omemo_content_factory.domain.run import Run, RunSnapshot, RunStatus
 from omemo_content_factory.infrastructure.run_snapshot_codec import (
     SnapshotFormatError,
     decode_snapshot,
@@ -36,10 +38,11 @@ from omemo_content_factory.infrastructure.run_snapshot_codec import (
 _CREATE_TABLE = "CREATE TABLE IF NOT EXISTS runs (run_id TEXT PRIMARY KEY, snapshot TEXT NOT NULL)"
 _UPSERT = "INSERT OR REPLACE INTO runs (run_id, snapshot) VALUES (?, ?)"
 _SELECT = "SELECT snapshot FROM runs WHERE run_id = ?"
+_SELECT_ALL = "SELECT run_id, snapshot FROM runs ORDER BY run_id"
 
 
 class SqliteRunStore:
-    """A ``RunStore`` keeping each Run's whole truth as one row of an SQLite database file.
+    """A ``RunStore`` and ``RunIndex`` keeping each Run's whole truth as one row of a database file.
 
     ``path`` is the database file, created on first use (its directory must exist). ``timeout`` is
     how long, in seconds, a call waits for another connection's lock before failing.
@@ -70,13 +73,18 @@ class SqliteRunStore:
             raise RunStoreError(f"run {run_id} could not be read: {error}") from error
         if row is None:
             return None
+        return Run.restore(_snapshot_of(run_id, row[0]))
+
+    def run_ids(self, /, *, status: RunStatus) -> tuple[str, ...]:
+        """Ids of the stored Runs at ``status``, in ascending id order (ADR-0048 §2)."""
         try:
-            snapshot = decode_snapshot(json.loads(row[0]))
-        except (TypeError, ValueError) as error:
-            raise RunStoreError(f"run {run_id} is stored in a malformed form: {error}") from error
-        if snapshot.run_id != run_id:
-            raise RunStoreError(f"the row of run {run_id} holds run {snapshot.run_id}")
-        return Run.restore(snapshot)
+            with closing(self._connect()) as connection:
+                rows = connection.execute(_SELECT_ALL).fetchall()
+        except sqlite3.Error as error:
+            raise RunStoreError(f"the stored runs could not be listed: {error}") from error
+        return tuple(
+            run_id for run_id, document in rows if _snapshot_of(run_id, document).status is status
+        )
 
     def _connect(self) -> sqlite3.Connection:
         """Open the database and make sure its one table exists."""
@@ -87,3 +95,14 @@ class SqliteRunStore:
             connection.close()
             raise
         return connection
+
+
+def _snapshot_of(run_id: str, document: str) -> RunSnapshot:
+    """Decode the row stored under ``run_id``; a malformed or foreign row is ``RunStoreError``."""
+    try:
+        snapshot = decode_snapshot(json.loads(document))
+    except (TypeError, ValueError) as error:
+        raise RunStoreError(f"run {run_id} is stored in a malformed form: {error}") from error
+    if snapshot.run_id != run_id:
+        raise RunStoreError(f"the row of run {run_id} holds run {snapshot.run_id}")
+    return snapshot

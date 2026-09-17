@@ -67,6 +67,14 @@ Composition Root.
 Artifact/Human Review/Evaluation/Analytics Record/журнал сохраняются вместе со своим Run.
 Определения (Workflow, Schema, Agent, Prompt) здесь не хранятся (ADR-0015 §2).
 
+**`RunIndex` (Этап 11, ADR-0048).** Отдельный протокол в том же модуле: `run_ids(*, status:
+RunStatus) -> tuple[str, ...]` — id сохранённых Run в этом статусе, по возрастанию id; сбой чтения
+или недекодируемая строка → `RunStoreError` (листинг никогда молча не пропускает Run). `RunStore` не
+изменён — обёртки вроде `BriefStatusReporter` остаются просто `RunStore`. `SqliteRunStore`
+реализует оба: читает все строки по порядку id и декодирует снимок тем же кодеком (без
+`Run.restore`, без новой колонки). `composition.build_run_index(environ)` — над тем же файлом, что
+`build_run_store`. Приёмка — `ADAPTER_ACCEPTANCE.md` §5 (STO-12).
+
 **Реализация (6b, ADR-0024).** `SqliteRunStore` (`infrastructure/sqlite_run_store.py`):
 встраиваемая SQLite, одна строка на Run, вся истина — JSON-документ его `RunSnapshot`
 (`infrastructure/run_snapshot_codec.py`). Предусловие выполнено: состав снимка дополнен
@@ -177,6 +185,26 @@ run_id) -> Run | None` (`application/brief_intake.py`), где `store` — `Brie
 | конец: обычный возврат или `MeasuredEvaluatorError` | `store.sync(run)`, затем исключение (если было) пробрасывается; прочие исключения — без `sync` |
 
 Приёмка Этапа 9 — `STAGE9_ACCEPTANCE.md` (`S9A`).
+
+**Один вызов брифа (Этап 11, ADR-0048).** `BriefProduction(director, store, board, workflow, *,
+desk=None, index=None)` (`application/brief_production.py`) — то, что делает точка входа при каждом
+срабатывании брифа (CLI `demo_notion.py` и HTTP-сервис — один и тот же код). `run_id_for_brief(ref)`
+= `run-notion-<ref>` (написание сохранено ради уже сохранённых Run). `invoke(brief_ref) ->
+BriefInvocation(brief_ref, run_id, run, decision, decision_error, qa_error, published,
+publish_error)`:
+
+| Шаг | Поведение |
+|---|---|
+| 1. с площадкой | `take_review_decision(store, desk, run_id)` → `decision`; `ReviewDeskError` → `decision_error`, вызов продолжается |
+| 2. | `produce_brief(...)` → `run`; `MeasuredEvaluatorError` → `qa_error` = «`<тип>: <сообщение>`», `run` загружается из store (`waiting_qa`) |
+| 3. с площадкой и Run | `publish_pending_review(run, desk)` → `published` и `store.show_review_location(run, location)`; `ReviewDeskError` → `publish_error` |
+| прочее | `BriefIntakeError`, `BriefBoardError`, `RunStoreError`, доменные ошибки, дефекты — пробрасываются |
+
+`run` = `None` только если нет ни сохранённого Run, ни готового брифа. `waiting_briefs()` — брифы Run
+в `waiting_human` по `index.run_ids(status=WAITING_HUMAN)`, в порядке id, **только** Run, чей id —
+`run_id_for_brief(content_brief_ref)` (Run других точек входа в том же файле пропускаются); Run,
+исчезнувший между листингом и загрузкой, пропускается; без `index` → `ValueError`. Свойства `store`,
+`has_desk`. Приёмка — `ADAPTER_ACCEPTANCE.md` §13 (BPR).
 
 ## 6. `ReviewDesk` (`adapters/review_desk.py`)
 
