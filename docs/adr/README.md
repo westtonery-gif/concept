@@ -72,3 +72,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0046](0046-stage-10-acceptance-and-review-decision-intake.md) | The ROADMAP Stage 10 (Google Docs) acceptance, and taking a review decision into the store | Accepted |
 | [0047](0047-review-link-on-the-brief.md) | The review Doc's link is shown on the brief | Accepted |
 | [0048](0048-brief-production-and-run-index.md) | One brief invocation as application code, and listing stored Runs by status | Accepted |
+| [0049](0049-production-service-and-n8n-workflows.md) | An HTTP production service for n8n, and the n8n workflows that call it | Accepted |

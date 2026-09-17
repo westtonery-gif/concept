@@ -38,6 +38,7 @@ from typing import TypeAlias
 from omemo_content_factory.adapters.brief_board import BriefBoard
 from omemo_content_factory.adapters.review_desk import ReviewDesk
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
+from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -62,6 +63,10 @@ from omemo_content_factory.infrastructure.llm import (
 from omemo_content_factory.infrastructure.notion_brief_board import (
     NotionBriefBoard,
     notion_settings_from_env,
+)
+from omemo_content_factory.infrastructure.production_service import (
+    ProductionService,
+    service_settings_from_env,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 from omemo_content_factory.tools.contract import Tool
@@ -238,6 +243,21 @@ def build_review_desk(environ: Mapping[str, str]) -> ReviewDesk:
     fails closed with ``ReviewDeskError`` before any request is made.
     """
     return GoogleDocsReviewDesk(google_docs_settings_from_env(environ))
+
+
+def build_production_service(
+    environ: Mapping[str, str], production: BriefProduction
+) -> ProductionService:
+    """Build the HTTP service n8n calls over ``production`` (ROADMAP Stage 11, ADR-0049).
+
+    Reads ``OMEMO_SERVICE_TOKEN`` / ``_HOST`` / ``_PORT``; a missing or short token fails closed
+    with ``ServiceConfigurationError`` before anything binds. Not started.
+    """
+    return ProductionService(
+        service_settings_from_env(environ),
+        produce=production.invoke,
+        waiting=production.waiting_briefs,
+    )
 
 
 def build_executor_map(

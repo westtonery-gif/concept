@@ -21,6 +21,22 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **The core is an HTTP service n8n calls, and the n8n workflows are committed (ROADMAP Stage 11,
+  ADR-0049; queue task 15.3).** `infrastructure/production_service.py` (stdlib `http.server`, no new
+  dependency): `POST /v1/briefs {"brief_ref"}` and `POST /v1/reviews/sweep` answer `202` and queue
+  work for **one** background worker (a brief waiting in the queue is not queued twice; a running one
+  is queued once more); `GET /v1/health`; bearer `OMEMO_SERVICE_TOKEN` (required, ≥ 32 chars,
+  constant-time compare, never logged), `OMEMO_SERVICE_HOST`/`_PORT` default `127.0.0.1:8765`; a
+  failing job is logged and the worker goes on; `stop()` closes the queue first. Built by
+  `composition.build_production_service(environ, production)` over `BriefProduction.invoke` /
+  `waiting_briefs`; entrypoint `factory_service.py` (logs one line per invocation). `n8n/`:
+  `brief-ready.workflow.json` (Notion Trigger `pagedUpdatedInDatabase` every minute → POST
+  `brief_ref = {{ $json.id }}`), `review-sweep.workflow.json` (Schedule every 5 min → POST sweep),
+  Header Auth credential `Concept factory service`, placeholders + setup in `n8n/README.md`. n8n
+  forwards every page edit — readiness stays the board's rule. Spec/acceptance:
+  `PRODUCTION_SERVICE_SPEC.md` / `PRODUCTION_SERVICE_ACCEPTANCE.md`; tests
+  `tests/test_production_service.py` (`SVC`), `tests/test_n8n_workflows.py` (`N8N`). Suite: 1137
+  passed.
 - **One brief invocation is application code, and stored Runs can be listed by status (ROADMAP
   Stage 11, ADR-0048; queue task 15.2).** `application/brief_production.py` `BriefProduction(director,
   store, board, workflow, *, desk=None, index=None)`: `invoke(brief_ref) -> BriefInvocation` runs
@@ -767,7 +783,7 @@ process at the time, not a pattern to keep copying.)
        an outcome instead of printing, so the CLI and the service run the same code; an additive
        `RunIndex` contract (Run ids by status) implemented by `SqliteRunStore`, and the sweep's
        "which briefs wait for a human". ADR.
-    3. **HTTP production service + n8n workflows.** `infrastructure/` service: `POST /v1/briefs`
+    3. ~~**HTTP production service + n8n workflows.**~~ — done (ADR-0049). `infrastructure/` service: `POST /v1/briefs`
        (`{"brief_ref"}`) and `POST /v1/reviews/sweep` answer `202` and queue work for **one**
        background worker (a brief already queued is not queued twice), `GET /v1/health`; bearer
        token `OMEMO_SERVICE_TOKEN`, host/port from env; entrypoint `factory_service.py`. Exported

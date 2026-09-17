@@ -233,6 +233,23 @@ report, the Run carries on regardless — the refusal is logged and printed, and
 Once a review is published, its Google Doc link is written into the page's `Review` URL property
 (ADR-0047); a link already shown is not written again.
 
+## Running the factory as a service for n8n
+
+`factory_service.py` (ROADMAP Stage 11, ADR-0049) serves the same production path as
+`demo_notion.py` over HTTP, so n8n can trigger it: `POST /v1/briefs` `{"brief_ref": "<page id>"}`
+produces or advances a brief, `POST /v1/reviews/sweep` advances every Run waiting for a human
+(decisions typed into the review Docs), `GET /v1/health` checks it's up. Both POSTs need
+`Authorization: Bearer $OMEMO_SERVICE_TOKEN`, answer `202` at once, and one background worker
+produces one brief at a time.
+
+```bash
+# everything demo_notion.py needs, plus:
+export OMEMO_SERVICE_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+python factory_service.py            # listens on 127.0.0.1:8765 (OMEMO_SERVICE_HOST/PORT)
+```
+
+The two n8n workflows that call it, and how to set them up, are in [`n8n/`](n8n/README.md).
+
 ## Google Docs review desk
 
 `GoogleDocsReviewDesk` (ROADMAP Stage 10, ADR-0043) publishes a candidate for human review as a

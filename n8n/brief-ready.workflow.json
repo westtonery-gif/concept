@@ -1,0 +1,83 @@
+{
+  "name": "Concept factory — brief page updated → production",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "event": "pagedUpdatedInDatabase",
+        "databaseId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "REPLACE_WITH_NOTION_DATABASE_ID"
+        },
+        "simple": true
+      },
+      "id": "5b0c8f5e-3d0a-4a53-9a5e-6f1b2f6d8a01",
+      "name": "Brief page updated",
+      "type": "n8n-nodes-base.notionTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "credentials": {
+        "notionApi": {
+          "name": "Concept Notion (read)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://127.0.0.1:8765/v1/briefs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "brief_ref",
+              "value": "={{ $json.id }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "9c2e4d71-1f6b-4b0e-8d4a-2a7c3e5f9b02",
+      "name": "Start production",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Concept factory service"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Brief page updated": {
+      "main": [
+        [
+          {
+            "node": "Start production",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
