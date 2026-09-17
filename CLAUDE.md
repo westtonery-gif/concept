@@ -756,6 +756,32 @@ process at the time, not a pattern to keep copying.)
        chosen trigger entrypoint does the right thing when invoked repeatedly/concurrently-ish
        against the same brief (CI-testable, no real n8n needed), not an end-to-end n8n round-trip.
 
+16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** **Blocked on
+    task 15** — ROADMAP's own dependency list is Stages 1-11, and Stage 11 isn't done. Prepared
+    ahead of time so there's no organizing pause once 15 lands, not to be started before it.
+    **Audit finding (checked against the actual test files, not assumed):** `tests/test_
+    stage10_acceptance.py` already runs the **entire** chain in one process per invocation — Notion
+    brief intake → Rin → Leo → real QA → Google Docs publish → decision → completion/rework,
+    crash/outage-safe (`STAGE9_ACCEPTANCE.md` reused, `STAGE10_ACCEPTANCE.md`). Four of Stage 12's
+    five DoD lines (one real brief reaches a human-approved artifact; every run is reproducible
+    from stored state; nothing ships without Approve; every inter-agent message is schema-
+    validated) are **already demonstrated at the CI/component level** by the S8A→S9A→S10A chain,
+    not still to build. So this stage is much smaller than its own "Высокая/L" estimate suggests —
+    don't reinvent what's already proven. Subtasks:
+    1. **Extend the acceptance chain with the trigger.** Once task 15 picks a mechanism, add it to
+       an `S12A`-shaped test so the *whole* loop — including the entry point Notion's "brief ready"
+       event would actually reach — is proven together at least once, not just its Notion→...→
+       Google Docs tail.
+    2. **Re-check the fifth DoD line for real**, don't assume it from the others: "падение одного
+       шага не разрушает систему" across the *combined* chain specifically (S10A's crash tests
+       cover the review/QA portion; confirm a crash during brief intake or trigger handling is
+       equally clean) — a targeted addition, not a rewrite.
+    3. **The actual milestone action is a live pilot, not more code.** One real brief, real Notion,
+       real Google Docs, real Anthropic, real n8n trigger, through to a human-approved artifact.
+       This needs the maintainer's real accounts across four external services — not available in
+       this environment, not something a session can do unattended. Flag it, don't fake it with a
+       scripted "acceptance" test standing in for the milestone.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
