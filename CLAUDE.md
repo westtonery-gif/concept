@@ -20,7 +20,26 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-17)
+## Current state (2026-09-18)
+- **ROADMAP Stage 12 (MVP) is closed as code; Milestone M3 is still open (ADR-0051).**
+  `tests/test_stage12_acceptance.py` (`S12A`, `STAGE12_ACCEPTANCE.md`) runs **S11A's production path
+  unchanged** — the real `ProductionService` over `BriefProduction` + `build_run_index`, every
+  request rendered from the committed n8n workflows — and asserts each of Stage 12's five DoD lines
+  **as the DoD words it, on the assembled loop entered through the trigger**: a brief goes from the
+  Notion trigger to an artifact a human `APPROVED`; the finished Run is reproducible from one stored
+  row (brief as the first Task's input, two `VALID` Outputs with catalogue `schema_ref`s, an Artifact
+  per Output, the Evaluation with its `evaluator_ref`, the Review with `decided_by`, one Analytics
+  Record per completed provider turn, and the journal's events); replaying the triggers produces
+  nothing again; nothing is `APPROVED` without an explicit Approve that QA passed; every inter-agent
+  message carries exactly its Schema's fields; one that fails its Schema stops the pipeline
+  (`FAILED` + `INVALID_OUTPUT_REASON`, no Artifact, Leo and QA never called); a crash mid-intake
+  leaves a managed `QUEUED` Run the next trigger produces **from the brief on the board**; a sweep
+  the service cannot dispatch answers `503` and changes nothing. No production code changed; S11A's
+  `Factory` gained two optional keyword arguments (`dies_after_saves`, `index`), as `_Process` did
+  for S9A. **Milestone M3 is deliberately NOT claimed (ADR-0051 §3): it needs the live pilot — one
+  real brief through real Notion, real Google Docs, real Anthropic and a real n8n trigger — which
+  needs the maintainer's four external accounts and cannot be done in this environment. A scripted
+  test may not stand in for it.** Suite: 1154 passed.
 - **ROADMAP Stage 11 (n8n) is closed (ADR-0050).** `tests/test_stage11_acceptance.py` (`S11A`,
   `STAGE11_ACCEPTANCE.md`) runs the real `ProductionService` over S10A's production path assembled as
   `BriefProduction` + `build_run_index`, and **renders every request from the committed n8n workflow
@@ -221,7 +240,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 50 ADRs (0001–0050) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 51 ADRs (0001–0051) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -236,8 +255,8 @@ anything ahead of the queue below — see task 10.
   `LLMArtifactEvaluator` (0036), the domain pivot (0037), the QA evaluator wiring (0038), the Stage 8 acceptance (0039), the Notion `BriefBoard` (0040), the status write-back (0041), the Stage 9 acceptance + brief intake (0042), the Google Docs desk
   (0043), the held Approval Gate + publication (0044), the decision fetch + Reject routing (0045),
   the Stage 10 acceptance (0046), the review link on the brief (0047), the brief invocation + Run
-  index (0048), the HTTP production service + n8n workflows (0049) and the Stage 11 acceptance
-  (0050) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
+  index (0048), the HTTP production service + n8n workflows (0049), the Stage 11 acceptance (0050)
+  and the Stage 12 acceptance + the M3 pilot boundary (0051) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
   `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
@@ -811,8 +830,9 @@ process at the time, not a pattern to keep copying.)
        cause no second model call and no extra board write; a desk decision is picked up by the
        sweep; a wrong token is refused; a failing job does not stop the worker. A live n8n round
        trip stays the operator's check. ADR.
-16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** Next —
-    task 15 (Stage 11) is closed (ADR-0050); the trigger mechanism 16.1 waits for is the HTTP
+16. **ROADMAP Stage 12 — first working MVP (Milestone M3, "Ключевая веха проекта").** **Closed as
+    code by 16.1 + 16.2 (ADR-0051); 16.3 — the live pilot — is still open and is the maintainer's,
+    not a session's.** The trigger mechanism 16.1 waited for is the HTTP
     `factory_service.py` + the `n8n/` workflows, and S11A already drives it with production assets.
     **Audit finding (checked against the actual test files, not assumed):** `tests/test_
     stage10_acceptance.py` already runs the **entire** chain in one process per invocation — Notion
@@ -823,19 +843,44 @@ process at the time, not a pattern to keep copying.)
     validated) are **already demonstrated at the CI/component level** by the S8A→S9A→S10A chain,
     not still to build. So this stage is much smaller than its own "Высокая/L" estimate suggests —
     don't reinvent what's already proven. Subtasks:
-    1. **Extend the acceptance chain with the trigger.** Once task 15 picks a mechanism, add it to
-       an `S12A`-shaped test so the *whole* loop — including the entry point Notion's "brief ready"
-       event would actually reach — is proven together at least once, not just its Notion→...→
-       Google Docs tail.
-    2. **Re-check the fifth DoD line for real**, don't assume it from the others: "падение одного
-       шага не разрушает систему" across the *combined* chain specifically (S10A's crash tests
-       cover the review/QA portion; confirm a crash during brief intake or trigger handling is
-       equally clean) — a targeted addition, not a rewrite.
-    3. **The actual milestone action is a live pilot, not more code.** One real brief, real Notion,
-       real Google Docs, real Anthropic, real n8n trigger, through to a human-approved artifact.
-       This needs the maintainer's real accounts across four external services — not available in
-       this environment, not something a session can do unattended. Flag it, don't fake it with a
-       scripted "acceptance" test standing in for the milestone.
+    1. ~~**Extend the acceptance chain with the trigger.**~~ — done (ADR-0051,
+       `STAGE12_ACCEPTANCE.md`, `tests/test_stage12_acceptance.py` `S12A`). The audit held up: no
+       component needed assembling, so `S12A` reuses S11A's path untouched and instead asserts each
+       DoD line **as the DoD words it**, entered through the n8n trigger — which is what none of
+       S8A–S11A did. Four gaps were real and are now covered: the candidate's `APPROVED` status
+       through the trigger (S11A-04 only checked the Run), reproducibility stated as one property of
+       the stored row (brief, both Outputs, Artifacts, Evaluation, Review, per-turn Analytics, the
+       journal), schema validation of inter-agent messages on the full loop (M2A proves it below the
+       board/desk/trigger), and the two crashes of 16.2. No production code changed.
+    2. ~~**Re-check the fifth DoD line for real.**~~ — done in the same `S12A` (S12A-07/08).
+       Checked, not assumed: behind the service a dying intake is a worker job raising, so the
+       service must answer the next request while the stored Run stays a managed `QUEUED` with no
+       Task and the next trigger produces it from the brief **on the board** (ADR-0042's resume
+       rule); and a scheduled trigger the service cannot even dispatch (listing the waiting Runs
+       fails) answers `503`, queues nothing, calls no model and leaves every stored Run untouched.
+       S11A's `Factory` gained `dies_after_saves` / `index` keyword arguments to drive both.
+    3. **The actual milestone action is a live pilot, not more code. — STILL OPEN, and it is the
+       maintainer's, not a session's.** One real brief, real Notion, real Google Docs, real
+       Anthropic, real n8n trigger, through to a human-approved artifact. This needs the
+       maintainer's real accounts across four external services — not available in this
+       environment, not something a session can do unattended. Flag it, don't fake it with a
+       scripted "acceptance" test standing in for the milestone. **ADR-0051 §3 says the same in the
+       record: Stage 12 is complete as code, Milestone M3 is not claimed until this runs.** Setup
+       the operator needs is already written down: `n8n/README.md` (live Notion Trigger + the
+       service's token/host), ADR-0043 + `.env.example` (the shared-drive folder shared with the
+       Google service account), the seven `OMEMO_NOTION_*` variables, and `demo_factory.py` for a
+       live provider call. `demo_notion.py` is the CLI for one brief; `factory_service.py` is the
+       service n8n calls.
+
+17. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
+    code, so the two things that were waiting on it are now unblocked *as candidates*, not as a
+    default: task 9 (ROADMAP Stage 13 — real media production) and task 10 (the `CONTENT_FACTORY_
+    THOUGHTS.md` §16 question: keep Stage 13 as ROADMAP has it, or carve out an earlier narrow video
+    slice). **Both still require the explicit ADR decision task 10 describes — closing Stage 12 did
+    not authorize either one**, and the maintainer's own note (§19) has the opening question for
+    whichever session picks it up. Note too that Milestone M3 (16.3) is still open: a green CI is
+    not the pilot. A reasonable next session is the ADR for that ordering decision — asked, not
+    guessed — while the live pilot waits on the maintainer's accounts.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

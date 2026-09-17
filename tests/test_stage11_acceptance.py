@@ -25,6 +25,7 @@ from anthropic.types import Message
 
 from omemo_content_factory.adapters.brief_board import BriefBoardError, IncomingBrief
 from omemo_content_factory.adapters.review_desk import ReviewDecision
+from omemo_content_factory.adapters.run_store import RunIndex
 from omemo_content_factory.agents import script_writer as leo
 from omemo_content_factory.application.brief_production import BriefProduction, run_id_for_brief
 from omemo_content_factory.composition import (
@@ -151,18 +152,21 @@ class Factory:
         desk: _Desk,
         producer: list[Message],
         qa: list[Message],
+        *,
+        dies_after_saves: int | None = None,
+        index: RunIndex | None = None,
     ) -> None:
         self.environ = environ
         self.board = board
         self.desk = desk
-        self.process = _Process(environ, board, producer, qa)
+        self.process = _Process(environ, board, producer, qa, dies_after_saves=dies_after_saves)
         production = BriefProduction(
             self.process.director,
             self.process.store,
             board,
             WORKFLOW,
             desk=desk,
-            index=build_run_index(environ),
+            index=index if index is not None else build_run_index(environ),
         )
         self.service: ProductionService = build_production_service(
             {**environ, "OMEMO_SERVICE_TOKEN": TOKEN, "OMEMO_SERVICE_PORT": "0"}, production
