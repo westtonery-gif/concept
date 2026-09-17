@@ -224,6 +224,29 @@ Every status the Run passes through (`queued`, `running`, `waiting_qa`, `waiting
 it is stored, and synced once more at the end of each invocation (ADR-0041). If Notion refuses a
 report, the Run carries on regardless — the refusal is logged and printed, and the next run retries.
 
+## Google Docs review desk (not wired yet)
+
+`GoogleDocsReviewDesk` (ROADMAP Stage 10, ADR-0043) publishes a candidate for human review as a
+Google Doc and reads the reviewer's decision back. It is not called by any entrypoint yet
+(publishing on `waiting_human` and applying the decision are the next steps). Operator setup:
+
+1. In Google Cloud, enable the **Google Drive API**, create a **service account** and download its
+   JSON key — keep it outside the repository.
+2. Create a folder for review Docs, preferably on a **shared drive** (a service account has no Drive
+   storage of its own), and share it with the service account's e-mail as an editor.
+3. Configure:
+
+```bash
+export OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE=/path/outside/the/repo/service-account.json
+export OMEMO_GOOGLE_REVIEW_FOLDER_ID=<folder id from the folder's URL>
+```
+
+Each review Doc starts with a decision block. The reviewer types one word after `РЕШЕНИЕ:` —
+`одобрено`, `отклонено` or `доработать` — and, for a rejection or rework, the reason after
+`ПРИЧИНА:`. Everything below the `======== МАТЕРИАЛЫ РЕВЬЮ ========` line (run, artifact version,
+brief, QA flags, candidate) is never read as a decision. An empty or unrecognised word keeps the
+review pending (the latter logs a warning); a deleted marker or separator line is an error.
+
 ## Project layout
 
 ```

@@ -24,7 +24,7 @@ classifiers = [
     "Typing :: Typed",
     "Private :: Do Not Upload",
 ]
-dependencies = ["anthropic>=0.40"]
+dependencies = ["anthropic>=0.40", "cryptography>=42"]
 
 [project.optional-dependencies]
 dev = [

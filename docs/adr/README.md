@@ -66,3 +66,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0040](0040-notion-brief-board.md) | Notion Adapter — a real `BriefBoard` over the Notion REST API | Accepted |
 | [0041](0041-brief-status-write-back.md) | Status write-back — every committed Run status is shown on its brief | Accepted |
 | [0042](0042-stage-9-acceptance-and-brief-intake.md) | The ROADMAP Stage 9 (Notion) acceptance, and the brief intake it required | Accepted |
+| [0043](0043-google-docs-review-desk.md) | Google Docs Adapter — a real `ReviewDesk` over Google Drive, a service account and a decision marker | Accepted |

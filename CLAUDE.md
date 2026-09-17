@@ -21,6 +21,28 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-17)
+- **A real Google Docs `ReviewDesk` exists (ROADMAP Stage 10, ADR-0043; queue task 14.1) — not
+  wired yet.** `infrastructure/google_docs_review_desk.py` `GoogleDocsReviewDesk` speaks the **Google
+  Drive API v3** only, through stdlib `urllib`: find by `appProperties` (SHA-256 of `review_id` /
+  of the canonical package JSON — no raw id ever enters a query), create a Doc by multipart upload
+  of `text/plain` with conversion, read by `export?mimeType=text/plain`. The two flagged decisions
+  were **asked, not guessed** — the maintainer chose: (1) **service account** auth (JWT RS256 →
+  token at the key's `token_uri`, cached to expiry − 60 s, dropped on `401`); the one new runtime
+  dependency is **`cryptography`** (stdlib cannot sign RS256; `google-auth` /
+  `google-api-python-client` rejected); (2) a **marker line**: the Doc starts with an instruction,
+  `РЕШЕНИЕ:`, `ПРИЧИНА:` and a `======== МАТЕРИАЛЫ РЕВЬЮ ========` separator; only the block above
+  the first separator is read. `одобрено`/`отклонено`/`доработать` (or the `ReviewStatus` values,
+  case-insensitive, trailing `.`/`!` ignored) decide; reason = rest of the `ПРИЧИНА:` line + following
+  block lines. Empty → `None`; unrecognised word → `None` + `WARNING` (a typo is not a fault);
+  damaged block (no separator, marker missing/repeated/out of order) → `ReviewDeskError`, as are
+  unpublished/trashed, two Docs per review, another package under a published review, non-2xx,
+  network, bad shapes. `google_docs_settings_from_env` needs `OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE` +
+  `OMEMO_GOOGLE_REVIEW_FOLDER_ID` and validates the key file up front (never echoes key material).
+  Operator setup (shared drive folder shared with the service account) is in README / `.env.example`.
+  Tests: `tests/test_google_docs_review_desk.py` (`GDR`, `ADAPTER_ACCEPTANCE.md` §10) against a local
+  fake Google that verifies the JWT signature. No Composition Root builder yet — 14.2. **A new
+  dependency means a fresh checkout's venv needs `pip install -e ".[dev]"` (or
+  `uv pip install cryptography`) again.** Suite: 1007 passed.
 - **ROADMAP Stage 9 (Notion) is closed (ADR-0042).** `tests/test_stage9_acceptance.py` (`S9A`,
   `STAGE9_ACCEPTANCE.md`) files a brief on `InMemoryBriefBoard` and produces it only through the new
   `application/brief_intake.py` `produce_brief(director, store, board, workflow, *, brief_ref,
@@ -616,7 +638,12 @@ process at the time, not a pattern to keep copying.)
       reviewer types/selects? a suggestion?). This needs its own small ADR before 14.1 writes code,
       not an improvised choice buried in the implementation.
     Subtasks:
-    1. **Real `GoogleDocsReviewDesk`.** ADR first for the two decisions above, then the
+    1. ~~**Real `GoogleDocsReviewDesk`.**~~ — done (ADR-0043,
+       `infrastructure/google_docs_review_desk.py`, `ADAPTER_SPEC.md` §6 "Реализация (Этап 10)",
+       `ADAPTER_ACCEPTANCE.md` §10 `GDR`, `tests/test_google_docs_review_desk.py`). Decided by the
+       maintainer when asked: service account auth; a `РЕШЕНИЕ:`/`ПРИЧИНА:` marker block above a
+       separator line. Decided here: Drive API v3 only over `urllib`, `cryptography` for RS256 (the
+       one new dependency). No `build_review_desk` yet — belongs to 14.2. Original brief: ADR first for the two decisions above, then the
        implementation: `publish` creates/updates a Doc with the candidate content + brief + QA
        flags (`ReviewPackage`'s existing fields) and returns its location; `fetch_decision` reads
        whatever mechanism the ADR chose. Second non-Anthropic third-party surface after Notion —

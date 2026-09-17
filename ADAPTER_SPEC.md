@@ -195,6 +195,47 @@ run_id) -> Run | None` (`application/brief_intake.py`), где `store` — `Brie
 первый; `decide` по неопубликованному → `ReviewDeskError`; первое решение окончательно — повтор
 того же безвреден, другое → `ReviewDeskError`.
 
+**Реализация (Этап 10, ADR-0043).** `GoogleDocsReviewDesk`
+(`infrastructure/google_docs_review_desk.py`): Google Drive API v3 через stdlib `urllib`; вход —
+сервисный аккаунт (JWT RS256 → access token по `token_uri` ключа, кэш до истечения минус 60 с,
+сброс после `401`); единственная новая зависимость — `cryptography` (подпись RS256). Ревью — Google
+Doc в настроенной папке (общие диски поддержаны), созданный конвертацией `text/plain` при загрузке;
+находится по `appProperties.omemo_review` = SHA-256 `review_id`, пакет сверяется по
+`appProperties.omemo_package` = SHA-256 канонического JSON пакета. Место —
+`https://docs.google.com/document/d/<id>/edit`.
+
+Текст Doc: строка-инструкция, `РЕШЕНИЕ:`, `ПРИЧИНА:`, разделитель
+`======== МАТЕРИАЛЫ РЕВЬЮ ========`, затем Run, ревью, артефакт (вид, версия, заменяемая версия),
+бриф, замечания QA (или «— нет»), кандидат. `fetch_decision` экспортирует Doc в текст и читает
+**только блок до первого разделителя**.
+
+| После `РЕШЕНИЕ:` (без пробелов по краям, без учёта регистра, финальные `.`/`!` отброшены) | Результат |
+|---|---|
+| пусто | `None` |
+| `одобрено` / `approved` | `APPROVED` |
+| `отклонено` / `rejected` | `REJECTED` |
+| `доработать` / `changes_requested` | `CHANGES_REQUESTED` |
+| иное | `None` + `WARNING` с `review_id` и значением |
+
+`reason` — текст после `ПРИЧИНА:` и все следующие строки блока, обрезанный; пусто → `None`.
+
+| Случай | `publish` | `fetch_decision` |
+|---|---|---|
+| Doc того же `review_id` с тем же пакетом | его место, без записи | — |
+| Doc того же `review_id` с другим пакетом | `ReviewDeskError`, первый Doc остаётся | — |
+| Doc нет (не публиковался / в корзине) | создаётся один Doc | `ReviewDeskError` |
+| больше одного Doc на `review_id` | `ReviewDeskError` | `ReviewDeskError` |
+| нет разделителя; нет `РЕШЕНИЕ:`/`ПРИЧИНА:` или строка повторена; `ПРИЧИНА:` выше `РЕШЕНИЕ:` | — | `ReviewDeskError` |
+| не-2xx токена или Drive; сбой соединения/таймаут; ответ не JSON-объект или не той формы; id файла не `[A-Za-z0-9_-]+`; экспорт не UTF-8 | `ReviewDeskError` | `ReviewDeskError` |
+
+Настройки — `google_docs_settings_from_env(environ)`: `OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE` (путь к
+JSON-ключу) и `OMEMO_GOOGLE_REVIEW_FOLDER_ID` — обязательны; отсутствующие/пустые →
+`ReviewDeskError` с их именами. Ключ читается сразу: нечитаем, не JSON-объект, `type` не
+`service_account`, пустые `client_email`/`private_key`/`token_uri`, ключ не RSA PEM →
+`ReviewDeskError` (путь назвать можно, ключ — никогда; в `repr` настроек ключа нет). Не подключён:
+публикация на `WAITING_HUMAN` — задача 14.2, применение решения — 14.3. Приёмка —
+`ADAPTER_ACCEPTANCE.md` §10.
+
 ## 7. `AnalyticsSink` (`adapters/analytics_sink.py`)
 
 | Метод | Поведение |
