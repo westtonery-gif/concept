@@ -505,6 +505,38 @@ process at the time, not a pattern to keep copying.)
        health mention, and `content_researcher.py`'s "омемо"→"OMEMO" terminology-glossary
        invocation (a Skill invocation, not Prompt text).
 
+13. **ROADMAP Stage 9 — Notion integration.** Next (ROADMAP order). Dependencies: Stages 6, 7 —
+    both done. The `BriefBoard` contract already exists (`adapters/brief_board.py`, ADR-0023:
+    `fetch_brief(brief_ref) -> IncomingBrief | None`, `report_status(brief_ref, *, run_id,
+    status)`) and has an in-memory stub (`InMemoryBriefBoard`, ADR-0025) — what's missing is a
+    **real** implementation and its wiring, the same split Storage went through (ADR-0024 real
+    impl, then ADR-0026 wiring). No n8n at this stage (Stage 11) — a manual/direct trigger is
+    fine. Subtasks:
+    1. **Real `NotionBriefBoard`.** First non-Anthropic third-party dependency (`pyproject.toml`
+       `dependencies` currently has only `anthropic`) — decide the Notion client library (official
+       `notion-client` vs. raw HTTP) as part of this subtask, not before. Maps a Notion
+       database entry to `IncomingBrief` (`brief_ref`, `body`) and writes `RunStatus` back to a
+       status property. Lives in `infrastructure/` (only place allowed to import a third-party
+       package or do network I/O, per `tests/test_adapter_contract.py`'s boundary). Needs its own
+       ADR + spec/acceptance, mirroring ADR-0024's realization pattern; auth via env vars
+       following the `client_for_role`/`OMEMO_PROVIDER__` convention, not hardcoded.
+    2. **Brief → Run entrypoint.** `board.fetch_brief(ref)` → `Run.create(content_brief_ref=…)` →
+       through `ContentDirector`, the way `demo_factory.py` does today with a hardcoded `BRIEF` —
+       except the brief now comes from Notion. Could extend `demo_factory.py` or add a dedicated
+       entrypoint; either way it's the first real "core reads its input from the outside" path.
+    3. **Status write-back — needs a design decision.** Decide which `Run` transitions get
+       reported to Notion (every one, like Storage's per-step commits, ADR-0026 §2? or only
+       terminal/human-facing states — `QUEUED`/`WAITING_HUMAN`/`COMPLETED`/`FAILED`?) and wire
+       `report_status` calls into the entrypoint or `ContentDirector`. `report_status`'s own
+       contract already makes repeating the same status harmless (ADR-0023/0025), so this is about
+       *when* to call it, not safety.
+    4. **Stage 9 acceptance** — a test in the `test_stage8_acceptance.py` shape proving the DoD
+       (a filed brief produces a valid Run; statuses land back on the board), run against
+       `InMemoryBriefBoard` for CI like Stage 8 used scripted transport under a real
+       `AnthropicLLMClient`. A live Notion round-trip is the operator's manual check afterward
+       (needs a real integration token + database — not available in this environment), the same
+       role `demo_factory.py` plays for live LLM calls.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
