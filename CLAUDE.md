@@ -872,7 +872,25 @@ process at the time, not a pattern to keep copying.)
        live provider call. `demo_notion.py` is the CLI for one brief; `factory_service.py` is the
        service n8n calls.
 
-17. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
+17. **`max_tokens` is hardcoded at 2048 and cannot be configured — found while setting up the M3
+    pilot (2026-09-18), needs an ADR.** `infrastructure/llm.py` `_DEFAULT_MAX_TOKENS = 2048` is a
+    constructor default, and `provider_model.py:102` builds `AnthropicLLMClient(model=…,
+    pricing=…)` without it — so no environment variable can change it, unlike provider, model and
+    the three pricing values. This was harmless when every model had thinking off by default. It is
+    not any more: **on Claude Opus 5 and Sonnet 5 adaptive thinking is on when the request omits
+    `thinking`, and thinking spends the same output budget.** A role that thinks its way through
+    2048 tokens never emits the forced `emit_fields` call, `_extract_fields` returns `{}`,
+    `Schema.validate` says `INVALID` and the Run ends `FAILED` with `INVALID_OUTPUT_REASON` — the
+    fail-closed path working exactly as designed, for a configuration reason rather than a content
+    one. The pilot therefore runs `claude-haiku-4-5` (thinking off by default, so 2048 is the whole
+    answer), which is a workaround, not a fix. Wanted: a per-role `OMEMO_MAX_TOKENS__<ROLE>`
+    alongside the existing binding variables (ADR-0016's ownership rule says selection lives in
+    config, and this is part of the selection), `PROVIDER_MODEL_SPEC.md` / `_ACCEPTANCE.md` amended,
+    and a decision on the default — plain 2048 is too small for a current model. Consider at the
+    same time whether the adapter should send `thinking` explicitly instead of inheriting whatever
+    the model's default happens to be, since that default now varies by model and changed under us.
+
+18. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
     code, so the two things that were waiting on it are now unblocked *as candidates*, not as a
     default: task 9 (ROADMAP Stage 13 — real media production) and task 10 (the `CONTENT_FACTORY_
     THOUGHTS.md` §16 question: keep Stage 13 as ROADMAP has it, or carve out an earlier narrow video

@@ -91,6 +91,31 @@ it's actually done, step by step against the Setup list above — not all at onc
   credential (`Concept factory service`), `factory_service.py`, the workflow import/placeholder
   edits, activation and an actual triggered request are **not done yet** — still open for the next
   pass at this same list.
+- **2026-09-18 — steps 1, 3 and 4 done; the Notion side is live.** The brief database
+  (`3de64b74a905809daaa5f749653c1f29`) had only its `Name` title property, so the four the core
+  needs were created through the Notion API: `Stage` (**select**, options `Ready for production` /
+  `Draft`), `Run status` (rich_text), `Run id` (rich_text), `Review` (url). **Note the type:** the
+  Notion API cannot create `status` properties at all — only `select`, which the adapter accepts
+  just the same (ADR-0040). All seven `OMEMO_NOTION_*` are in the repo's `.env`, and
+  `build_brief_board(os.environ).fetch_brief(<page>)` returned the page's paragraphs over the live
+  API, so the board adapter is verified end to end against real Notion. A brief page was filled in
+  and left at `Stage = Draft`, so flipping it to `Ready for production` is the deliberate start of
+  the pilot. Both workflows are imported (step 3) with the database id substituted and the HTTP
+  Request URLs pointed at `http://host.docker.internal:8765` (step 4). **The pilot runs without the
+  Google Docs desk** — the operator cannot create a Google service account, so `OMEMO_GOOGLE_*` are
+  unset, `BriefProduction.has_desk` is `False`, the Run stops at `waiting_human` and the approval is
+  given with `demo_notion.py --approve`. The "→ Google Docs →" leg of Stage 12's DoD is therefore
+  **not** covered by this pilot; a Notion-based `ReviewDesk` behind the existing port is the
+  candidate fix (`CLAUDE.md` 16.3). Still open: renaming the `Notion account` credential to
+  `Concept Notion (read)`, putting the generated `OMEMO_SERVICE_TOKEN` into the Header Auth
+  credential, deleting the leftover `ConceptImportChk` workflow (CLI has no `delete:workflow`),
+  activating, and the run itself.
+- **2026-09-18 — `versionId` was missing from both committed workflow files** (fixed in 4499e2b).
+  `n8n import:workflow` failed with `SQLITE_CONSTRAINT: NOT NULL constraint failed:
+  workflow_entity.versionId` and created nothing — the same class of defect as the missing top-level
+  `id`. Both files now carry a fixed `versionId`, pinned by `N8N-01`; the committed file was then
+  imported into this n8n unchanged (only its `id` altered, so the check could not touch the
+  configured workflow).
 - **2026-09-18 — n8n moved off `npx` onto Docker (see "Running n8n persistently" above).** Docker
   Desktop installed; n8n's existing `~/.n8n` data directory bind-mounted into the official
   `n8nio/n8n:1.121.0` image via `docker-compose.yml`, `restart: unless-stopped`. Verified after the
