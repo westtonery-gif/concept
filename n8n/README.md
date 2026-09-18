@@ -101,3 +101,12 @@ it's actually done, step by step against the Setup list above — not all at onc
   are present and unchanged in the n8n UI after the container recreate — the bind mount round-trips
   the same SQLite file, nothing was re-entered. Still not done: everything the previous entry
   already listed as open.
+- **2026-09-18 — step 2's naming deviation resolved.** Renamed the Notion API credential in the n8n
+  UI from `Notion account` to `Concept Notion (read)`, matching what both workflow JSON files
+  reference by name; the connection test still reports "Connection tested successfully" after the
+  rename. Step 2 of the Setup list is now fully done. **Note:** a `Concept factory service` Header
+  Auth credential already exists in n8n (created 17 September, correctly named) — but it has never
+  been tested, since `factory_service.py` has never been started, so it's unverified whether its
+  `Authorization` value actually matches a real `OMEMO_SERVICE_TOKEN`. Still open: start
+  `factory_service.py` and confirm/update that credential's value against it, then workflow
+  import/placeholder edits, activation and an actual triggered request.
