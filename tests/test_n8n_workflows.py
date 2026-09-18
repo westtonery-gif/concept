@@ -46,10 +46,23 @@ def test_n8n_01_exactly_the_two_workflows_are_committed_inactive() -> None:
     assert sorted(N8N.glob("*.workflow.json")) == [BRIEF_READY, REVIEW_SWEEP]
     for path in (BRIEF_READY, REVIEW_SWEEP):
         workflow = _load(path)
-        assert {"id", "name", "nodes", "connections", "active"} <= set(workflow)
+        assert {"id", "versionId", "name", "nodes", "connections", "active"} <= set(workflow)
         assert workflow["active"] is False
     ids = [_load(path)["id"] for path in (BRIEF_READY, REVIEW_SWEEP)]
     assert len(set(ids)) == 2 and all(isinstance(i, str) and i.strip() for i in ids)
+
+
+def test_n8n_01_the_cli_required_fields_have_the_shape_n8n_stores() -> None:
+    """``n8n import:workflow`` writes these two columns straight through: both are NOT NULL.
+
+    A missing ``id`` or ``versionId`` fails the import with an SQLite constraint error, which is
+    how each of them was found (ADR-0050, and a live n8n 1.121.0 for ``versionId``).
+    """
+    version_ids = [_load(path)["versionId"] for path in (BRIEF_READY, REVIEW_SWEEP)]
+
+    assert len(set(version_ids)) == 2
+    for version_id in version_ids:
+        assert re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", version_id)
 
 
 @pytest.mark.parametrize("path", [BRIEF_READY, REVIEW_SWEEP], ids=lambda p: p.name)
@@ -83,7 +96,8 @@ def test_n8n_03_the_request_posts_to_a_service_route_with_the_header_credential(
 
     text = path.read_text(encoding="utf-8")
     assert "Bearer" not in text and "Authorization" not in text
-    without_node_ids = re.sub(r'"id": "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"', "", text)
+    uuid_field = r'"(id|versionId)": "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}"'
+    without_node_ids = re.sub(uuid_field, "", text)
     placeholder_free = without_node_ids.replace("REPLACE_WITH_NOTION_DATABASE_ID", "")
     assert not re.search(r"[A-Za-z0-9_\-]{32,}", placeholder_free)
 
