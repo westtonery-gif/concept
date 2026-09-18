@@ -14,6 +14,30 @@ Every page edit is forwarded on purpose, ready or not. Readiness is the board's 
 link writes also edit the page, so they trigger one more call. That call finds nothing new and
 writes nothing (ADR-0047, ADR-0048).
 
+## Running n8n persistently (Docker)
+
+`docker-compose.yml` runs n8n as a `restart: unless-stopped` container instead of the ad hoc
+`npx n8n` (which dies with its shell/terminal and needs no persistence). It bind-mounts an
+existing `~/.n8n` (SQLite store) by absolute path, so credentials and workflows created before
+switching to Docker are kept, not lost.
+
+```bash
+cp .env.example .env   # then set N8N_DATA_DIR to the absolute path of the existing ~/.n8n
+docker compose up -d
+docker compose logs -f n8n   # startup should end "Editor is now accessible via: http://localhost:5678"
+```
+
+`.env` is git-ignored (repo `.gitignore`); only `.env.example` is committed. Because n8n now runs
+**inside** a container, `http://127.0.0.1:8765` in both workflow files' HTTP Request nodes (step 4
+below) must become `http://host.docker.internal:8765` to reach a `factory_service.py` running
+directly on the host — that placeholder note in step 4 is no longer a Docker-Desktop-only caveat,
+it's the actual value needed here.
+
+Moving to a domain later is the same image: point `N8N_HOST`/`N8N_PROTOCOL`/`WEBHOOK_URL` at the
+real host name instead of `localhost`/`http`, put a reverse proxy with TLS in front, and use the
+same `docker-compose.yml` (or its image) on the hosting provider — no n8n reconfiguration beyond
+those env vars.
+
 ## Setup
 
 1. **Start the service** where n8n can reach it, with everything `demo_notion.py` needs plus a token
@@ -67,3 +91,13 @@ it's actually done, step by step against the Setup list above — not all at onc
   credential (`Concept factory service`), `factory_service.py`, the workflow import/placeholder
   edits, activation and an actual triggered request are **not done yet** — still open for the next
   pass at this same list.
+- **2026-09-18 — n8n moved off `npx` onto Docker (see "Running n8n persistently" above).** Docker
+  Desktop installed; n8n's existing `~/.n8n` data directory bind-mounted into the official
+  `n8nio/n8n:1.121.0` image via `docker-compose.yml`, `restart: unless-stopped`. Verified after the
+  switch: `docker logs concept-n8n` ends clean (no deprecation warnings once
+  `DB_SQLITE_POOL_SIZE`/`N8N_RUNNERS_ENABLED`/`N8N_BLOCK_ENV_ACCESS_IN_NODE`/
+  `N8N_GIT_NODE_DISABLE_BARE_REPOS` are set), `curl http://localhost:5678/healthz` → `{"status":
+  "ok"}`, and both credentials from the entry above (`Notion account`, `Concept factory service`)
+  are present and unchanged in the n8n UI after the container recreate — the bind mount round-trips
+  the same SQLite file, nothing was re-entered. Still not done: everything the previous entry
+  already listed as open.

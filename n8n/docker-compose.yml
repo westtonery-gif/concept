@@ -1,0 +1,25 @@
+# n8n as a persistent Docker service for the Concept factory (see README.md).
+#
+# Reuses the existing ~/.n8n data directory (SQLite store) so credentials and
+# workflows created via `npx n8n` are not lost. Copy `.env.example` to `.env`
+# and fill it in before the first `docker compose up -d`.
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.121.0
+    container_name: concept-n8n
+    restart: unless-stopped
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    environment:
+      - N8N_SECURE_COOKIE=false
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-UTC}
+      - DB_SQLITE_POOL_SIZE=1
+      - N8N_RUNNERS_ENABLED=true
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - N8N_GIT_NODE_DISABLE_BARE_REPOS=true
+    volumes:
+      - ${N8N_DATA_DIR}:/home/node/.n8n
