@@ -80,6 +80,55 @@ those env vars.
 `CLAUDE.md`'s Stage 11 note ("A live Notion Trigger stays the operator's check") is tracked here as
 it's actually done, step by step against the Setup list above — not all at once.
 
+- **2026-09-19 — the whole loop ran from a live Notion trigger; the pilot is paused at the human
+  gate.** Steps 2 and 5 finished (credential renamed to `Concept Notion (read)`, the leftover
+  `ConceptImportChk` deleted, `brief-ready` activated; `review-sweep` deliberately left inactive —
+  with no desk it has nothing to pick up). `factory_service.py` was started on `0.0.0.0:8765` with
+  `claude-haiku-4-5` bound to all three roles (see `CLAUDE.md` task 17 for why not Opus). Verified
+  before spending anything: `/v1/health` answers from the host **and from inside the n8n container**
+  over `host.docker.internal`; no token → `401`; a brief still at `Stage = Draft` → `202` and
+  "nothing to produce", no model call. Then `Stage` was flipped to `Ready for production` and **n8n
+  itself** called the service:
+
+  ```
+  06:11:08  POST /v1/briefs → 202          (sent by n8n, not by hand)
+  06:11:15  Rin   → Output VALID, schema content-research-report
+  06:11:22  Leo   → Output VALID, schema script-draft@v1
+  06:11:28  QA    → verdict
+  06:11:29  Run → waiting_human
+  ```
+
+  Result: two `SUCCEEDED` Tasks, two `VALID` Outputs, a `DRAFT` research artifact and a `CANDIDATE`
+  script, one `PENDING` review, and three Analytics Records totalling **$0.010045** — real tokens,
+  real prices. In Notion the page shows `Run status = waiting_human` and the Run id; `Review` stays
+  empty because there is no desk.
+
+  **QA answered `flagged`, with three substantive flags** — an unsourced claim, no client context,
+  and psychological assertions needing grounding. The first one is a genuine catch: the brief asked
+  for no unverifiable research references and Leo used one anyway. So the gate is shut: an Approve
+  now would raise `ArtifactQaNotPassedError` (ADR-0018), and the honest route is a rework. **No
+  decision was taken** — the approval is the operator's and nobody else's, so the Run is left
+  `waiting_human` exactly as the factory left it.
+
+  Two operational findings worth keeping:
+
+  - **A rejected trigger is lost, not retried.** The first n8n call got `401` (see below) and the
+    Notion Trigger never repeated it — it forwards a page once, when the page changes. The page had
+    to be touched again to re-fire. Anything that makes the service refuse or be unreachable
+    silently drops that brief until someone edits the page (`CLAUDE.md` task 18).
+  - **The polling loop settled by itself.** The core's own four status writes edited the page during
+    the run, yet no further `POST /v1/briefs` arrived in the following minutes. Notion reports
+    `last_edited_time` only to the minute, so writes inside the same minute as the poll look
+    unchanged. Observation over a few minutes, not a guarantee — the design does not rely on it
+    (ADR-0047/0048 make a repeat call harmless anyway).
+
+- **2026-09-19 — the n8n credential had `__n8n_BLANK_VALUE_<uuid>` in front of the token.** The
+  first trigger was refused `401`. The Header Auth value was 104 characters instead of 50: n8n shows
+  a saved secret as a "leave unchanged" placeholder, and `Bearer <token>` had been pasted **after**
+  it. The token itself was right. Fixed by rewriting the credential through
+  `n8n import:credentials` (value assembled from `.env`, never printed; the temp files inside the
+  container had to be removed as root, since `docker cp` lands them owned by root). Worth knowing
+  when a credential "looks correct" in the UI but every request comes back `401`.
 - **2026-09-17 — step 2 (Notion API credential), partially done.** Created the Notion integration
   `concept` (Internal Integration Secret) at `notion.com/my-integrations` and granted its Content
   access to the brief database `New database` (id `3de64b74a905809daaa5f749653c1f29`, workspace

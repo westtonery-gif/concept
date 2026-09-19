@@ -20,7 +20,28 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-18)
+## Current state (2026-09-19)
+- **The M3 pilot ran on live systems and is PAUSED AT THE HUMAN GATE — the milestone is not
+  closed.** On 2026-09-19 the whole loop ran end to end against real Notion, real n8n (Docker,
+  1.121.0) and real Anthropic: a page flipped to `Ready for production` → **n8n itself** called
+  `factory_service.py` → Rin → Leo → QA → `waiting_human`, in 21 seconds, for **$0.010045** of real
+  tokens (three Analytics Records). Two `SUCCEEDED` Tasks, two `VALID` Outputs against the catalogue
+  Schemas, a `CANDIDATE` script, a `PENDING` review, and `Run status = waiting_human` written back
+  onto the Notion page. Full log: `n8n/README.md` → Operator verification log.
+  **Where it stopped and why:** QA answered **`flagged`** with three substantive flags (an unsourced
+  claim the brief had explicitly forbidden, no client context, ungrounded psychological assertions).
+  That shuts the gate — an Approve now raises `ArtifactQaNotPassedError` (ADR-0018) — so the real
+  route is a rework (`demo_notion.py --request-changes "<text>"`), which would also exercise
+  ADR-0032 on a live model for the first time. **The decision was deliberately left to the
+  maintainer: a session must not approve, request changes or reject on their behalf.** The Run sits
+  stored at `waiting_human`; nothing is lost by leaving it.
+  **What the pilot does NOT cover:** the `→ Google Docs →` leg. The maintainer cannot create a
+  Google service account, so `OMEMO_GOOGLE_*` are unset, `has_desk` is `False` and the approval
+  would be given through the CLI. **Milestone M3 therefore stays open** on two counts: no
+  human-approved artifact yet, and the review-desk leg unproven (see task 16.3 and task 19).
+  Roles are bound to `claude-haiku-4-5`, not Opus — a workaround for task 17, not a preference.
+  `.env` (git-ignored) holds the live configuration; `factory_service.py` was run manually and is
+  not a service unit.
 - **ROADMAP Stage 12 (MVP) is closed as code; Milestone M3 is still open (ADR-0051).**
   `tests/test_stage12_acceptance.py` (`S12A`, `STAGE12_ACCEPTANCE.md`) runs **S11A's production path
   unchanged** — the real `ProductionService` over `BriefProduction` + `build_run_index`, every
@@ -859,8 +880,16 @@ process at the time, not a pattern to keep copying.)
        rule); and a scheduled trigger the service cannot even dispatch (listing the waiting Runs
        fails) answers `503`, queues nothing, calls no model and leaves every stored Run untouched.
        S11A's `Factory` gained `dies_after_saves` / `index` keyword arguments to drive both.
-    3. **The actual milestone action is a live pilot, not more code. — STILL OPEN, and it is the
-       maintainer's, not a session's.** One real brief, real Notion, real Google Docs, real
+    3. **The actual milestone action is a live pilot, not more code. — PARTLY DONE 2026-09-19,
+       STILL OPEN.** The pilot ran (see "Current state" above and `n8n/README.md`): a real brief in
+       real Notion, triggered by real n8n, produced by real Anthropic, through to `waiting_human`
+       with statuses written back — for $0.010045. **Two things keep M3 open.** (1) No human-approved
+       artifact: QA said `flagged`, so the gate is correctly shut and the next move is a rework the
+       **maintainer** must ask for — a session may not decide the review. (2) No Google Docs leg:
+       no service account, so the desk is absent and approval would go through the CLI. Closing M3
+       needs both — a decision on the candidate, and either a Google service account or the Notion
+       desk of task 19. Everything else in this subtask's original brief is now done, not pending.
+       Original brief: One real brief, real Notion, real Google Docs, real
        Anthropic, real n8n trigger, through to a human-approved artifact. This needs the
        maintainer's real accounts across four external services — not available in this
        environment, not something a session can do unattended. Flag it, don't fake it with a
@@ -890,7 +919,36 @@ process at the time, not a pattern to keep copying.)
     same time whether the adapter should send `thinking` explicitly instead of inheriting whatever
     the model's default happens to be, since that default now varies by model and changed under us.
 
-18. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
+18. **A refused or undelivered trigger is silently lost — found in the pilot (2026-09-19), needs a
+    decision, probably an ADR.** n8n's Notion Trigger forwards a page **once**, when it changes. In
+    the pilot the first call came back `401` (a credential typo) and the trigger never retried; the
+    brief sat ready and unproduced until the page was edited again by hand. The same hole is open
+    whenever `factory_service.py` is down, restarting, or refusing — every brief edited in that
+    window is dropped, with nothing in the core to notice. `review-sweep` covers Runs already at
+    `waiting_human`, and nothing covers briefs that never became Runs. Options to weigh, not to
+    assume: a second scheduled route (`POST /v1/briefs/sweep`) that asks the board for ready briefs
+    with no stored Run — symmetrical with the review sweep, one more `BriefBoard` query, no n8n
+    logic; n8n's own retry/error-workflow settings — transport-level, keeps the core simpler, but
+    puts behaviour in n8n, which ARCHITECTURE §3.2 wants kept to transport; or accepting it and
+    documenting the manual re-touch. Note this is not the polling-loop question of ADR-0049 §3
+    (that one settled — see the log), it is its mirror image.
+
+19. **A `ReviewDesk` on Notion — the way to finish M3 without Google (2026-09-19).** The maintainer
+    cannot create a Google service account, so `GoogleDocsReviewDesk` (ADR-0043) cannot be used
+    here, and Stage 12's `→ Google Docs →` leg stays unproven. The port already exists and is
+    vendor-neutral (`adapters/review_desk.py`: `publish(ReviewPackage) -> location`,
+    `fetch_decision(review_id) -> ReviewDecision | None`), and the factory is business-agnostic
+    (ADR-0037) — so a second implementation is an **additive** module, exactly like `NotionBriefBoard`
+    was, with no core change. `NotionBriefBoard` already proves the HTTP client, the auth and the
+    block/property handling against this very workspace; the decision marker can reuse ADR-0043 §2's
+    grammar (`РЕШЕНИЕ:` / `ПРИЧИНА:` above a separator) since it is about text, not about Google.
+    Open questions for the ADR: a page in the brief database or its own database; how `review_id` is
+    found again (ADR-0043 hashes it into `appProperties` — Notion has no equivalent, so a property);
+    and whether the same integration token may write, given the current one is described as
+    read-only in `n8n/README.md`. Do not start before the maintainer chooses between this and a
+    Google service account — both close the same gap, and it is their call which.
+
+20. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
     code, so the two things that were waiting on it are now unblocked *as candidates*, not as a
     default: task 9 (ROADMAP Stage 13 — real media production) and task 10 (the `CONTENT_FACTORY_
     THOUGHTS.md` §16 question: keep Stage 13 as ROADMAP has it, or carve out an earlier narrow video
