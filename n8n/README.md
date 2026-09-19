@@ -135,3 +135,16 @@ it's actually done, step by step against the Setup list above — not all at onc
   `Authorization` value actually matches a real `OMEMO_SERVICE_TOKEN`. Still open: start
   `factory_service.py` and confirm/update that credential's value against it, then workflow
   import/placeholder edits, activation and an actual triggered request.
+- **2026-09-19 — credential/workflow cleanup for the pilot (phase A).** Confirmed
+  `Concept Notion (read)` is still the credential's name after the Docker move (the entry above's
+  rename survived the bind-mounted SQLite round-trip). Updated `Concept factory service`'s
+  `Authorization` value to `Bearer <the repo .env's OMEMO_SERVICE_TOKEN>` — its previous value
+  predated that token and did not match it; still unverified against a *running*
+  `factory_service.py` (n8n's Header Auth credential type has no connection test). Deleted the
+  leftover `ConceptImportChk` workflow: the n8n UI has no direct Delete on an active workflow —
+  **Archive first** (workflow list row's `⋮` menu), then enable "Show archived workflows" in the
+  filter panel and Delete from there. Activated only `Concept factory — brief page updated →
+  production`; `Concept factory — sweep reviews waiting for a human` stays Inactive on purpose —
+  phase A has no review desk (no `OMEMO_GOOGLE_*`, per the entry above), so there is nothing for a
+  sweep to pick up yet. Still open: start `factory_service.py` and flip the brief page's `Stage` to
+  `Ready for production` — the actual pilot trigger.
