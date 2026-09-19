@@ -24,6 +24,8 @@ from omemo_content_factory.infrastructure.llm import (
     AnthropicLLMClient,
     LLMError,
     LLMTaskExecutor,
+    ThinkingMode,
+    ThinkingSetting,
     TokenPricing,
 )
 from omemo_content_factory.tools.contract import Tool
@@ -32,6 +34,7 @@ from omemo_content_factory.tools.text_metrics import TextMetrics
 from omemo_content_factory.tools.toolbox import Toolbox
 
 _PRICING = TokenPricing(Decimal("3"), Decimal("15"), "USD")
+_NO_THINKING = ThinkingSetting(ThinkingMode.DISABLED)
 
 
 class _ScriptedMessages:
@@ -76,12 +79,18 @@ def _call(call_id: str, name: str, arguments: dict[str, object] | None = None) -
 
 
 def _client(
-    responses: list[Message], *, max_tool_calls: int = 8
+    responses: list[Message],
+    *,
+    max_tool_calls: int = 8,
+    max_tokens: int = 4096,
+    thinking: ThinkingSetting = _NO_THINKING,
 ) -> tuple[AnthropicLLMClient, _ScriptedMessages]:
     scripted = _ScriptedAnthropic(responses)
     client = AnthropicLLMClient(
         model="configured-model",
         pricing=_PRICING,
+        max_tokens=max_tokens,
+        thinking=thinking,
         max_tool_calls=max_tool_calls,
         client=cast(anthropic.Anthropic, scripted),
     )
@@ -279,7 +288,38 @@ def test_ltl_08_composition_builds_each_agent_scoped_toolbox_and_rejects_bad_gra
         build_executor_map([bad_agent], None, FakeLLMClient(), leo.SCHEMAS, available_tools=tools)
 
 
+def test_ltl_09_request_budget_and_thinking_are_sent_on_every_turn() -> None:
+    """PROVIDER_MODEL_ACCEPTANCE §7 B (`ADR-0052`): the settings belong to the client, not to
+    one call."""
+    client, endpoint = _client(
+        [
+            _message(_call("date-1", "current_date")),
+            _message(_call("final-1", "emit_fields", {"audience": "A", "angle": "B"})),
+        ],
+        max_tokens=12000,
+        thinking=ThinkingSetting(ThinkingMode.ADAPTIVE),
+    )
+
+    client.complete(
+        system="research",
+        user="What should we publish this week?",
+        fields=("audience", "angle"),
+        toolbox=_current_date_toolbox(lambda: datetime(2026, 9, 19, 18, 30, tzinfo=UTC)),
+    )
+
+    assert len(endpoint.calls) == 2
+    for call in endpoint.calls:  # the second turn is not weaker than the first
+        assert call["max_tokens"] == 12000
+        assert call["thinking"] == {"type": "adaptive"}
+
+
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, "2"])
 def test_ltl_call_budget_must_be_a_positive_integer(value: object) -> None:
     with pytest.raises(ValueError, match="max_tool_calls"):
-        AnthropicLLMClient(model="configured", pricing=_PRICING, max_tool_calls=cast(int, value))
+        AnthropicLLMClient(
+            model="configured",
+            pricing=_PRICING,
+            max_tokens=4096,
+            thinking=ThinkingSetting(ThinkingMode.DISABLED),
+            max_tool_calls=cast(int, value),
+        )

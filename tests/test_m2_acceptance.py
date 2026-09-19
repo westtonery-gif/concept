@@ -49,7 +49,12 @@ from omemo_content_factory.domain.run import Actor, ReworkPolicy, Run, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, TokenPricing
+from omemo_content_factory.infrastructure.llm import (
+    AnthropicLLMClient,
+    ThinkingMode,
+    ThinkingSetting,
+    TokenPricing,
+)
 
 RUN_ID = "run-m2-acceptance"
 BRIEF = "Тема: магний и сон для подписчиков омемо. Цель: короткий вертикальный сценарий."
@@ -197,6 +202,8 @@ def _compile(turns: list[Message], store: RunStore) -> tuple[ContentDirector, _S
     client = AnthropicLLMClient(
         model="configured-alias",
         pricing=_PRICING,
+        max_tokens=4096,
+        thinking=ThinkingSetting(ThinkingMode.DISABLED),
         client=cast(anthropic.Anthropic, scripted),
         clock=_ticking_clock(),
     )

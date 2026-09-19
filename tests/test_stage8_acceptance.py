@@ -40,7 +40,12 @@ from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient, TokenPricing
+from omemo_content_factory.infrastructure.llm import (
+    AnthropicLLMClient,
+    ThinkingMode,
+    ThinkingSetting,
+    TokenPricing,
+)
 
 RUN_ID = "run-stage8-acceptance"
 BRIEF = "Тема: как выбрать беговые кроссовки. Цель: короткий вертикальный сценарий."
@@ -175,12 +180,16 @@ class _Process:
         producer_client = AnthropicLLMClient(
             model="producer-alias",
             pricing=_PRODUCER_PRICING,
+            max_tokens=4096,
+            thinking=ThinkingSetting(ThinkingMode.DISABLED),
             client=cast(anthropic.Anthropic, producer_sdk),
             clock=_ticking_clock(),
         )
         qa_client = AnthropicLLMClient(
             model="qa-alias",
             pricing=_QA_PRICING,
+            max_tokens=4096,
+            thinking=ThinkingSetting(ThinkingMode.DISABLED),
             client=cast(anthropic.Anthropic, qa_sdk),
             clock=_ticking_clock(),
         )

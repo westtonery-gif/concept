@@ -141,8 +141,10 @@ python demo.py
 
 A real model call needs `ANTHROPIC_API_KEY` plus explicit
 `OMEMO_LLM_INPUT_PRICE_PER_MILLION`, `OMEMO_LLM_OUTPUT_PRICE_PER_MILLION` and
-`OMEMO_LLM_PRICE_CURRENCY` values in the environment (optionally `OMEMO_LLM_MODEL` to choose the
-model); missing configuration is explained and the demo exits cleanly. No QA, Human Review,
+`OMEMO_LLM_PRICE_CURRENCY` values, plus an explicit request budget — `OMEMO_LLM_MAX_TOKENS` and
+`OMEMO_LLM_THINKING` (`adaptive` | `disabled` | `inherit` | `budget:<tokens>`, ADR-0052) — in the
+environment (optionally `OMEMO_LLM_MODEL` to choose the model); missing configuration is explained
+and the demo exits cleanly. No QA, Human Review,
 publication or external integrations are involved.
 
 ## Running the factory-role demo
@@ -161,16 +163,22 @@ export OMEMO_MODEL__CONTENT_RESEARCHER_V1=claude-sonnet-4-6
 export OMEMO_INPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_OUTPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_PRICE_CURRENCY__CONTENT_RESEARCHER_V1=USD
+export OMEMO_MAX_TOKENS__CONTENT_RESEARCHER_V1=16000
+export OMEMO_THINKING__CONTENT_RESEARCHER_V1=adaptive
 export OMEMO_PROVIDER__SCRIPT_WRITER_V1=anthropic
 export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
 export OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_OUTPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_PRICE_CURRENCY__SCRIPT_WRITER_V1=USD
+export OMEMO_MAX_TOKENS__SCRIPT_WRITER_V1=16000
+export OMEMO_THINKING__SCRIPT_WRITER_V1=adaptive
 export OMEMO_PROVIDER__QA_AGENT_V1=anthropic
 export OMEMO_MODEL__QA_AGENT_V1=claude-sonnet-4-6
 export OMEMO_INPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_OUTPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
 export OMEMO_PRICE_CURRENCY__QA_AGENT_V1=USD
+export OMEMO_MAX_TOKENS__QA_AGENT_V1=16000
+export OMEMO_THINKING__QA_AGENT_V1=adaptive
 python demo_factory.py
 ```
 
@@ -191,7 +199,11 @@ stays at `WAITING_QA` and running the demo again asks QA again (ADR-0038).
 
 Replace the rate placeholders with the provider's current per-million-token prices. Pricing is
 explicit and per role; an Anthropic binding without both rates and a currency fails closed rather
-than recording a guessed cost (ADR-0029).
+than recording a guessed cost (ADR-0029). So are the output budget and the thinking choice
+(ADR-0052): there is no default `max_tokens` and nothing is inherited silently from the model, since
+a role that spends its whole budget on reasoning never emits a structured answer and the Run fails
+as `INVALID`. `budget:<tokens>` is the only form Haiku 4.5 and older models accept; Opus 5 and
+Sonnet 5 reject it with a `400` and take `adaptive`. `.env.example` explains each value.
 
 The Run is saved after every step to `OMEMO_RUN_STORE_PATH` (default `.omemo/runs.sqlite3`,
 git-ignored; ADR-0026). Running the demo again **resumes** that Run instead of starting over: an
@@ -210,7 +222,7 @@ outside" path (ROADMAP Stage 9, ADR-0040). Everything else (roles, QA gate, rewo
 exactly `demo_factory.py`, reused rather than duplicated.
 
 ```bash
-# same ANTHROPIC_API_KEY / OMEMO_PROVIDER__* / pricing exports as demo_factory.py, plus:
+# same ANTHROPIC_API_KEY / OMEMO_PROVIDER__* / pricing / budget exports as demo_factory.py, plus:
 export OMEMO_NOTION_TOKEN=secret_...
 export OMEMO_NOTION_DATABASE_ID=...
 export OMEMO_NOTION_READY_PROPERTY=Stage

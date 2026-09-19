@@ -38,7 +38,11 @@ from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.infrastructure.in_memory_adapters import InMemoryBriefBoard
-from omemo_content_factory.infrastructure.llm import AnthropicLLMClient
+from omemo_content_factory.infrastructure.llm import (
+    AnthropicLLMClient,
+    ThinkingMode,
+    ThinkingSetting,
+)
 from tests.test_stage8_acceptance import (
     _PRODUCER_PRICING,
     _QA_PRICING,
@@ -130,12 +134,16 @@ class _Process:
         producer_client = AnthropicLLMClient(
             model="producer-alias",
             pricing=_PRODUCER_PRICING,
+            max_tokens=4096,
+            thinking=ThinkingSetting(ThinkingMode.DISABLED),
             client=cast(anthropic.Anthropic, producer_sdk),
             clock=_ticking_clock(),
         )
         qa_client = AnthropicLLMClient(
             model="qa-alias",
             pricing=_QA_PRICING,
+            max_tokens=4096,
+            thinking=ThinkingSetting(ThinkingMode.DISABLED),
             client=cast(anthropic.Anthropic, qa_sdk),
             clock=_ticking_clock(),
         )

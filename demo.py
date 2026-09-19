@@ -9,8 +9,10 @@ It shows, for the run: the Run status, each Task's status, each Task's Output, t
 provenance ``Task -> Output -> Artifact``), the domain-event journal, and the final article.
 
 Run with: ``python demo.py``. A real model call needs ``ANTHROPIC_API_KEY`` plus explicit input /
-output token prices and currency in the environment (`ADR-0029`; optionally ``OMEMO_LLM_MODEL``
-to choose the model). Missing configuration is explained and the demo exits cleanly. No QA,
+output token prices and currency (`ADR-0029`) and an explicit request budget —
+``OMEMO_LLM_MAX_TOKENS`` and ``OMEMO_LLM_THINKING`` (`ADR-0052`) — in the environment (optionally
+``OMEMO_LLM_MODEL`` to choose the model). Missing configuration is explained and the demo exits
+cleanly. No QA,
 Human Review, publication or external integrations are involved.
 """
 
@@ -33,6 +35,7 @@ from omemo_content_factory.domain.task import TaskEvent, TaskFailed
 from omemo_content_factory.infrastructure.llm import (
     AnthropicLLMClient,
     LLMTaskExecutor,
+    ThinkingSetting,
     TokenPricing,
 )
 
@@ -183,7 +186,20 @@ def main() -> None:
         safe_print("Set OMEMO_LLM_INPUT_PRICE_PER_MILLION, ")
         safe_print("OMEMO_LLM_OUTPUT_PRICE_PER_MILLION and OMEMO_LLM_PRICE_CURRENCY.")
         return
-    client = AnthropicLLMClient(model=model, pricing=pricing)
+    # The output budget and the thinking choice are configuration too (ADR-0052): this older
+    # entrypoint has global bindings, so they are global variables here, with no default.
+    try:
+        client = AnthropicLLMClient(
+            model=model,
+            pricing=pricing,
+            max_tokens=int(os.environ["OMEMO_LLM_MAX_TOKENS"]),
+            thinking=ThinkingSetting.parse(os.environ["OMEMO_LLM_THINKING"]),
+        )
+    except (KeyError, ValueError) as exc:
+        safe_print(f"The request budget is missing or invalid: {exc}")
+        safe_print("Set OMEMO_LLM_MAX_TOKENS (an integer, e.g. 16000) and OMEMO_LLM_THINKING")
+        safe_print("(adaptive | disabled | inherit | budget:<tokens>).")
+        return
     executors: Mapping[str, TaskExecutor] = {
         "researcher@v1": LLMTaskExecutor(
             client=client,

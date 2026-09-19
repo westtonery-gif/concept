@@ -24,13 +24,16 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
+from enum import Enum
 from typing import Protocol
 
 import anthropic
+from anthropic import Omit, omit
 from anthropic.types import (
     ContentBlock,
     Message,
     MessageParam,
+    ThinkingConfigParam,
     ToolChoiceParam,
     ToolParam,
     ToolResultBlockParam,
@@ -50,8 +53,9 @@ from omemo_content_factory.domain.tool import ToolDescriptor
 from omemo_content_factory.tools.contract import ToolCall, ToolResult, ToolResultStatus
 from omemo_content_factory.tools.toolbox import Toolbox
 
-_DEFAULT_MAX_TOKENS = 2048
 _DEFAULT_MAX_TOOL_CALLS = 8
+_MIN_THINKING_BUDGET = 1024
+_THINKING_BUDGET_PREFIX = "budget:"
 _STRUCTURED_TOOL_NAME = "emit_fields"
 _INPUT_PLACEHOLDER = "{input}"
 _TOKENS_PER_MILLION = Decimal(1_000_000)
@@ -86,6 +90,78 @@ class TokenPricing:
             Decimal(input_tokens) * self.input_per_million
             + Decimal(output_tokens) * self.output_per_million
         ) / _TOKENS_PER_MILLION
+
+
+class ThinkingMode(Enum):
+    """The forms a role's extended-thinking choice can take (ADR-0052 §2)."""
+
+    ADAPTIVE = "adaptive"
+    DISABLED = "disabled"
+    BUDGET = "budget"
+    INHERIT = "inherit"
+
+
+@dataclass(frozen=True, slots=True)
+class ThinkingSetting:
+    """One role's explicit extended-thinking choice (ADR-0052 §2).
+
+    The provider's own default is **not** a choice this object can hold implicitly: the request
+    always carries what the configuration says, and ``INHERIT`` — the one mode that omits the
+    field — is a value an operator wrote down. ``BUDGET`` is the pre-adaptive form
+    (``budget_tokens``), which only older models still accept; the current models take ``ADAPTIVE``
+    and reject a budget with a ``400``. Which mode a given model accepts is the provider's
+    knowledge, deliberately not modelled here (ADR-0052 §4).
+    """
+
+    mode: ThinkingMode
+    budget_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode is ThinkingMode.BUDGET:
+            value = self.budget_tokens
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError(f"a thinking budget must be an int, got {value!r}")
+            if value < _MIN_THINKING_BUDGET:
+                raise ValueError(
+                    f"a thinking budget must be >= {_MIN_THINKING_BUDGET}, got {value}"
+                )
+        elif self.budget_tokens is not None:
+            raise ValueError(f"thinking mode '{self.mode.value}' takes no budget_tokens")
+
+    @classmethod
+    def parse(cls, raw: str) -> ThinkingSetting:
+        """Read the closed configuration grammar (`ADR-0052` §2), case-insensitive.
+
+        ``adaptive`` / ``disabled`` / ``inherit`` / ``budget:<N>``. Anything else raises
+        ``ValueError`` — an unrecognised word never degrades into inheriting the model's default,
+        which is the behaviour this setting exists to end. The grammar lives with the value object
+        so both entrypoints read one definition; naming the environment variable that carries it
+        stays selection's business (SPEC §1.2).
+        """
+        value = raw.strip().lower()
+        for mode in (ThinkingMode.ADAPTIVE, ThinkingMode.DISABLED, ThinkingMode.INHERIT):
+            if value == mode.value:
+                return cls(mode)
+        if value.startswith(_THINKING_BUDGET_PREFIX):
+            budget = value.removeprefix(_THINKING_BUDGET_PREFIX).strip()
+            try:
+                return cls(ThinkingMode.BUDGET, int(budget))
+            except ValueError as exc:
+                raise ValueError(f"invalid thinking budget '{budget}': {exc}") from exc
+        raise ValueError(
+            f"unknown thinking value '{raw}' "
+            f"(expected adaptive, disabled, inherit or budget:<tokens>)"
+        )
+
+    def as_param(self) -> ThinkingConfigParam | None:
+        """Translate the choice into the provider's field; ``None`` means send no field at all."""
+        if self.mode is ThinkingMode.ADAPTIVE:
+            return {"type": "adaptive"}
+        if self.mode is ThinkingMode.DISABLED:
+            return {"type": "disabled"}
+        if self.mode is ThinkingMode.BUDGET and self.budget_tokens is not None:
+            return {"type": "enabled", "budget_tokens": self.budget_tokens}
+        return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,8 +254,10 @@ class AnthropicLLMClient:
     Structured output is obtained through the private ``emit_fields`` tool. With an empty Toolbox
     it is forced in one call, preserving ADR-0014. With granted Tools, the adapter translates their
     provider-neutral descriptors and runs the bounded multi-turn loop from ADR-0028. The model is
-    supplied by configuration (never hardcoded, PROJECT.md §5). SDK/protocol/budget failures are
-    wrapped as :class:`LLMError`.
+    supplied by configuration (never hardcoded, PROJECT.md §5), and so are ``max_tokens`` and the
+    ``thinking`` choice: both are **required** and have no default here, because a default would
+    be a guess about the role's model (ADR-0052 §1). SDK/protocol/budget failures are wrapped as
+    :class:`LLMError` — including a provider refusing a thinking mode its model does not accept.
     """
 
     def __init__(
@@ -187,7 +265,8 @@ class AnthropicLLMClient:
         *,
         model: str,
         pricing: TokenPricing,
-        max_tokens: int = _DEFAULT_MAX_TOKENS,
+        max_tokens: int,
+        thinking: ThinkingSetting,
         max_tool_calls: int = _DEFAULT_MAX_TOOL_CALLS,
         client: anthropic.Anthropic | None = None,
         clock: Callable[[], datetime] = _utc_now,
@@ -198,9 +277,17 @@ class AnthropicLLMClient:
             or max_tool_calls < 1
         ):
             raise ValueError("max_tool_calls must be an int >= 1")
+        if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens < 1:
+            raise ValueError(f"max_tokens must be an int >= 1, got {max_tokens!r}")
+        budget = thinking.budget_tokens
+        if budget is not None and budget >= max_tokens:
+            raise ValueError(
+                f"a thinking budget ({budget}) must be below max_tokens ({max_tokens})"
+            )
         self._model = model
         self._pricing = pricing
         self._max_tokens = max_tokens
+        self._thinking = thinking
         self._max_tool_calls = max_tool_calls
         self._client = anthropic.Anthropic() if client is None else client
         self._clock = clock
@@ -284,6 +371,10 @@ class AnthropicLLMClient:
         tool_choice: ToolChoiceParam,
     ) -> tuple[Message, LLMCallMetrics]:
         """Make and measure one provider turn; errors without a response report no usage."""
+        # Both the output budget and the thinking choice belong to the client, so every turn of the
+        # ADR-0028 loop carries them, not only the first (ADR-0052 §2).
+        param = self._thinking.as_param()
+        thinking: ThinkingConfigParam | Omit = omit if param is None else param
         started_at = self._clock()
         try:
             message = self._client.messages.create(
@@ -293,6 +384,7 @@ class AnthropicLLMClient:
                 messages=messages,
                 tools=tools,
                 tool_choice=tool_choice,
+                thinking=thinking,
             )
         except anthropic.AnthropicError as exc:
             raise LLMError(str(exc)) from exc

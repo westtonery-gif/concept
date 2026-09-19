@@ -21,6 +21,19 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-19)
+- **`max_tokens` and extended thinking are per-role configuration; no request parameter is hardcoded
+  any more (ADR-0052; queue task 17).** `OMEMO_MAX_TOKENS__<ROLE>` and `OMEMO_THINKING__<ROLE>`
+  (`adaptive` | `disabled` | `budget:<N>` | `inherit`) are **required** for an anthropic binding, like
+  the three pricing values; `_DEFAULT_MAX_TOKENS = 2048` is deleted and `AnthropicLLMClient` cannot be
+  built without both, so the defect cannot come back through a caller. `ThinkingSetting` (immutable,
+  owns the grammar via `parse`) is sent on **every** provider turn, including each turn of the
+  ADR-0028 Tool loop; `inherit` is the only mode that omits the field, and the SDK strips it from the
+  body. `N >= 1024` and `N < max_tokens` are checked at selection time, before a token is bought.
+  What a given model accepts is deliberately not modelled — a wrong pair is the provider's `400`,
+  i.e. an already-managed failed Task. **An existing `.env` must add both variables per anthropic
+  role** (it fails closed, naming what is missing). `PROVIDER_MODEL_SPEC.md` /
+  `PROVIDER_MODEL_ACCEPTANCE.md` are 1.2 (§7 new); tests `tests/test_provider_model.py` + `LTL-09`.
+  Suite: 1182 passed.
 - **The M3 pilot ran on live systems and is PAUSED AT THE HUMAN GATE — the milestone is not
   closed.** On 2026-09-19 the whole loop ran end to end against real Notion, real n8n (Docker,
   1.121.0) and real Anthropic: a page flipped to `Ready for production` → **n8n itself** called
@@ -39,7 +52,9 @@ anything ahead of the queue below — see task 10.
   Google service account, so `OMEMO_GOOGLE_*` are unset, `has_desk` is `False` and the approval
   would be given through the CLI. **Milestone M3 therefore stays open** on two counts: no
   human-approved artifact yet, and the review-desk leg unproven (see task 16.3 and task 19).
-  Roles are bound to `claude-haiku-4-5`, not Opus — a workaround for task 17, not a preference.
+  Roles were bound to `claude-haiku-4-5`, not Opus — the workaround for task 17, which is now fixed
+  (ADR-0052): a next pilot can bind Opus 5 / Sonnet 5 by setting `OMEMO_MAX_TOKENS__<ROLE>` and
+  `OMEMO_THINKING__<ROLE>`, both of which an existing `.env` must now add for every anthropic role.
   `.env` (git-ignored) holds the live configuration; `factory_service.py` was run manually and is
   not a service unit.
 - **ROADMAP Stage 12 (MVP) is closed as code; Milestone M3 is still open (ADR-0051).**
@@ -261,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 51 ADRs (0001–0051) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 52 ADRs (0001–0052) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -277,7 +292,8 @@ anything ahead of the queue below — see task 10.
   (0043), the held Approval Gate + publication (0044), the decision fetch + Reject routing (0045),
   the Stage 10 acceptance (0046), the review link on the brief (0047), the brief invocation + Run
   index (0048), the HTTP production service + n8n workflows (0049), the Stage 11 acceptance (0050)
-  and the Stage 12 acceptance + the M3 pilot boundary (0051) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
+  the Stage 12 acceptance + the M3 pilot boundary (0051) and the per-role `max_tokens` + explicit
+  thinking (0052) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
   `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
@@ -901,23 +917,26 @@ process at the time, not a pattern to keep copying.)
        live provider call. `demo_notion.py` is the CLI for one brief; `factory_service.py` is the
        service n8n calls.
 
-17. **`max_tokens` is hardcoded at 2048 and cannot be configured — found while setting up the M3
-    pilot (2026-09-18), needs an ADR.** `infrastructure/llm.py` `_DEFAULT_MAX_TOKENS = 2048` is a
-    constructor default, and `provider_model.py:102` builds `AnthropicLLMClient(model=…,
-    pricing=…)` without it — so no environment variable can change it, unlike provider, model and
-    the three pricing values. This was harmless when every model had thinking off by default. It is
-    not any more: **on Claude Opus 5 and Sonnet 5 adaptive thinking is on when the request omits
-    `thinking`, and thinking spends the same output budget.** A role that thinks its way through
-    2048 tokens never emits the forced `emit_fields` call, `_extract_fields` returns `{}`,
-    `Schema.validate` says `INVALID` and the Run ends `FAILED` with `INVALID_OUTPUT_REASON` — the
-    fail-closed path working exactly as designed, for a configuration reason rather than a content
-    one. The pilot therefore runs `claude-haiku-4-5` (thinking off by default, so 2048 is the whole
-    answer), which is a workaround, not a fix. Wanted: a per-role `OMEMO_MAX_TOKENS__<ROLE>`
-    alongside the existing binding variables (ADR-0016's ownership rule says selection lives in
-    config, and this is part of the selection), `PROVIDER_MODEL_SPEC.md` / `_ACCEPTANCE.md` amended,
-    and a decision on the default — plain 2048 is too small for a current model. Consider at the
-    same time whether the adapter should send `thinking` explicitly instead of inheriting whatever
-    the model's default happens to be, since that default now varies by model and changed under us.
+17. ~~**`max_tokens` is hardcoded at 2048 and cannot be configured.**~~ — done (ADR-0052,
+    `PROVIDER_MODEL_SPEC.md` / `_ACCEPTANCE.md` 1.2). Both decisions the task asked for were **asked,
+    not guessed** — the maintainer chose (2026-09-19): `OMEMO_MAX_TOKENS__<ROLE>` is **required** for
+    an anthropic binding, exactly like the pricing values (so **no** default lives in code — the
+    `_DEFAULT_MAX_TOKENS` constant is gone and `AnthropicLLMClient(max_tokens=…, thinking=…)` cannot
+    be constructed without both), and thinking is **sent explicitly and per role** rather than
+    inherited. **Corrected while implementing:** the maintainer's answer named `budget_tokens`, which
+    the current models reject with a `400` (it lives on only for Haiku 4.5 and older) — so
+    `OMEMO_THINKING__<ROLE>` has a closed grammar instead: `adaptive` | `disabled` | `budget:<N>` |
+    `inherit`, the last being the one spelling that omits the field (a written-down decision, not a
+    silent fallback). `budget:<N>` is checked against `N >= 1024` and `N < max_tokens` **at selection
+    time**, so a pair the provider would `400` costs zero tokens. Tests: `tests/test_provider_model.py`
+    (§4 variant + §7 A/C/D), `LTL-09` (§7 B: both values on every turn of the Tool loop). Suite: 1182
+    passed. **Deliberately left out (ADR-0052 §4):** `output_config.effort`, `thinking.display`,
+    streaming for large budgets, a per-model validity table in the factory (that would hardcode model
+    knowledge — a wrong pair surfaces as the provider's `400`, i.e. a managed failed Task), and the
+    finding that **Claude Fable 5.1 / Mythos 5.1 cannot back any role at all**: they reject forced
+    `tool_choice`, which *is* ADR-0014's structured-output mechanism. Note for the next live pilot:
+    an existing `.env` must add both variables per anthropic role or the factory fails closed at
+    startup, and Opus 5 / Sonnet 5 are now usable (`adaptive` + a real budget).
 
 18. **A refused or undelivered trigger is silently lost — found in the pilot (2026-09-19), needs a
     decision, probably an ADR.** n8n's Notion Trigger forwards a page **once**, when it changes. In

@@ -23,6 +23,8 @@ from omemo_content_factory.infrastructure.llm import (
     AnthropicLLMClient,
     LLMError,
     LLMTaskExecutor,
+    ThinkingMode,
+    ThinkingSetting,
     TokenPricing,
 )
 from omemo_content_factory.tools.contract import Tool
@@ -92,6 +94,8 @@ def _client(
     return AnthropicLLMClient(
         model="configured-alias",
         pricing=_PRICING,
+        max_tokens=4096,
+        thinking=ThinkingSetting(ThinkingMode.DISABLED),
         max_tool_calls=max_tool_calls,
         client=cast(anthropic.Anthropic, scripted),
         clock=clock,
@@ -251,6 +255,8 @@ def test_mtc_07_transport_failure_without_response_does_not_fabricate_metrics() 
     client = AnthropicLLMClient(
         model="configured-alias",
         pricing=_PRICING,
+        max_tokens=4096,
+        thinking=ThinkingSetting(ThinkingMode.DISABLED),
         client=cast(anthropic.Anthropic, _FailingAnthropic()),
         clock=lambda: _T0,
     )

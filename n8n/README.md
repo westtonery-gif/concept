@@ -84,7 +84,10 @@ it's actually done, step by step against the Setup list above — not all at onc
   gate.** Steps 2 and 5 finished (credential renamed to `Concept Notion (read)`, the leftover
   `ConceptImportChk` deleted, `brief-ready` activated; `review-sweep` deliberately left inactive —
   with no desk it has nothing to pick up). `factory_service.py` was started on `0.0.0.0:8765` with
-  `claude-haiku-4-5` bound to all three roles (see `CLAUDE.md` task 17 for why not Opus). Verified
+  `claude-haiku-4-5` bound to all three roles (at the time the only usable choice — `max_tokens` was
+  hardcoded at 2048; ADR-0052 has since made it and the thinking mode per-role configuration, so a
+  next pilot can bind Opus 5 or Sonnet 5 by setting `OMEMO_MAX_TOKENS__<ROLE>` and
+  `OMEMO_THINKING__<ROLE>=adaptive`). Verified
   before spending anything: `/v1/health` answers from the host **and from inside the n8n container**
   over `host.docker.internal`; no token → `401`; a brief still at `Stage = Draft` → `202` and
   "nothing to produce", no model call. Then `Stage` was flipped to `Ready for production` and **n8n
