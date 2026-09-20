@@ -184,8 +184,12 @@ it's actually done, step by step against the Setup list above — not all at onc
   an undecided review read `None`; a never-published `review_id` was refused; and all three options
   mapped correctly — `Доработать → changes_requested` (with the reason), `Одобрено → approved`
   (reason `None`), `Отклонено → rejected` (with the reason). The decision was then reset to unset,
-  so the test row claims no verdict. **The test row `run-live-check-review-1` is left in the
-  database as evidence and can be deleted.** Nothing was decided on any real review: a session must
+  so the test row claims no verdict. **Then the maintainer set `Одобрено` from the dropdown in the
+  Notion UI, and `fetch_decision` read back `ReviewDecision(APPROVED, reason=None)`** — the last
+  untested leg, because everything above had been written by the API. The stored shape is identical
+  either way (`{"type": "select", "select": {"name": "Одобрено", …}}`), so the human path and the
+  machine path agree. **The test row `run-live-check-review-1` is left in the database as evidence
+  and can be deleted.** Nothing was decided on any real review: a session must
   not act as the reviewer (`CLAUDE.md` 16.3).
 - **2026-09-19 — the n8n credential had `__n8n_BLANK_VALUE_<uuid>` in front of the token.** The
   first trigger was refused `401`. The Header Auth value was 104 characters instead of 50: n8n shows
