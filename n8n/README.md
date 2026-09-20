@@ -80,6 +80,45 @@ those env vars.
 `CLAUDE.md`'s Stage 11 note ("A live Notion Trigger stays the operator's check") is tracked here as
 it's actually done, step by step against the Setup list above — not all at once.
 
+- **2026-09-20 — the maintainer asked for a rework; ADR-0032 and ADR-0052 both ran on live models
+  for the first time, and QA flagged the new version too.** The maintainer decided the review (a
+  session may not): changes requested on `…-review-1`, with instructions covering the three flags —
+  drop the unsourced "paralysis" claim, drop the nonexistent checklist link and any promised
+  outcome (no client profile exists, so the material is general, not promo), drop the "the brain
+  gives up" psychology. Before the run, `.env` was moved off the pilot's `claude-haiku-4-5` onto
+  **`claude-sonnet-5`** for all three roles, with the two variables ADR-0052 now requires per
+  anthropic role — `OMEMO_MAX_TOKENS__<ROLE>=16000` and `OMEMO_THINKING__<ROLE>=adaptive`. Without
+  them the factory refused to build at all (`ProviderModelSelectionError: role
+  'content_researcher@v1' selects provider 'anthropic' without max tokens, thinking`), which is the
+  fail-closed behaviour that note predicted. The already-running `factory_service.py` was stopped
+  first, so the CLI and a re-triggered service could not touch the same stored Run at once.
+
+  What the factory did: `…-review-1` recorded `changes_requested`, `resume` re-entered `RUNNING`,
+  **only Leo** was re-executed (`…-task-3`, `script_writer@v1`), `…-artifact-2` became `SUPERSEDED`
+  and `…-artifact-3` was created as `CANDIDATE` **v2** with `supersedes_ref` pointing at its
+  predecessor; `rework_count` is 1 of 3; a fresh `…-review-2` is `PENDING`. Rin was not called
+  again. Sonnet 5 accepted `thinking: {"type": "adaptive"}` on every turn — ADR-0052's grammar is
+  now proven against a model that rejects `budget_tokens`. Cost of this invocation: **$0.020702**
+  (`…-task-3` $0.012282, `…-evaluation-2` $0.008420), about twice the whole haiku pilot, as
+  expected from Sonnet 5's $2/$10 per MTok.
+
+  **QA answered `flagged` again**, with four flags: no client/product data or editorial rules; "они
+  решают проблему фиксации, а не приоритизации" stated as fact; "это просто честный учёт
+  собственной пропускной способности" reading as an implied promise of results; and the script
+  looking like a stock problem-agitate-solve pattern in the productivity niche. Two of those Leo
+  could not have fixed, which is the finding below.
+
+  **Finding — `passed` is unreachable on this path, and it is structural, not a wording problem.**
+  `ArtifactEvaluator.evaluate(content: str)` (ADR-0018/0036) hands the QA model **only the
+  candidate's own content** — never the brief, never a client profile. But `qa-agent` v2's criteria
+  ask for exactly that: criterion 4 judges "редакционным правилам клиента, присланным в контексте",
+  and criterion 1 asks whether the material repeats the client's own or a competitor's output.
+  Neither is decidable from the text alone, and the prompt closes with "Если сомневаешься — не
+  ставь passed" — so a correct QA agent flags the missing context every time. The gate is doing
+  what it was told; the contract is what is short. No further rework was spent on it: another
+  iteration would buy a differently-worded flag, not a verdict. Options for the maintainer are
+  queued in `CLAUDE.md` task 21.
+
 - **2026-09-19 — the whole loop ran from a live Notion trigger; the pilot is paused at the human
   gate.** Steps 2 and 5 finished (credential renamed to `Concept Notion (read)`, the leftover
   `ConceptImportChk` deleted, `brief-ready` activated; `review-sweep` deliberately left inactive —
