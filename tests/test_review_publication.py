@@ -38,6 +38,7 @@ from omemo_content_factory.domain.run import Actor, Run, RunSnapshot, RunStatus
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.infrastructure.google_docs_review_desk import GoogleDocsReviewDesk
 from omemo_content_factory.infrastructure.in_memory_adapters import InMemoryReviewDesk
+from omemo_content_factory.infrastructure.notion_review_desk import NotionReviewDesk
 
 RUN_ID = "run-rpb-0001"
 BRIEF = "a brief about running shoes"
@@ -356,6 +357,37 @@ def test_rpb_05_a_desk_outage_propagates_changes_nothing_and_the_next_call_publi
 def test_rpb_06_the_publisher_takes_any_review_desk() -> None:
     desk: ReviewDesk = FlakyDesk()
     assert publish_pending_review(_produced(None), desk) is None
+
+
+def test_rpb_08_the_environment_chooses_the_desk_and_a_half_set_one_never_falls_back() -> None:
+    """Presence is the opt-in, and a partly configured desk is refused, not replaced (ADR-0060)."""
+    notion_env = {
+        "OMEMO_REVIEW_NOTION_TOKEN": "t",
+        "OMEMO_REVIEW_NOTION_DATABASE_ID": "db",
+        "OMEMO_REVIEW_NOTION_TITLE_PROPERTY": "Name",
+        "OMEMO_REVIEW_NOTION_REVIEW_ID_PROPERTY": "Review id",
+        "OMEMO_REVIEW_NOTION_DECISION_PROPERTY": "Решение",
+        "OMEMO_REVIEW_NOTION_REASON_PROPERTY": "Причина",
+        "OMEMO_REVIEW_NOTION_FINGERPRINT_PROPERTY": "Fingerprint",
+    }
+    assert isinstance(build_review_desk(notion_env), NotionReviewDesk)
+
+    google_env = {
+        "OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE": "/nowhere/key.json",
+        "OMEMO_GOOGLE_REVIEW_FOLDER_ID": "folder-1",
+    }
+    half_notion = {"OMEMO_REVIEW_NOTION_TOKEN": "t", **google_env}
+    with pytest.raises(ReviewDeskError) as caught:
+        build_review_desk(half_notion)
+    message = str(caught.value)
+    assert "OMEMO_REVIEW_NOTION_DATABASE_ID" in message
+    assert "OMEMO_GOOGLE" not in message, "a half-set Notion desk must not fall back to Google"
+
+    with pytest.raises(ReviewDeskError) as neither:
+        build_review_desk({})
+    both = str(neither.value)
+    assert "OMEMO_REVIEW_NOTION_TOKEN" in both
+    assert "OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE" in both
 
 
 def test_rpb_07_build_review_desk_fails_closed_or_builds_the_google_desk(tmp_path: Path) -> None:

@@ -41,10 +41,16 @@ anything ahead of the queue below — see task 10.
   rule of three, and ADR-0061 records that the shared client is extracted only once three
   implementations exist in `src/` (this is the second). Spec: `ADAPTER_SPEC.md` §6 "Реализация на
   Notion"; acceptance: `ADAPTER_ACCEPTANCE.md` §14 `NRD`; tests `tests/test_notion_review_desk.py`
-  run the real HTTP code against a local `ThreadingHTTPServer` playing Notion. **No Composition Root
-  builder yet** — selecting between the Google and Notion desks in `build_review_desk` and wiring
-  `demo_notion.py` is the next subtask, the way `build_brief_board` followed ADR-0040. Suite: 1213
-  passed.
+  run the real HTTP code against a local `ThreadingHTTPServer` playing Notion. **Wired:** `composition.build_review_desk(environ)` now
+  **chooses**, with presence as the opt-in and **no silent fallback** — any `OMEMO_REVIEW_NOTION_*`
+  variable selects the Notion desk, otherwise any `OMEMO_GOOGLE_*` selects Google Docs, and a
+  **partly** configured desk fails closed naming its own missing variables rather than being
+  quietly replaced by the other one (an operator who set half of Notion's variables meant Notion).
+  With neither set, the error names both sets. `demo_notion.py`'s `_DESK_VARS` is the union, so "no
+  desk at all" stays a legitimate state (ADR-0044 §5) and reviews stay in the Run store. Tests:
+  `RPB-08`. **Still the operator's:** create the review database in Notion with the five properties
+  and **grant the `concept` integration access to it** — a database the integration cannot see is
+  indistinguishable from an empty one (ADR-0055 §5). Suite: 1214 passed.
 - **`max_tokens` and extended thinking are per-role configuration; no request parameter is hardcoded
   any more (ADR-0052; queue task 17).** `OMEMO_MAX_TOKENS__<ROLE>` and `OMEMO_THINKING__<ROLE>`
   (`adaptive` | `disabled` | `budget:<N>` | `inherit`) are **required** for an anthropic binding, like

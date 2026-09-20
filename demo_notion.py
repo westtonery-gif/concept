@@ -21,16 +21,18 @@ cleanly (`BriefBoard.fetch_brief` returns ``None`` for all of these — delibera
 indistinguishable, ADR-0040 §3). ``--approve`` / ``--request-changes "<instructions>"`` /
 ``--reject "<reason>"`` play the human reviewer, same as in ``demo_factory.py``.
 
-When both ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID`` are set, a Run
-waiting for a human has its pending review published as a Google Doc at the end of every invocation
-(ADR-0043/0044), the Doc's link is printed and written onto the brief's page (ADR-0047); publishing
-again finds the same Doc. Without them the review stays in the Run store only; a half-configured
-desk is explained and the demo exits. A desk that refuses to publish never touches the Run — the
-refusal is printed and the next invocation tries again.
+When a review desk is configured, a Run waiting for a human has its pending review published at the
+end of every invocation (ADR-0044), its link is printed and written onto the brief's page
+(ADR-0047); publishing again finds the same place. Two desks exist and the environment chooses:
+any ``OMEMO_REVIEW_NOTION_*`` variable selects the Notion desk (ADR-0060), otherwise any
+``OMEMO_GOOGLE_*`` variable selects Google Docs (ADR-0043). With neither the review stays in the
+Run store only; a half-configured desk is explained and the demo exits, and it is **not** silently
+replaced by the other one. A desk that refuses to publish never touches the Run — the refusal is
+printed and the next invocation tries again.
 
 Each invocation is ``BriefProduction.invoke`` (ADR-0048) — the same code ``factory_service.py``
 runs when n8n triggers a brief. With the desk configured, a stored Run waiting for a human first
-has its review published (idempotent) and the reviewer's decision read from the Doc (ADR-0045):
+has its review published (idempotent) and the reviewer's decision read back (ADR-0045):
 approved, changes requested or rejected is recorded, saved and routed by the resume that follows —
 a rework publishes the new version's review at the end. An approval of a candidate QA did not pass
 is not recorded; the demo says to change the Doc's decision instead. A reviewer flag wins over the
@@ -70,6 +72,8 @@ from omemo_content_factory.application.brief_status import BriefStatusReporter
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.review_publication import pending_review
 from omemo_content_factory.composition import (
+    GOOGLE_REVIEW_DESK_VARS,
+    NOTION_REVIEW_DESK_VARS,
     build_brief_board,
     build_review_desk,
     build_run_index,
@@ -82,7 +86,8 @@ from omemo_content_factory.composition import (
 from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
 
-_GOOGLE_VARS = ("OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE", "OMEMO_GOOGLE_REVIEW_FOLDER_ID")
+_DESK_VARS = NOTION_REVIEW_DESK_VARS + GOOGLE_REVIEW_DESK_VARS
+"""Any of these means the operator wants a desk; none means reviews stay local (ADR-0044 §5)."""
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -93,11 +98,13 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def _build_review_desk(environ: Mapping[str, str]) -> ReviewDesk | None:
-    """The Google Docs desk when configured, ``None`` when not configured at all (ADR-0044 §5).
+    """The configured desk, or ``None`` when no desk is configured at all (ADR-0044 §5).
 
-    A partly or wrongly configured desk raises ``ReviewDeskError`` naming what is wrong.
+    Which implementation is chosen is ``build_review_desk``'s rule (ADR-0060). A partly or wrongly
+    configured desk raises ``ReviewDeskError`` naming what is wrong, rather than falling back to
+    the other implementation.
     """
-    if not any(environ.get(name, "").strip() for name in _GOOGLE_VARS):
+    if not any(environ.get(name, "").strip() for name in _DESK_VARS):
         return None
     return build_review_desk(environ)
 
@@ -128,8 +135,12 @@ def explain_configuration_error(exc: Exception) -> None:
     if isinstance(exc, BriefBoardError):
         safe_print(f"The Notion board is not configured: {exc}")
     elif isinstance(exc, ReviewDeskError):
-        safe_print(f"The Google Docs review desk is not configured: {exc}")
-        safe_print(f"Set both {' and '.join(_GOOGLE_VARS)}, or neither to keep reviews local.")
+        safe_print(f"The review desk is not configured: {exc}")
+        safe_print(
+            "Set every variable of one desk, or none of them to keep reviews local: "
+            f"{', '.join(NOTION_REVIEW_DESK_VARS)} (Notion), "
+            f"or {', '.join(GOOGLE_REVIEW_DESK_VARS)} (Google Docs)."
+        )
     else:
         safe_print(f"Provider/model selection failed: {exc}")
         safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")

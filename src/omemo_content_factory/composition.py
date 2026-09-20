@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from omemo_content_factory.adapters.brief_board import BriefBoard
-from omemo_content_factory.adapters.review_desk import ReviewDesk
+from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.content_director import ContentDirector
@@ -52,6 +52,12 @@ from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
 from omemo_content_factory.infrastructure.google_docs_review_desk import (
+    REVIEW_FOLDER_ID_VAR as GOOGLE_REVIEW_FOLDER_ID_VAR,
+)
+from omemo_content_factory.infrastructure.google_docs_review_desk import (
+    SERVICE_ACCOUNT_FILE_VAR as GOOGLE_SERVICE_ACCOUNT_FILE_VAR,
+)
+from omemo_content_factory.infrastructure.google_docs_review_desk import (
     GoogleDocsReviewDesk,
     google_docs_settings_from_env,
 )
@@ -63,6 +69,31 @@ from omemo_content_factory.infrastructure.llm import (
 from omemo_content_factory.infrastructure.notion_brief_board import (
     NotionBriefBoard,
     notion_settings_from_env,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    DATABASE_ID_VAR as NOTION_REVIEW_DATABASE_ID_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    DECISION_PROPERTY_VAR as NOTION_REVIEW_DECISION_PROPERTY_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    FINGERPRINT_PROPERTY_VAR as NOTION_REVIEW_FINGERPRINT_PROPERTY_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    REASON_PROPERTY_VAR as NOTION_REVIEW_REASON_PROPERTY_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    REVIEW_ID_PROPERTY_VAR as NOTION_REVIEW_ID_PROPERTY_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    TITLE_PROPERTY_VAR as NOTION_REVIEW_TITLE_PROPERTY_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    TOKEN_VAR as NOTION_REVIEW_TOKEN_VAR,
+)
+from omemo_content_factory.infrastructure.notion_review_desk import (
+    NotionReviewDesk,
+    notion_review_settings_from_env,
 )
 from omemo_content_factory.infrastructure.production_service import (
     ProductionService,
@@ -235,14 +266,48 @@ def build_brief_board(environ: Mapping[str, str]) -> BriefBoard:
     return NotionBriefBoard(notion_settings_from_env(environ))
 
 
-def build_review_desk(environ: Mapping[str, str]) -> ReviewDesk:
-    """Build the ``ReviewDesk`` a real entrypoint publishes reviews to (ROADMAP Stage 10, ADR-0044).
+NOTION_REVIEW_DESK_VARS: tuple[str, ...] = (
+    NOTION_REVIEW_TOKEN_VAR,
+    NOTION_REVIEW_DATABASE_ID_VAR,
+    NOTION_REVIEW_TITLE_PROPERTY_VAR,
+    NOTION_REVIEW_ID_PROPERTY_VAR,
+    NOTION_REVIEW_DECISION_PROPERTY_VAR,
+    NOTION_REVIEW_REASON_PROPERTY_VAR,
+    NOTION_REVIEW_FINGERPRINT_PROPERTY_VAR,
+)
+"""Every variable the Notion desk needs; **any** of them present selects it (ADR-0060)."""
 
-    Reads ``OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE`` and ``OMEMO_GOOGLE_REVIEW_FOLDER_ID``
-    (:func:`google_docs_settings_from_env`, ADR-0043): a missing variable or an unusable key file
-    fails closed with ``ReviewDeskError`` before any request is made.
+GOOGLE_REVIEW_DESK_VARS: tuple[str, ...] = (
+    GOOGLE_SERVICE_ACCOUNT_FILE_VAR,
+    GOOGLE_REVIEW_FOLDER_ID_VAR,
+)
+"""Every variable the Google Docs desk needs (ADR-0043)."""
+
+
+def build_review_desk(environ: Mapping[str, str]) -> ReviewDesk:
+    """Build the ``ReviewDesk`` a real entrypoint publishes reviews to (ADR-0044, ADR-0060).
+
+    Two implementations of the port exist, so the environment chooses. The rule is **presence as an
+    opt-in**, with no silent fallback: setting *any* ``OMEMO_REVIEW_NOTION_*`` variable selects the
+    Notion desk (ADR-0060), otherwise any ``OMEMO_GOOGLE_*`` variable selects the Google Docs desk
+    (ADR-0043). A partly configured desk is **not** quietly replaced by the other one — it fails
+    closed naming the variables its own implementation still needs, because an operator who set
+    half of Notion's variables meant Notion.
+
+    With neither configured, ``ReviewDeskError`` names both sets. Entrypoints that treat "no desk at
+    all" as a legitimate state check the variables first (``demo_notion.py``, ADR-0044 §5).
     """
-    return GoogleDocsReviewDesk(google_docs_settings_from_env(environ))
+    if any(environ.get(name, "").strip() for name in NOTION_REVIEW_DESK_VARS):
+        return NotionReviewDesk(notion_review_settings_from_env(environ))
+    if any(environ.get(name, "").strip() for name in GOOGLE_REVIEW_DESK_VARS):
+        return GoogleDocsReviewDesk(google_docs_settings_from_env(environ))
+    raise ReviewDeskError(
+        "no review desk is configured; set "
+        + ", ".join(NOTION_REVIEW_DESK_VARS)
+        + " for the Notion desk, or "
+        + ", ".join(GOOGLE_REVIEW_DESK_VARS)
+        + " for the Google Docs desk"
+    )
 
 
 def build_production_service(
