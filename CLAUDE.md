@@ -967,7 +967,12 @@ process at the time, not a pattern to keep copying.)
     read-only in `n8n/README.md`. Do not start before the maintainer chooses between this and a
     Google service account — both close the same gap, and it is their call which.
 
-20. **What comes after Stage 12 — decide before coding, don't drift into it.** Stage 12 is closed as
+20. ~~**What comes after Stage 12 — decide before coding, don't drift into it.**~~ — done
+    (ADR-0053, 2026-09-20). Asked, not guessed: the maintainer brought a **third** candidate — a
+    clipping department — and chose it as the next work. Task 9 (Stage 13) and task 10 (the §16
+    video slice) stay unauthorized; Milestone M3 stays open and is not blocked, because its two
+    remaining items (a decision on the `flagged` candidate, and a review desk) wait on the
+    maintainer, not on engineering time. The department itself is task 21. Original brief: Stage 12 is closed as
     code, so the two things that were waiting on it are now unblocked *as candidates*, not as a
     default: task 9 (ROADMAP Stage 13 — real media production) and task 10 (the `CONTENT_FACTORY_
     THOUGHTS.md` §16 question: keep Stage 13 as ROADMAP has it, or carve out an earlier narrow video
@@ -976,6 +981,55 @@ process at the time, not a pattern to keep copying.)
     whichever session picks it up. Note too that Milestone M3 (16.3) is still open: a green CI is
     not the pilot. A reasonable next session is the ADR for that ordering decision — asked, not
     guessed — while the live pilot waits on the maintainer's accounts.
+
+21. **The clipping department (started 2026-09-20, authorized by ADR-0053).** A second department
+    alongside the content factory: an existing TV series episode (rights cleared) → short vertical
+    clips for TikTok / Reels / Shorts, through the same fail-closed QA + Human Review discipline
+    (ADR-0018). Everything is **additive** — no core change, or it is a defect signal with its own
+    ADR (ROADMAP Stage 13 DoD, `PROJECT.md` §4 п.11). The working note
+    `CLIPPING_DEPARTMENT_THOUGHTS.md` is non-normative and authorizes nothing; ADR-0053 records what
+    the maintainer settled on 2026-09-20: Vyra AI as the vendor (behind a role-named port, per
+    ADR-0023), a **separate** board database, a local episode file in test mode, v1 ends at an
+    approved clip file and publishes nothing, and nothing slow ever runs inside a reasoning step
+    (ADR-0028 §3's budget is for fast calls; minutes-long work uses the ADR-0049 queue, and
+    cutting/rendering is a deterministic `Workflow` step). Subtasks, each ADR-before-code:
+    1. **Side-effecting Tools — the boundary ADR.** ADR-0022 "Deferred" already reserved this one:
+       *"Tools on top of Adapters … The import allowlist is widened explicitly, by ADR, and the
+       adapter is injected like the clock."* So this is not a new architectural question — it is a
+       thin Tool in `tools/`, the port injected at construction, the real I/O in `infrastructure/`,
+       and `_ALLOWED_PROJECT_IMPORTS` in `tests/test_tool_contract.py` widened by name. Note while
+       designing: `ToolValue` is `str | int | bool` and a Tool answers with a flat mapping, so a
+       list of clip candidates belongs in the planner's Structured Output, not in a Tool's return
+       (or the kinds get widened here, by ADR).
+    2. **The clip QA criteria + the platform format contract — needs the maintainer, then an ADR.**
+       Two things are open and must not be guessed: what "accuracy to the source" means for scripted
+       fiction (working answer, put to the maintainer: a clip is self-contained and creates no
+       meaning the scene does not contain — no reply cut mid-word, no splice that invents an
+       exchange, no punchline without its setup, no spoiler), and the target frame (the maintainer's
+       screenshot shows a 16:9 frame letterboxed inside a 9:16 phone screen, which is a different
+       decision from reframing the shot to 9:16). Same shape as `qa-agent`: Prompt + Schema + the
+       ADR-0034 verdict grammar reused, not reinvented.
+    3. **Two cutting modes, and the volume they imply (answered 2026-09-20).** The department cuts
+       **by meaning** (the planner agent ranks moments found in the indexed episode) **and plainly by
+       length** (consecutive two-minute pieces). Chunk mode needs no agent at all: no Vyra call, no
+       LLM call, no ranking — a deterministic `Workflow` step, near-zero cost, whose only judgement
+       is nudging a boundary to the nearest speech pause so a cut does not land mid-word (so it still
+       wants the transcript). Both modes end at the same place: a rendered clip, its own Artifact,
+       its own verdict, its own gate. **Still open:** 30 episodes/month implies ~450 clips and, under
+       the current discipline, ~450 human Approves (~15/day by hand). The gate itself is not
+       negotiable (`PROJECT.md` §12, ADR-0018), so the question for 21.2 is whether one Approve may
+       cover a batch of chunk-mode clips from one episode — a domain decision, asked not guessed.
+    4. **The board Adapter.** A separate Notion database (the maintainer's choice), mirroring
+       `BriefBoard`: readiness is the board's rule, never re-decided in the agent (`n8n/README.md`).
+       Open: its properties, and whether the existing integration token may read it — it is
+       described as read-only in `n8n/README.md`, the same obstacle task 19 names.
+    5. **`CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`**, in the shape of the existing per-aggregate
+       specs, once 21.1–21.4 land.
+    6. **Only then implement:** the episode-source port (local file first), the indexing/transcription
+       step on the ADR-0049 queue, the clip-planner Agent (Prompt + Schema + Tool grants), the QA role,
+       the deterministic render step, and one Artifact + one gate per clip candidate.
+    7. **Automatic publishing** — wanted by the maintainer, deliberately out of scope for v1. Additive
+       Adapters per platform when it is asked for.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

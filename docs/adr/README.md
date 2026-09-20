@@ -76,3 +76,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0050](0050-stage-11-acceptance.md) | The ROADMAP Stage 11 (n8n) acceptance | Accepted |
 | [0051](0051-stage-12-acceptance-and-the-m3-pilot.md) | The ROADMAP Stage 12 (MVP) acceptance, and what Milestone M3 still needs | Accepted |
 | [0052](0052-per-role-max-tokens-and-explicit-thinking.md) | `max_tokens` and extended thinking belong to the role's binding | Accepted |
+| [0053](0053-clipping-department-ordering-and-shape.md) | The clipping department is the next work, and the shape it takes | Accepted |
