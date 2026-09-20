@@ -164,6 +164,29 @@ it's actually done, step by step against the Setup list above — not all at onc
     unchanged. Observation over a few minutes, not a guarantee — the design does not rely on it
     (ADR-0047/0048 make a repeat call harmless anyway).
 
+- **2026-09-20 — the Notion review desk is live and verified end to end (ADR-0060).** The
+  integration's token (`.env`'s `OMEMO_NOTION_TOKEN`) was checked first and still authenticates
+  against `Immiray's Space`, so nothing had to be reissued — and it turned out the integration has
+  **workspace-level** access there, not per-page grants: a page created in the UI was visible to
+  `/v1/search` immediately, so **no sharing step was needed** at all. Setup: a top-level page
+  `Concept — ревью` created in the UI (the API cannot create a database whose parent is the
+  workspace, and the brief database sits at workspace level, so a parent page had to exist), then
+  the database **`Ревью Concept`** (`3e164b74-a905-817e-82fb-e45d15659ba6`) created **through the
+  API** with exactly `Name` (title), `Review id` (rich_text), `Решение` (**select**, options
+  `Одобрено`/`Отклонено`/`Доработать`), `Причина` (rich_text), `Fingerprint` (rich_text). The API
+  route was chosen deliberately over clicking: it guarantees the names and, above all, the **type**
+  — the UI's obvious choice would be a `status` property, which the API cannot create and which the
+  2026-09-18 entry already recorded as a trap. The seven `OMEMO_REVIEW_NOTION_*` variables are in
+  `.env`, the token reusing the existing integration's value.
+  **Verified against real Notion, through `composition.build_review_desk`:** it selects
+  `NotionReviewDesk`; `publish` created the page and returned its url; republishing the same
+  package returned **the same page**; a **different** package under that `review_id` was refused;
+  an undecided review read `None`; a never-published `review_id` was refused; and all three options
+  mapped correctly — `Доработать → changes_requested` (with the reason), `Одобрено → approved`
+  (reason `None`), `Отклонено → rejected` (with the reason). The decision was then reset to unset,
+  so the test row claims no verdict. **The test row `run-live-check-review-1` is left in the
+  database as evidence and can be deleted.** Nothing was decided on any real review: a session must
+  not act as the reviewer (`CLAUDE.md` 16.3).
 - **2026-09-19 — the n8n credential had `__n8n_BLANK_VALUE_<uuid>` in front of the token.** The
   first trigger was refused `401`. The Header Auth value was 104 characters instead of 50: n8n shows
   a saved secret as a "leave unchanged" placeholder, and `Bearer <token>` had been pasted **after**
