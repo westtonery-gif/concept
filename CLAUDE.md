@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 55 ADRs (0001–0055) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 56 ADRs (0001–0056) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -295,8 +295,9 @@ anything ahead of the queue below — see task 10.
   the Stage 12 acceptance + the M3 pilot boundary (0051) and the per-role `max_tokens` + explicit
   thinking (0052) are all implemented and tested. **ADR-0053** (the clipping department is the next
   work, and its shape), **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
-  world rather than change it) and **ADR-0055** (the `EpisodeBoard` port and its Notion
-  implementation) are decisions with **no code yet** — queue task 21. All gates green:
+  world rather than change it) **ADR-0055** (the `EpisodeBoard` port and its Notion
+  implementation) and **ADR-0056** (clip QA: arithmetic is checked deterministically, the model
+  judges meaning) are decisions with **no code yet** — queue task 21. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -1019,30 +1020,46 @@ process at the time, not a pattern to keep copying.)
        (ADR-0054): richer `ToolValue` kinds — it is `str | int | bool` and a Tool answers with a flat
        mapping, so a list of clip candidates belongs in the planner's Structured Output unless the
        kinds are widened by ADR; a per-role `max_tool_calls`; and tracing Tool calls.
-    2. **The clip QA criteria + the platform format contract — needs an ADR; the two flagged
-       questions are answered (2026-09-20).** Same shape as `qa-agent`: Prompt + Schema + the
-       ADR-0034 verdict grammar reused, not reinvented.
-       - **Accuracy to the source**, for scripted fiction, is not "do not state a falsehood" — it is
-         **a clip must be self-contained and must create no meaning the scene does not contain**: no
-         reply cut mid-word, no splice that invents an exchange that never happened, no punchline
-         without its setup, no spoiler of a later beat. A machine does all four easily and
-         invisibly, which is why this is a QA criterion and not a rendering detail.
-       - **The frame: v1 does not reframe.** The maintainer's screenshot was misread on first
-         look — the black bars are **TikTok's**, added because the author uploaded a 16:9 clip
-         as-is; they are not part of the clip. So v1 renders in the source aspect and lets the
-         platform letterbox it. QA's format check is therefore duration and technical fitness, not
-         aspect ratio. True 9:16 reframing (which needs speaker tracking to be worth anything) is a
-         later, separate decision — not a v1 requirement, and not something to slip in quietly.
-         **This supersedes the second bullet of ADR-0053's "clip QA criteria" Deferred item**, which
-         wrote the screenshot up as an open letterbox-vs-reframe choice. The ADR is Accepted and
-         immutable (`docs/adr/README.md`), so the correction lives here, where the decision is made.
-       - **Still open, deliberately: the gate's granularity.** ~450 clips/month means ~450 human
-         Approves (~15/day). Whether one Approve may cover a batch of chunk-mode clips from one
-         episode is **not decided — the maintainer wants a test first**. Until that test exists, v1
-         keeps the strict reading: **one Artifact, one verdict, one Approve per clip** (fail closed,
-         `PROJECT.md` §12 / ADR-0018 — the conservative default is the safe one). Batching is an
-         optimisation to decide with real numbers from the first episode, in its own ADR; the first
-         pilot should therefore be deliberately small, one episode, not thirty.
+    2. ~~**The clip QA criteria + the platform format contract.**~~ — done (ADR-0056); the Prompt
+       and the role module land with 21.6. The two flagged questions were answered by the maintainer
+       (2026-09-20): **accuracy to the source**, for scripted fiction, is *a clip must be
+       self-contained and create no meaning the scene does not contain* — no reply cut mid-word, no
+       splice that invents an exchange, no punchline without its setup, no spoiler; and **v1 does
+       not reframe** — the screenshot was misread on first look, the black bars are TikTok's, added
+       because a 16:9 clip was uploaded as-is, so the render keeps the source aspect and the
+       platform letterboxes it. (That supersedes the second bullet of ADR-0053's "clip QA criteria"
+       Deferred item; the ADR is Accepted and immutable, so the correction lives here.) ADR-0056
+       then splits the gate in two:
+       - **Format compliance is arithmetic and never goes to a model.** Duration, resolution and
+         container are checked deterministically from the render step's own measurements against
+         configured limits (pure, Skills-library shaped — `check_required_elements@v1` is the
+         precedent). A clip out of spec is **not** a content risk for a human to read: it is the
+         render producing something other than it was told, so it is a **`FAILED` Task with a stable
+         reason** (ADR-0033's shape), not a `flagged` verdict. At ~450 clips/month this is what keeps
+         the human queue to clips that actually need judgement.
+       - **The model judges meaning, and reads the plan, not the pixels.** `ArtifactEvaluator.
+         evaluate(content: str)` takes text, and nothing in v1 justifies changing a port the whole
+         factory depends on. `clip_qa_agent@v1` on `qa_agent`'s template (ADR-0035) — new Agent, new
+         Prompt `clip-qa-agent`, **no Skills, no Tools** — reusing **`qa-verdict@v1` and the
+         ADR-0034 grammar unchanged**. It reads the clip Artifact's canonical JSON: episode ref,
+         mode, boundaries, the transcript of exactly what the cut contains, the draft caption, the
+         rendered file's location.
+       **Found while writing it:** criterion 4 (no spoiler) **cannot be judged from the clip alone**
+       — nothing in a two-minute excerpt says whether it gives away a later beat. So the QA input
+       carries the **full episode transcript** too, or the criterion is theatre. Cost accepted with
+       open eyes: ~15 clips per episode means that transcript re-sent fifteen times; caching the
+       per-episode prefix is the obvious optimisation and is deferred to be measured, not assumed.
+       **Chunk-mode clips still get the verdict in v1** — criterion 2 is unreachable there by
+       construction, but a mechanical cut lands on an orphaned punchline or a spoiler as readily as
+       a chosen one; narrowing it is an optimisation to make with numbers from the first episode.
+       **Still open** (unchanged): the gate's granularity — ~450 clips/month means ~450 Approves
+       (~15/day), and whether one Approve may cover a batch of chunk-mode clips from one episode is
+       **not decided, the maintainer wants a test first**. Until then v1 keeps the strict reading:
+       one Artifact, one verdict, one Approve per clip (fail closed, `PROJECT.md` §12 / ADR-0018).
+       The first pilot should therefore be one episode, not thirty. Also deferred by ADR-0056:
+       judging the rendered pixels (needs a multimodal port), platform caps as configuration, and
+       **which evaluator the Director is given when a Run carries many clip Artifacts** — the same
+       knot ADR-0055 §6 flagged, for 21.6 to untie.
     3. **Two cutting modes, and the volume they imply (answered 2026-09-20).** The department cuts
        **by meaning** (the planner agent ranks moments found in the indexed episode) **and plainly by
        length** (consecutive two-minute pieces). Chunk mode needs no agent at all: no Vyra call, no
