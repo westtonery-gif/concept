@@ -21,6 +21,29 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-20)
+- **Both episode boards exist (queue task 21.6, second slice).** `InMemoryEpisodeBoard`
+  (`infrastructure/in_memory_adapters.py`) keeps ADR-0025's shape: a control side **outside** the
+  Protocol (`put` = the editor, `reports` = what the outside sees), and it fails **loudly** where
+  the contract is silent — a status on an episode the board never had is `EpisodeBoardError`, not
+  an invented row. `NotionEpisodeBoard` (`infrastructure/notion_episode_board.py`) is the real one:
+  readiness from a `status`/`select` property, `source_ref` from a `rich_text` one, the cutting mode
+  from a `select` speaking **exactly `ClipMode`'s vocabulary** (`chunk`/`scene`, case- and
+  space-insensitive). **The mode is the one place this adapter departs from ADR-0040's "not
+  producible is `None`" rule**: a mode column holding something that is not a `ClipMode` — or
+  nothing at all — is `EpisodeBoardError`, because reading a broken board as "not ready" would hide
+  the breakage behind a legitimate-looking `None`. Everything genuinely unclippable (unknown,
+  archived, other database, not ready, no source) stays indistinguishably `None`. Eight required
+  `OMEMO_EPISODE_NOTION_*` variables, no default property names; the token never appears in `repr`
+  or a message; refs percent-encoded, dots included. Tests: `tests/test_notion_episode_board.py`
+  (`NEB`, 35 cases against a local `ThreadingHTTPServer` playing Notion) and `STE` in
+  `tests/test_in_memory_adapters.py`. **This is the third Notion implementation, so ADR-0061's
+  condition is now met and the shared-client extraction is due** — as its own behaviour-neutral
+  refactor, never inside a feature commit. Suite: 1300 passed.
+- **The intermittent suite failure has a name:** `tests/test_production_service.py::
+  test_svc_04_a_chunked_body_without_content_length_is_refused`. It failed once in a full run
+  (`1299 passed, 1 failed`), then five full runs and eight isolated runs all passed — a timing race
+  in the test's own HTTP client against the service closing the connection after refusing, not a
+  defect in `ProductionService`. Queued as its own task; **not** fixed inside the clipping work.
 - **The clipping department's contracts and its two pure functions exist (queue task 21.6, first
   slice; `CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`).** Four new role-named ports in `adapters/`:
   `EpisodeBoard` (+ `IncomingEpisode`, `ClipMode`, `EpisodeBoardError`), `EpisodeSource`
@@ -43,9 +66,7 @@ anything ahead of the queue below — see task 10.
   in the shape of `TLB-01`), `tests/test_clip_format.py` (`RND-01…04`). Suite: 1259 passed.
   **Still blocked on the environment, and said so in the acceptance's own state table:** ffmpeg is
   not installed (so the real `ClipRenderer` waits) and Vyra is not configured (so `FootageIndex`'s
-  real adapter waits). **Next:** `InMemoryEpisodeBoard` (`STE`), `NotionEpisodeBoard` (`NEB`, the
-  **third** Notion consumer — after which ADR-0061 says to extract the shared client),
-  `clip_qa_agent@v1` (`CQA`) and the production path (`CRN`).
+  real adapter waits). **Next:** `clip_qa_agent@v1` (`CQA`) and the production path (`CRN`).
 - **A real Notion `ReviewDesk` exists (ADR-0060; queue task 19) — not wired yet.**
   `infrastructure/notion_review_desk.py` `NotionReviewDesk` is the **second** implementation of the
   ADR-0023 port, beside `GoogleDocsReviewDesk`; no core change, exactly as `NotionBriefBoard` was

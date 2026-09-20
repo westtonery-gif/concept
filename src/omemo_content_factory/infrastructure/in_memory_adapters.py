@@ -7,12 +7,13 @@ implementations: they keep their state in the process's memory and reach nothing
 and never learns which implementation it was given.
 
 Each stub also plays the party on the other side of the wall, through a small control side that is
-**not** part of its Protocol (ADR-0025 §2): the editor files briefs (``InMemoryBriefBoard.put``),
-the human decides (``InMemoryReviewDesk.decide``), and what the outside would see can be read back.
+**not** part of its Protocol (ADR-0025 §2): the editor files briefs (``InMemoryBriefBoard.put``)
+and episodes ready to clip (``InMemoryEpisodeBoard.put``), the human decides
+(``InMemoryReviewDesk.decide``), and what the outside would see can be read back.
 
 Where the contract is silent the stubs fail loudly instead of guessing (ADR-0025 §3): a status on an
-unknown brief, a different package under a published review, a second different decision and a
-different record under a delivered id are refused with the contract's own error.
+unknown brief or episode, a different package under a published review, a second different
+decision and a different record under a delivered id are refused with the contract's own error.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from collections.abc import Sequence
 
 from omemo_content_factory.adapters.analytics_sink import AnalyticsSinkError
 from omemo_content_factory.adapters.brief_board import BriefBoardError, IncomingBrief
+from omemo_content_factory.adapters.episode_board import EpisodeBoardError, IncomingEpisode
 from omemo_content_factory.adapters.review_desk import (
     ReviewDecision,
     ReviewDeskError,
@@ -31,6 +33,48 @@ from omemo_content_factory.domain.human_review import ReviewId
 from omemo_content_factory.domain.run import RunStatus
 
 _REVIEW_LOCATION = "memory://reviews/{review_id}"
+
+
+class InMemoryEpisodeBoard:
+    """An ``EpisodeBoard`` holding episodes marked ready to clip and the statuses reported on them.
+
+    Infrastructure like ``FakeLLMClient``, not a test double (ADR-0025). Its control side —
+    ``put`` (the editor) and ``reports`` (what the outside sees) — is deliberately **outside** the
+    ``EpisodeBoard`` Protocol, so the core only ever holds the contract.
+    """
+
+    def __init__(self) -> None:
+        self._episodes: dict[str, IncomingEpisode] = {}
+        self._ready: set[str] = set()
+        self._reports: dict[str, list[tuple[str, RunStatus]]] = {}
+
+    def put(self, episode: IncomingEpisode, *, ready: bool = True) -> None:
+        """File ``episode`` (control side: the editor), replacing what its reference held."""
+        self._episodes[episode.episode_ref] = episode
+        if ready:
+            self._ready.add(episode.episode_ref)
+        else:
+            self._ready.discard(episode.episode_ref)
+
+    def fetch_episode(self, episode_ref: str, /) -> IncomingEpisode | None:
+        """The episode as filed if it is ready to clip; ``None`` if unknown or not ready."""
+        return self._episodes[episode_ref] if episode_ref in self._ready else None
+
+    def report_status(self, episode_ref: str, /, *, run_id: str, status: RunStatus) -> None:
+        """Show the Run's status on its episode; repeating the last report changes nothing.
+
+        An episode the board never had raises ``EpisodeBoardError`` and nothing is recorded — the
+        contract is silent here, and ADR-0025 §3 chose to fail loudly rather than invent a row.
+        """
+        if episode_ref not in self._episodes:
+            raise EpisodeBoardError(f"episode {episode_ref} is not on the board")
+        history = self._reports.setdefault(episode_ref, [])
+        if not history or history[-1] != (run_id, status):
+            history.append((run_id, status))
+
+    def reports(self, episode_ref: str) -> tuple[tuple[str, RunStatus], ...]:
+        """What the board shows for ``episode_ref``: ``(run_id, status)`` reports, oldest first."""
+        return tuple(self._reports.get(episode_ref, ()))
 
 
 class InMemoryBriefBoard:

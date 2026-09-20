@@ -17,6 +17,12 @@ import pytest
 import omemo_content_factory.infrastructure.in_memory_adapters as stubs_module
 from omemo_content_factory.adapters.analytics_sink import AnalyticsSink, AnalyticsSinkError
 from omemo_content_factory.adapters.brief_board import BriefBoard, BriefBoardError, IncomingBrief
+from omemo_content_factory.adapters.episode_board import (
+    ClipMode,
+    EpisodeBoard,
+    EpisodeBoardError,
+    IncomingEpisode,
+)
 from omemo_content_factory.adapters.review_desk import (
     ReviewDecision,
     ReviewDesk,
@@ -30,6 +36,7 @@ from omemo_content_factory.domain.run import Run, RunStatus
 from omemo_content_factory.infrastructure.in_memory_adapters import (
     InMemoryAnalyticsSink,
     InMemoryBriefBoard,
+    InMemoryEpisodeBoard,
     InMemoryReviewDesk,
 )
 from tests.restorable_runs import CD, REVIEWER, drive, evaluate, record_call, succeeded_task
@@ -288,3 +295,62 @@ def test_stb_07_a_brief_goes_to_an_approved_artifact_through_the_stubs() -> None
         ("r-1", RunStatus.COMPLETED),
     )
     assert sink.records == tuple(run.analytics_records)
+
+
+# --- STE: the episode board stub (CLIPPING_ACCEPTANCE §2) ---------------------------------
+
+
+def _episode(ref: str = "episode-1", mode: ClipMode = ClipMode.SCENE) -> IncomingEpisode:
+    return IncomingEpisode(episode_ref=ref, source_ref=f"{ref}.mp4", mode=mode)
+
+
+def test_ste_01_a_filed_episode_is_handed_over() -> None:
+    board = InMemoryEpisodeBoard()
+    episode = _episode()
+    board.put(episode)
+    assert board.fetch_episode("episode-1") == episode
+
+
+def test_ste_01_the_stub_satisfies_the_port_and_keeps_its_control_side_outside_it() -> None:
+    board: EpisodeBoard = InMemoryEpisodeBoard()  # mypy --strict rejects a drifted shape
+    assert board.fetch_episode("nothing") is None
+    assert not hasattr(EpisodeBoard, "put")
+    assert not hasattr(EpisodeBoard, "reports")
+
+
+def test_ste_02_an_unknown_or_unready_episode_is_none() -> None:
+    board = InMemoryEpisodeBoard()
+    assert board.fetch_episode("episode-1") is None
+    board.put(_episode(), ready=False)
+    assert board.fetch_episode("episode-1") is None, "on the board is not the same as ready"
+    board.put(_episode())
+    assert board.fetch_episode("episode-1") is not None
+
+
+def test_ste_03_a_status_on_an_unknown_episode_fails_loudly_and_records_nothing() -> None:
+    board = InMemoryEpisodeBoard()
+    with pytest.raises(EpisodeBoardError) as caught:
+        board.report_status("episode-1", run_id="run-1", status=RunStatus.QUEUED)
+    assert "episode-1" in str(caught.value)
+    assert board.reports("episode-1") == ()
+
+
+def test_ste_04_repeating_the_last_status_changes_nothing_and_history_is_readable() -> None:
+    board = InMemoryEpisodeBoard()
+    board.put(_episode())
+    board.report_status("episode-1", run_id="run-1", status=RunStatus.QUEUED)
+    board.report_status("episode-1", run_id="run-1", status=RunStatus.QUEUED)
+    board.report_status("episode-1", run_id="run-1", status=RunStatus.RUNNING)
+    assert board.reports("episode-1") == (
+        ("run-1", RunStatus.QUEUED),
+        ("run-1", RunStatus.RUNNING),
+    )
+
+
+def test_ste_04_refiling_an_episode_replaces_what_the_reference_held() -> None:
+    board = InMemoryEpisodeBoard()
+    board.put(_episode(mode=ClipMode.SCENE))
+    board.put(_episode(mode=ClipMode.CHUNK))
+    episode = board.fetch_episode("episode-1")
+    assert episode is not None
+    assert episode.mode is ClipMode.CHUNK
