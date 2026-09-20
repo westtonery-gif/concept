@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 59 ADRs (0001–0059) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 60 ADRs (0001–0060) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -301,7 +301,9 @@ anything ahead of the queue below — see task 10.
   boundaries; `CHUNK` / `SCENE`; **v1 has no planner agent**, so ADR-0054 has no consumer yet) and
   **ADR-0059** (one Run per episode; the aggregate already carries it, the orchestrator does not)
   are decisions with **no code yet** — queue task 21. **All the department's decisions are now
-  made; 21.5 (specs) and 21.6 (implementation) are what remain.** All gates green:
+  made; 21.5 (specs) and 21.6 (implementation) are what remain.** **ADR-0060** (a Notion
+  `ReviewDesk`: typed properties, its own database — queue task 19) is likewise decided and
+  unbuilt, and it requires the Notion HTTP plumbing to be **extracted first**. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -961,20 +963,40 @@ process at the time, not a pattern to keep copying.)
     documenting the manual re-touch. Note this is not the polling-loop question of ADR-0049 §3
     (that one settled — see the log), it is its mirror image.
 
-19. **A `ReviewDesk` on Notion — the way to finish M3 without Google (2026-09-19).** The maintainer
-    cannot create a Google service account, so `GoogleDocsReviewDesk` (ADR-0043) cannot be used
-    here, and Stage 12's `→ Google Docs →` leg stays unproven. The port already exists and is
-    vendor-neutral (`adapters/review_desk.py`: `publish(ReviewPackage) -> location`,
-    `fetch_decision(review_id) -> ReviewDecision | None`), and the factory is business-agnostic
-    (ADR-0037) — so a second implementation is an **additive** module, exactly like `NotionBriefBoard`
-    was, with no core change. `NotionBriefBoard` already proves the HTTP client, the auth and the
-    block/property handling against this very workspace; the decision marker can reuse ADR-0043 §2's
-    grammar (`РЕШЕНИЕ:` / `ПРИЧИНА:` above a separator) since it is about text, not about Google.
-    Open questions for the ADR: a page in the brief database or its own database; how `review_id` is
-    found again (ADR-0043 hashes it into `appProperties` — Notion has no equivalent, so a property);
-    and whether the same integration token may write, given the current one is described as
-    read-only in `n8n/README.md`. Do not start before the maintainer chooses between this and a
-    Google service account — both close the same gap, and it is their call which.
+19. **A `ReviewDesk` on Notion — chosen by the maintainer 2026-09-20; contract settled by
+    ADR-0060, implementation open.** This closes M3's last structural gap without a Google service
+    account **and** gives the clipping department its human gate (~390 reviews/month, ADR-0059).
+    The port is unchanged and vendor-neutral; a second implementation is additive, like
+    `NotionBriefBoard`. Decisions:
+    - **Its own database**, not a page in the brief board — a review outlives the brief, belongs to
+      a Run and an Artifact, and ~390 clip reviews a month would bury a board holding tens of rows.
+      Per ADR-0055 §5 the prerequisite is **content access**: the `concept` integration must be
+      granted that database explicitly, or every lookup is indistinguishable from "not decided yet".
+    - **Typed properties, not ADR-0043's marker line — a deliberate departure from what this task
+      originally suggested.** The `РЕШЕНИЕ:`/`ПРИЧИНА:` grammar exists because *a Google Doc has no
+      properties*; it is a workaround for a constraint Notion does not have, and copying it would
+      import its whole failure surface (prose parsing, damaged/missing/repeated marker, an
+      unrecognised word that must be treated as silence). Instead: **`Решение`** is a `select` with
+      exactly `Одобрено`/`Отклонено`/`Доработать` → `APPROVED`/`REJECTED`/`CHANGES_REQUESTED`,
+      unset → `None` (the only ambiguity left), an option outside the three → `ReviewDeskError`
+      (misconfigured database, not silence); **`Причина`** is `rich_text`, blank → `None`. A
+      dropdown cannot be typo'd. The API **can** create `select` properties (not `status` — the
+      operator log recorded that), so setup is scriptable. ADR-0043 is **not** superseded: its
+      grammar stays right for a Doc.
+    - **`review_id` is a queryable `rich_text` property**, found by a database query with a filter.
+      No hashing: ADR-0043 hashed because a Drive lookup puts its query in the URL, while a Notion
+      query is a `POST` body, so no id enters a path. Publishing the same `review_id` twice returns
+      the same page (the port's idempotence; publish is also the retry, ADR-0044 §4).
+    - **A clip is reviewed by its local file path** — `ArtifactView.content` is text and Notion
+      cannot play a file on the maintainer's machine, so the page carries the plan + path and the
+      reviewer opens it in a player before choosing. Honest about what v1 is; hosting clips for a
+      remote reviewer is an upload adapter and its own decision.
+    - **The Notion HTTP plumbing is extracted FIRST, before this desk is built** (ADR-0060 §5).
+      This is the third consumer, which is exactly the moment ADR-0055 §3 named. Extracting first is
+      behaviour-neutral over two tested consumers with the gate as proof; extracting afterwards
+      would mean writing the plumbing a third time and removing it in a diff that also adds new
+      behaviour, where "nothing changed" is unprovable. **That refactor is the immediate next task**
+      — its own ADR, its own session, `infrastructure/` only.
 
 20. ~~**What comes after Stage 12 — decide before coding, don't drift into it.**~~ — done
     (ADR-0053, 2026-09-20). Asked, not guessed: the maintainer brought a **third** candidate — a
