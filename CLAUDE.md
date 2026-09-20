@@ -1231,8 +1231,21 @@ process at the time, not a pattern to keep copying.)
        different clip. A rejected clip is simply not shipped; no `SUPERSEDED` chain, no rework loop.
        **Deferred:** the per-clip review desk (same blocker as task 19 / M3 — it will bite here too),
        and whether ~390 Tasks + ~390 Evaluations a month in one store stays comfortable.
-    5. **`CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`**, in the shape of the existing per-aggregate
-       specs, once 21.1–21.4 land.
+    5. ~~**`CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`**~~ — done. Ten sections and seven
+       criterion families (`EPB`, `STE`, `NEB`, `CLP`, `RND`, `CQA`, `CRN`). The acceptance opens
+       with an honest implementation-state table, because two layers are blocked on things this
+       environment does not have: **ffmpeg is not installed** (so `ClipRenderer` waits, though the
+       pure format check does not) and **Vyra is not configured** (so `FootageIndex`'s real adapter
+       waits, though the port and a stub do not). **Found while writing the spec:** with the planner
+       agent gone (ADR-0058 §4) **nothing generates the draft caption** ADR-0056 §2 put in the clip
+       payload — and v1 publishes nothing, so it has no reader either. It is dropped
+       (ADR-0022 §2's rule); burnt-in subtitles come from the transcript deterministically and are
+       not a caption. Ports named: `EpisodeBoard`, `EpisodeSource` (`locate -> LocatedEpisode`, a
+       locally readable path; a remote implementation materialises a local copy so the render step
+       never learns about the network), `FootageIndex`
+       (`index -> IndexedFootage(duration_ms, scenes, speech)`), `ClipRenderer`
+       (`render -> RenderedClip` carrying its **own measurements** — it made the file and knows
+       them, which is what lets ADR-0056 §1's check be arithmetic).
     6. **Only then implement:** the episode-source port (local file first), the indexing/transcription
        step on the ADR-0049 queue, the clip-planner Agent (Prompt + Schema + Tool grants), the QA role,
        the deterministic render step, and one Artifact + one gate per clip candidate.
