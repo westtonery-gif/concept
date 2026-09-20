@@ -20,7 +20,31 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-19)
+## Current state (2026-09-20)
+- **A real Notion `ReviewDesk` exists (ADR-0060; queue task 19) — not wired yet.**
+  `infrastructure/notion_review_desk.py` `NotionReviewDesk` is the **second** implementation of the
+  ADR-0023 port, beside `GoogleDocsReviewDesk`; no core change, exactly as `NotionBriefBoard` was
+  additive. A review is a page of its **own** database: `publish` writes the package into the page's
+  blocks (instruction, what is reviewed, the brief, QA flags, the material) plus three properties —
+  title, `review_id` and a SHA-256 fingerprint of the canonical package — and returns the page's
+  `url`; republishing the same `review_id` with the same package returns that same page (so it is
+  also the retry), while a **different** package under it is `ReviewDeskError`. `fetch_decision`
+  reads **typed properties**, not a marker line: a `select` (`Одобрено`/`Отклонено`/`Доработать`,
+  plus the `ReviewStatus` spellings, case- and space-insensitive) and a `rich_text` reason (blank →
+  `None`). **Unset → `None` is the only ambiguity left; an option outside the three is
+  `ReviewDeskError`, never silence.** Lookup is a database query filtered on the `review_id`
+  property — a `POST` body, so unlike ADR-0043's Drive lookup nothing is hashed and no id enters a
+  URL. Notion's limits are handled: text is chunked at 2000 characters and blocks past the first
+  100 are appended in further requests. Seven required `OMEMO_REVIEW_NOTION_*` variables, no default
+  property names (ADR-0040's rule); the token never appears in `repr` or a message. The request
+  helper, auth header and property reader are **duplicated from `notion_brief_board` on purpose** —
+  rule of three, and ADR-0061 records that the shared client is extracted only once three
+  implementations exist in `src/` (this is the second). Spec: `ADAPTER_SPEC.md` §6 "Реализация на
+  Notion"; acceptance: `ADAPTER_ACCEPTANCE.md` §14 `NRD`; tests `tests/test_notion_review_desk.py`
+  run the real HTTP code against a local `ThreadingHTTPServer` playing Notion. **No Composition Root
+  builder yet** — selecting between the Google and Notion desks in `build_review_desk` and wiring
+  `demo_notion.py` is the next subtask, the way `build_brief_board` followed ADR-0040. Suite: 1213
+  passed.
 - **`max_tokens` and extended thinking are per-role configuration; no request parameter is hardcoded
   any more (ADR-0052; queue task 17).** `OMEMO_MAX_TOKENS__<ROLE>` and `OMEMO_THINKING__<ROLE>`
   (`adaptive` | `disabled` | `budget:<N>` | `inherit`) are **required** for an anthropic binding, like
