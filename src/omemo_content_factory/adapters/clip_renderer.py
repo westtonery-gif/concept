@@ -18,13 +18,40 @@ from omemo_content_factory.adapters.episode_source import LocatedEpisode
 
 
 @dataclass(frozen=True, slots=True)
+class Caption:
+    """One line to draw, timed **relative to the clip's own start** (ADR-0062 §1).
+
+    ``0`` is the clip's first frame, not the episode's: the renderer is handed a clip and the lines
+    to draw on it, and never learns where that clip sat in the episode.
+    """
+
+    start_ms: int
+    end_ms: int
+    text: str
+
+    def __post_init__(self) -> None:
+        for name, value in (("start_ms", self.start_ms), ("end_ms", self.end_ms)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"a caption needs a whole, non-negative {name}")
+        if self.end_ms <= self.start_ms:
+            raise ValueError("a caption must end after it starts")
+        if not isinstance(self.text, str) or not self.text.strip():
+            raise ValueError("a caption needs non-blank text")
+
+
+@dataclass(frozen=True, slots=True)
 class ClipRenderRequest:
-    """One clip to cut: where from, which interval, what to burn in, where to write."""
+    """One clip to cut: where from, which interval, which lines to burn in, where to write.
+
+    ``captions`` may be empty, which means burn nothing — a clip with no speech is a normal clip.
+    How captions become pixels is the adapter's business; no subtitle file format is in this
+    contract, because a different renderer would use a different one (ADR-0062 §3).
+    """
 
     located: LocatedEpisode
     start_ms: int
     end_ms: int
-    subtitles: str
+    captions: tuple[Caption, ...]
     destination: str
 
     def __post_init__(self) -> None:
@@ -35,8 +62,12 @@ class ClipRenderRequest:
             raise ValueError("a clip must end after it starts")
         if not isinstance(self.destination, str) or not self.destination.strip():
             raise ValueError("a clip render request needs a non-blank destination")
-        if not isinstance(self.subtitles, str):
-            raise ValueError("a clip render request needs subtitles text, possibly empty")
+        if not isinstance(self.captions, tuple) or not all(
+            isinstance(caption, Caption) for caption in self.captions
+        ):
+            raise ValueError("a clip render request keeps its captions in a tuple")
+        if any(caption.end_ms > self.end_ms - self.start_ms for caption in self.captions):
+            raise ValueError("a caption falls outside the clip it belongs to")
 
 
 @dataclass(frozen=True, slots=True)

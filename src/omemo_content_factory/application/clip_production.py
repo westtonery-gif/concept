@@ -306,7 +306,7 @@ class ClipProduction:
                     located=located,
                     start_ms=clip.start_ms,
                     end_ms=clip.end_ms,
-                    subtitles=clip.transcript,
+                    captions=clip.captions,
                     destination=destination,
                 )
             )

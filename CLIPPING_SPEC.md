@@ -96,8 +96,13 @@
 `plan_clips(indexed, *, episode_ref, mode, chunk_ms, max_ms, pause_tolerance_ms) -> ClipPlan`
 
 `ClipPlan(episode_ref, mode, clips: tuple[PlannedClip, ...])`;
-`PlannedClip(index, start_ms, end_ms, transcript)` — `index` с 1, интервалы не пересекаются и идут
-по возрастанию, `transcript` — текст речи ровно этого интервала.
+`PlannedClip(index, start_ms, end_ms, transcript, captions)` — `index` с 1, интервалы не
+пересекаются и идут по возрастанию. Речь несётся **дважды и намеренно** (`ADR-0062` §2):
+`transcript` — плоский текст, его читает QA, потому что судит смысл; `captions` — те же слова
+с временами **относительно начала клипа**, их читает рендерер, чтобы рисовать реплику тогда,
+когда её произносят. Реплика, пересекающая границу, **обрезается по времени, а не
+выбрасывается**: её слова частично звучат в кадре, а терять диалог на каждом резе — ровно то,
+что зритель заметит.
 
 | Случай | Результат |
 |---|---|
@@ -114,7 +119,12 @@
 
 | Метод | Поведение |
 |---|---|
-| `render(request, /) -> RenderedClip` | вырезать интервал, вжечь субтитры, записать файл |
+| `render(request, /) -> RenderedClip` | вырезать интервал, вжечь `captions`, записать файл |
+
+`ClipRenderRequest(located, start_ms, end_ms, captions, destination)`; пустые `captions` —
+законно и значит «не вжигать ничего»: клип без речи это обычный клип. Формат файла субтитров
+**не в контракте** — это дело адаптера (`ADR-0062` §3).
+
 
 `RenderedClip(path, duration_ms, width, height, container)` — **измерения возвращает тот, кто
 рендерил**: он произвёл файл и знает их. Ошибка — `ClipRendererError`.

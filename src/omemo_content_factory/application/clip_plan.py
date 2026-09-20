@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import pairwise
 
+from omemo_content_factory.adapters.clip_renderer import Caption
 from omemo_content_factory.adapters.episode_board import ClipMode
 from omemo_content_factory.adapters.footage_index import IndexedFootage, SpeechSpan
 
@@ -19,12 +20,18 @@ __all__ = ["ClipPlan", "PlannedClip", "plan_clips"]
 
 @dataclass(frozen=True, slots=True)
 class PlannedClip:
-    """One clip: a contiguous interval and the speech it contains (ADR-0058 §2)."""
+    """One clip: a contiguous interval and the speech it contains (ADR-0058 §2).
+
+    The speech is carried **twice, on purpose** (ADR-0062 §2): ``transcript`` is flat text, which
+    is what the QA role reads because it judges meaning; ``captions`` are the same words with times
+    relative to this clip, which is what a renderer needs to draw them when they are said.
+    """
 
     index: int
     start_ms: int
     end_ms: int
     transcript: str
+    captions: tuple[Caption, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +81,7 @@ def plan_clips(
             start_ms=start,
             end_ms=end,
             transcript=_transcript(indexed.speech, start, end),
+            captions=_captions(indexed.speech, start, end),
         )
         for number, (start, end) in enumerate(bounds, start=1)
     )
@@ -149,6 +157,23 @@ def _nudge(at_ms: int, speech: tuple[SpeechSpan, ...], tolerance_ms: int) -> int
             nearer = span.start_ms if before <= after else span.end_ms
             return nearer if min(before, after) <= tolerance_ms else at_ms
     return at_ms
+
+
+def _captions(speech: tuple[SpeechSpan, ...], start_ms: int, end_ms: int) -> tuple[Caption, ...]:
+    """The overlapping lines, re-based to the clip and clipped to its bounds (ADR-0062 §2).
+
+    A line straddling a boundary is shortened, never dropped: its words are partly spoken on
+    screen, and losing dialogue at every cut is exactly where a viewer would notice.
+    """
+    return tuple(
+        Caption(
+            start_ms=max(span.start_ms, start_ms) - start_ms,
+            end_ms=min(span.end_ms, end_ms) - start_ms,
+            text=span.text.strip(),
+        )
+        for span in speech
+        if span.start_ms < end_ms and span.end_ms > start_ms and span.text.strip()
+    )
 
 
 def _transcript(speech: tuple[SpeechSpan, ...], start_ms: int, end_ms: int) -> str:

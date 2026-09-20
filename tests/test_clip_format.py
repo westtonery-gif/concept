@@ -81,3 +81,26 @@ def test_rnd_01_ill_formed_limits_are_refused(overrides: dict[str, object]) -> N
 def test_rnd_01_an_ill_formed_measurement_is_refused(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         _clip(**overrides)
+
+
+def test_rnd_01_a_caption_outside_its_clip_is_refused() -> None:
+    """The request is re-based to the clip, so a caption past its length is a caller defect."""
+    from omemo_content_factory.adapters.clip_renderer import Caption, ClipRenderRequest
+    from omemo_content_factory.adapters.episode_source import LocatedEpisode
+
+    located = LocatedEpisode(source_ref="s.mp4", path="/m/s.mp4")
+    ClipRenderRequest(
+        located=located,
+        start_ms=0,
+        end_ms=10_000,
+        captions=(Caption(start_ms=0, end_ms=10_000, text="fits exactly"),),
+        destination="clip.mp4",
+    )
+    with pytest.raises(ValueError, match="outside the clip"):
+        ClipRenderRequest(
+            located=located,
+            start_ms=0,
+            end_ms=10_000,
+            captions=(Caption(start_ms=0, end_ms=10_001, text="one ms too long"),),
+            destination="clip.mp4",
+        )
