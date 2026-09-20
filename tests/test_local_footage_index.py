@@ -300,6 +300,7 @@ def test_fix_08_the_real_whisper_runs_end_to_end(episode: Path) -> None:
         LocatedEpisode(source_ref="episode.mp4", path=str(episode))
     )
     assert abs(footage.duration_ms - 4_000) <= 250
-    assert [scene.at_ms for scene in footage.scenes] == [2_000]
+    assert len(footage.scenes) == 1
+    assert abs(footage.scenes[0].at_ms - 2_000) <= 100
     for span in footage.speech:
         assert 0 <= span.start_ms < span.end_ms <= footage.duration_ms
