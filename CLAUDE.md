@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 56 ADRs (0001–0056) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 57 ADRs (0001–0057) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -296,8 +296,9 @@ anything ahead of the queue below — see task 10.
   thinking (0052) are all implemented and tested. **ADR-0053** (the clipping department is the next
   work, and its shape), **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
   world rather than change it) **ADR-0055** (the `EpisodeBoard` port and its Notion
-  implementation) and **ADR-0056** (clip QA: arithmetic is checked deterministically, the model
-  judges meaning) are decisions with **no code yet** — queue task 21. All gates green:
+  implementation) **ADR-0056** (clip QA: arithmetic is checked deterministically, the model
+  judges meaning) and **ADR-0057** (the two cutting modes restated — `CHUNK` / `STORYLINE`,
+  amending §§ of 0053/0055/0056) are decisions with **no code yet** — queue task 21. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -1060,16 +1061,42 @@ process at the time, not a pattern to keep copying.)
        judging the rendered pixels (needs a multimodal port), platform caps as configuration, and
        **which evaluator the Director is given when a Run carries many clip Artifacts** — the same
        knot ADR-0055 §6 flagged, for 21.6 to untie.
-    3. **Two cutting modes, and the volume they imply (answered 2026-09-20).** The department cuts
-       **by meaning** (the planner agent ranks moments found in the indexed episode) **and plainly by
-       length** (consecutive two-minute pieces). Chunk mode needs no agent at all: no Vyra call, no
-       LLM call, no ranking — a deterministic `Workflow` step, near-zero cost, whose only judgement
-       is nudging a boundary to the nearest speech pause so a cut does not land mid-word (so it still
-       wants the transcript). Both modes end at the same place: a rendered clip, its own Artifact,
-       its own verdict, its own gate. **Still open:** 30 episodes/month implies ~450 clips and, under
-       the current discipline, ~450 human Approves (~15/day by hand). The gate itself is not
-       negotiable (`PROJECT.md` §12, ADR-0018), so the question for 21.2 is whether one Approve may
-       cover a batch of chunk-mode clips from one episode — a domain decision, asked not guessed.
+    3. **The two cutting modes — restated by the maintainer 2026-09-20 (ADR-0057, which amends
+       ADR-0053 §5, ADR-0055 §2 and ADR-0056 §2).** The distinction is about the **source material**,
+       not the algorithm, and the working note's "find the clip-worthy moments" framing was wrong:
+       - **`CHUNK`** — series that follow essentially one thread, main characters on screen
+         throughout. The episode is continuous, so consecutive two-minute pieces work and nothing
+         needs understanding. No agent, no vendor reasoning call, no ranking; it still wants the
+         transcript, to nudge a boundary to the nearest speech pause.
+       - **`STORYLINE`** — series with many main characters whose scenes are **interleaved** through
+         the episode. Cutting by length there yields two minutes of three unrelated threads. The job
+         is to **follow one thread and gather its scattered scenes into one clip** — de-interleaving,
+         not highlight ranking.
+       `ClipMode` is therefore `CHUNK` / `STORYLINE`; `SEMANTIC` named a method, and `BOTH` is
+       dropped (mark the episode twice). **A storyline clip is a list of segments**, so the clip
+       payload carries `segments` (ordered start/end + transcript) and a chunk clip is the
+       one-segment case — one shape, one QA input, both modes. **Segments stay in episode order**:
+       reordering manufactures events. **QA criterion 2 is restated** — under the old wording ("no
+       splice that invents an exchange") storyline mode would have been forbidden outright, since
+       splicing is its point. It becomes **no invented continuity**: joins only in episode order and
+       only from one thread, never making two moments read as continuous when they are not.
+       Criterion 1 gets *heavier* here — a thread pulled out of its episode must stand alone.
+       **Vyra checked 2026-09-20 (its own product page):** scenes detected, speech transcribed,
+       subjects tagged — but the tags shown are generic (`person`, `indoors`), the product is aimed
+       at short creator footage, and **recurring-character re-identification across a 25-minute
+       episode is nowhere claimed**. So storyline mode is designed to **follow threads through the
+       transcript** — the vendor gives scene boundaries + timed speech, the planner agent reads who
+       speaks, to whom, about what. Needs only advertised capabilities, puts the hard part on the
+       component suited to it, and degrades honestly: a thread carried by silent action will be
+       followed poorly — measure that on the first episode. Putting re-identification to the vendor
+       is the first concrete question for them. **Arithmetic resolved:** 15 clips × 2 min out of 25
+       min looked impossible, but 25 ÷ 2 ≈ 12–13 — those were **chunk-mode numbers all along**.
+       Storyline mode yields fewer, longer clips, as long as the thread needs. **Still open:** a
+       maximum length for a storyline clip, and the gate's granularity — ~450 clips/month means
+       ~450 Approves (~15/day), and whether one Approve may cover a batch of chunk-mode clips from
+       one episode is **not decided, the maintainer wants a test first**. Until then v1 keeps the
+       strict reading: one Artifact, one verdict, one Approve per clip (`PROJECT.md` §12,
+       ADR-0018), and the first pilot is one episode, not thirty.
     4. ~~**The board Adapter — the contract ADR.**~~ — done (ADR-0055); the implementation is
        21.6. A second port `EpisodeBoard` beside `BriefBoard` (not an extension of it):
        `fetch_episode -> IncomingEpisode | None`, `report_status(episode_ref, *, run_id, status)`,
