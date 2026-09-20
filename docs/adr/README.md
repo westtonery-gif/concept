@@ -78,3 +78,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0052](0052-per-role-max-tokens-and-explicit-thinking.md) | `max_tokens` and extended thinking belong to the role's binding | Accepted |
 | [0053](0053-clipping-department-ordering-and-shape.md) | The clipping department is the next work, and the shape it takes | Accepted |
 | [0054](0054-side-effecting-tools-over-injected-ports.md) | Side-effecting Tools — a thin Tool over an injected port, and the rule that they observe rather than change | Accepted |
+| [0055](0055-episode-board-contract.md) | The `EpisodeBoard` port and its Notion implementation — where an episode ready to clip comes from | Accepted |

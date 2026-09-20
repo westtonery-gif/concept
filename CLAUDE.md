@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 54 ADRs (0001–0054) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 55 ADRs (0001–0055) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -294,8 +294,9 @@ anything ahead of the queue below — see task 10.
   index (0048), the HTTP production service + n8n workflows (0049), the Stage 11 acceptance (0050)
   the Stage 12 acceptance + the M3 pilot boundary (0051) and the per-role `max_tokens` + explicit
   thinking (0052) are all implemented and tested. **ADR-0053** (the clipping department is the next
-  work, and its shape) and **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
-  world rather than change it) are decisions with **no code yet** — queue task 21. All gates green:
+  work, and its shape), **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
+  world rather than change it) and **ADR-0055** (the `EpisodeBoard` port and its Notion
+  implementation) are decisions with **no code yet** — queue task 21. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -1052,10 +1053,31 @@ process at the time, not a pattern to keep copying.)
        the current discipline, ~450 human Approves (~15/day by hand). The gate itself is not
        negotiable (`PROJECT.md` §12, ADR-0018), so the question for 21.2 is whether one Approve may
        cover a batch of chunk-mode clips from one episode — a domain decision, asked not guessed.
-    4. **The board Adapter.** A separate Notion database (the maintainer's choice), mirroring
-       `BriefBoard`: readiness is the board's rule, never re-decided in the agent (`n8n/README.md`).
-       Open: its properties, and whether the existing integration token may read it — it is
-       described as read-only in `n8n/README.md`, the same obstacle task 19 names.
+    4. ~~**The board Adapter — the contract ADR.**~~ — done (ADR-0055); the implementation is
+       21.6. A second port `EpisodeBoard` beside `BriefBoard` (not an extension of it):
+       `fetch_episode -> IncomingEpisode | None`, `report_status(episode_ref, *, run_id, status)`,
+       its own `EpisodeBoardError`. `IncomingEpisode(episode_ref, source_ref, mode)` carries
+       **editorial intent, not the video** — `source_ref` is an opaque handle the episode-source
+       port resolves (ADR-0053 §7), so the board survives the move off a local file; `mode` is a
+       closed `ClipMode` (`SEMANTIC`/`CHUNK`/`BOTH`) because which way an episode is cut is an
+       editorial call, not an inference. Clip length/count/platform deliberately stay out —
+       configuration, not a column every editor fills. `NotionEpisodeBoard` duplicates
+       `NotionBriefBoard`'s HTTP plumbing **on purpose** (rule of three); **the foreseeable third is
+       task 19's Notion `ReviewDesk`, and that is when to extract it — as its own behaviour-neutral
+       refactor, never mixed into the feature commit.** Eight required `OMEMO_EPISODE_NOTION_*`
+       variables, no default property names (ADR-0040). **The "read-only token" was a misreading,
+       resolved from the operator log:** `Concept Notion (read)` names *n8n's* credential, not the
+       integration's capability — the same token created four properties via the API (2026-09-18)
+       and wrote `Run status` back in the live pilot (2026-09-19). **The real prerequisite is
+       access:** Notion grants content access per database, so the `concept` integration must be
+       granted access to the new episode database, or `fetch_episode` sees an empty board and says
+       `None` silently. **This answers the identical doubt in task 19.** Flagged for 21.6, not
+       decided here: `report_status` presumes **one Run per episode** (clips as its Artifacts),
+       which sits awkwardly with ADR-0053 §5's per-clip gate given `ContentDirector` evaluates the
+       final step's Artifact — if it becomes one Run per clip, the write-back needs revisiting.
+       Also deferred: the `POST /v1/episodes` route + a second Notion Trigger (ADR-0049's two
+       findings apply unchanged — a core write re-triggers the poll, and task 18's lost-trigger hole
+       is open on this board too), clip locations reported back, and `InMemoryEpisodeBoard`.
     5. **`CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`**, in the shape of the existing per-aggregate
        specs, once 21.1–21.4 land.
     6. **Only then implement:** the episode-source port (local file first), the indexing/transcription
