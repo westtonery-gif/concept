@@ -1001,14 +1001,30 @@ process at the time, not a pattern to keep copying.)
        designing: `ToolValue` is `str | int | bool` and a Tool answers with a flat mapping, so a
        list of clip candidates belongs in the planner's Structured Output, not in a Tool's return
        (or the kinds get widened here, by ADR).
-    2. **The clip QA criteria + the platform format contract — needs the maintainer, then an ADR.**
-       Two things are open and must not be guessed: what "accuracy to the source" means for scripted
-       fiction (working answer, put to the maintainer: a clip is self-contained and creates no
-       meaning the scene does not contain — no reply cut mid-word, no splice that invents an
-       exchange, no punchline without its setup, no spoiler), and the target frame (the maintainer's
-       screenshot shows a 16:9 frame letterboxed inside a 9:16 phone screen, which is a different
-       decision from reframing the shot to 9:16). Same shape as `qa-agent`: Prompt + Schema + the
+    2. **The clip QA criteria + the platform format contract — needs an ADR; the two flagged
+       questions are answered (2026-09-20).** Same shape as `qa-agent`: Prompt + Schema + the
        ADR-0034 verdict grammar reused, not reinvented.
+       - **Accuracy to the source**, for scripted fiction, is not "do not state a falsehood" — it is
+         **a clip must be self-contained and must create no meaning the scene does not contain**: no
+         reply cut mid-word, no splice that invents an exchange that never happened, no punchline
+         without its setup, no spoiler of a later beat. A machine does all four easily and
+         invisibly, which is why this is a QA criterion and not a rendering detail.
+       - **The frame: v1 does not reframe.** The maintainer's screenshot was misread on first
+         look — the black bars are **TikTok's**, added because the author uploaded a 16:9 clip
+         as-is; they are not part of the clip. So v1 renders in the source aspect and lets the
+         platform letterbox it. QA's format check is therefore duration and technical fitness, not
+         aspect ratio. True 9:16 reframing (which needs speaker tracking to be worth anything) is a
+         later, separate decision — not a v1 requirement, and not something to slip in quietly.
+         **This supersedes the second bullet of ADR-0053's "clip QA criteria" Deferred item**, which
+         wrote the screenshot up as an open letterbox-vs-reframe choice. The ADR is Accepted and
+         immutable (`docs/adr/README.md`), so the correction lives here, where the decision is made.
+       - **Still open, deliberately: the gate's granularity.** ~450 clips/month means ~450 human
+         Approves (~15/day). Whether one Approve may cover a batch of chunk-mode clips from one
+         episode is **not decided — the maintainer wants a test first**. Until that test exists, v1
+         keeps the strict reading: **one Artifact, one verdict, one Approve per clip** (fail closed,
+         `PROJECT.md` §12 / ADR-0018 — the conservative default is the safe one). Batching is an
+         optimisation to decide with real numbers from the first episode, in its own ADR; the first
+         pilot should therefore be deliberately small, one episode, not thirty.
     3. **Two cutting modes, and the volume they imply (answered 2026-09-20).** The department cuts
        **by meaning** (the planner agent ranks moments found in the indexed episode) **and plainly by
        length** (consecutive two-minute pieces). Chunk mode needs no agent at all: no Vyra call, no
