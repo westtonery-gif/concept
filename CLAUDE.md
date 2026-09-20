@@ -21,6 +21,33 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **The clipping department's production path is assembled and proven (queue task 21.6, `CRN`).**
+  `application/clip_production.py` `ClipProduction.invoke(episode_ref)` takes one episode from the
+  board to a human decision on every clip, as **application code beside `ContentDirector`** — never
+  through it, because the Director's contract is a *declared* Workflow matched by position ending
+  in one candidate (ADR-0026), and a fan-out of unknown width is a different shape. **Two of the
+  Director's rules are deliberately not copied and both are written down in the module:** ADR-0031's
+  fail-fast across steps (clips are independent, so one that cannot be rendered fails **its own**
+  Task and the episode goes on) and its single candidate (every clip gets its own Artifact,
+  Evaluation and Human Review — thirteen independent fail-closed gates, which `Run` already supports
+  unchanged). What **is** copied is ADR-0026 §2's commit discipline. **Resumption is real, not
+  claimed:** the plan is a pure function of the footage, so a crashed invocation is resumed by
+  re-planning and reusing every committed Task — a terminal one is skipped, one left `RUNNING` is
+  finished on its stored input rather than opened twice. `CRN-08` kills the process after **each of
+  the fourteen commit points of a full invocation** and proves the episode still completes with
+  three artifacts, three evaluations and no duplicate. Other `CRN` rows: a flagged clip blocks only
+  itself and never fails the Run; a rejected clip is simply not shipped (no `SUPERSEDED`, no
+  rework); the Run completes when every clip is decided whatever the decisions were; a QA outage
+  parks at `WAITING_QA` and the next invocation asks again; a desk outage never changes the Run;
+  and `RND-05` — a clip out of spec **fails its Task and never becomes an Artifact, an Evaluation or
+  a review**, because a render defect is not a content risk. `application/clip_review.py` holds the
+  per-Artifact siblings ADR-0059 §5 demanded; `review_publication`'s `pending[-1]` behaviour is
+  **unchanged**, and `CRN-07` pins that. **Found while writing it:** the domain refuses an Output on
+  a Task that has not succeeded (ADR-0005 §5), so the Task succeeds first and all four writes land
+  in one commit. `infrastructure/in_memory_clipping.py` supplies the stubs for the two ports blocked
+  on the environment (no ffmpeg, no Vyra), so the whole path is exercisable today. Suite: 1340
+  passed. **What is left for a real clip to exist:** an ffmpeg-backed `ClipRenderer`, a Vyra-backed
+  `FootageIndex`, a filesystem `EpisodeSource`, a Composition Root builder and the n8n trigger.
 - **The clipping department's QA role exists (queue task 21.6, third slice; ADR-0056).**
   `agents/clip_qa_agent.py` — `clip_qa_agent@v1` → Prompt `clip-qa-agent` v1 (bundled store) →
   **the same** `qa-verdict@v1` Schema, whose object is *reused* rather than rebuilt: one verdict
