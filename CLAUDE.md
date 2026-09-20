@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 60 ADRs (0001–0060) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 61 ADRs (0001–0061) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -303,7 +303,8 @@ anything ahead of the queue below — see task 10.
   are decisions with **no code yet** — queue task 21. **All the department's decisions are now
   made; 21.5 (specs) and 21.6 (implementation) are what remain.** **ADR-0060** (a Notion
   `ReviewDesk`: typed properties, its own database — queue task 19) is likewise decided and
-  unbuilt, and it requires the Notion HTTP plumbing to be **extracted first**. All gates green:
+  unbuilt. **ADR-0061** corrects ADR-0060 §5's ordering: only one Notion module exists, so the
+  plumbing extraction waits until three are **written** — desk, then episode board, then extract. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -991,12 +992,16 @@ process at the time, not a pattern to keep copying.)
       cannot play a file on the maintainer's machine, so the page carries the plan + path and the
       reviewer opens it in a player before choosing. Honest about what v1 is; hosting clips for a
       remote reviewer is an upload adapter and its own decision.
-    - **The Notion HTTP plumbing is extracted FIRST, before this desk is built** (ADR-0060 §5).
-      This is the third consumer, which is exactly the moment ADR-0055 §3 named. Extracting first is
-      behaviour-neutral over two tested consumers with the gate as proof; extracting afterwards
-      would mean writing the plumbing a third time and removing it in a diff that also adds new
-      behaviour, where "nothing changed" is unprovable. **That refactor is the immediate next task**
-      — its own ADR, its own session, `infrastructure/` only.
+    - **Ordering, corrected by ADR-0061:** ADR-0060 §5 said to extract the shared Notion plumbing
+      *before* building this desk, counting it as the third consumer. That counted **decisions, not
+      modules** — `src/` holds exactly one Notion module (`notion_brief_board.py`);
+      `NotionEpisodeBoard` and `NotionReviewDesk` are decided and unwritten. Extracting from one
+      implementation means inventing the seams two unwritten callers will need, which the
+      Conventions forbid, and the refactor would have no proof: its argument is "behaviour did not
+      change" and there is no second behaviour to hold it against. **So: desk (2nd, duplicates the
+      plumbing deliberately) → `NotionEpisodeBoard` (3rd, task 21.6) → then the extraction**, alone,
+      with its own ADR and the gate over three real consumers. ADR-0060 §5's *reason* stands and
+      applies to that step: the refactor never lands inside the commit that revealed the need.
 
 20. ~~**What comes after Stage 12 — decide before coding, don't drift into it.**~~ — done
     (ADR-0053, 2026-09-20). Asked, not guessed: the maintainer brought a **third** candidate — a

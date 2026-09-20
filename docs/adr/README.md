@@ -84,3 +84,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0058](0058-scene-boundary-cutting-and-an-agentless-v1.md) | Cutting at scene boundaries — and what falls away when v1 has no planner agent | Accepted |
 | [0059](0059-one-run-per-episode.md) | One Run per episode — the aggregate already carries it, the orchestrator does not | Accepted |
 | [0060](0060-notion-review-desk.md) | A `ReviewDesk` on Notion — typed properties instead of a marker line, and its own database | Accepted |
+| [0061](0061-extraction-waits-for-three-real-implementations.md) | The Notion plumbing extraction waits for three *written* implementations | Accepted |
