@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 52 ADRs (0001–0052) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 54 ADRs (0001–0054) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -293,7 +293,10 @@ anything ahead of the queue below — see task 10.
   the Stage 10 acceptance (0046), the review link on the brief (0047), the brief invocation + Run
   index (0048), the HTTP production service + n8n workflows (0049), the Stage 11 acceptance (0050)
   the Stage 12 acceptance + the M3 pilot boundary (0051) and the per-role `max_tokens` + explicit
-  thinking (0052) are all implemented and tested. All gates green: ruff, ruff format, mypy --strict, pytest.
+  thinking (0052) are all implemented and tested. **ADR-0053** (the clipping department is the next
+  work, and its shape) and **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
+  world rather than change it) are decisions with **no code yet** — queue task 21. All gates green:
+  ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
   `LLMArtifactEvaluator` renders the Artifact content into the `qa-agent` template, calls
@@ -993,14 +996,28 @@ process at the time, not a pattern to keep copying.)
     approved clip file and publishes nothing, and nothing slow ever runs inside a reasoning step
     (ADR-0028 §3's budget is for fast calls; minutes-long work uses the ADR-0049 queue, and
     cutting/rendering is a deterministic `Workflow` step). Subtasks, each ADR-before-code:
-    1. **Side-effecting Tools — the boundary ADR.** ADR-0022 "Deferred" already reserved this one:
-       *"Tools on top of Adapters … The import allowlist is widened explicitly, by ADR, and the
-       adapter is injected like the clock."* So this is not a new architectural question — it is a
-       thin Tool in `tools/`, the port injected at construction, the real I/O in `infrastructure/`,
-       and `_ALLOWED_PROJECT_IMPORTS` in `tests/test_tool_contract.py` widened by name. Note while
-       designing: `ToolValue` is `str | int | bool` and a Tool answers with a flat mapping, so a
-       list of clip candidates belongs in the planner's Structured Output, not in a Tool's return
-       (or the kinds get widened here, by ADR).
+    1. ~~**Side-effecting Tools — the boundary ADR.**~~ — done (ADR-0054). The shape was as
+       ADR-0022 "Deferred" reserved it: a thin Tool in `tools/` over a port injected at
+       construction, the real I/O in `infrastructure/`, and `_ALLOWED_PROJECT_IMPORTS` in
+       `tests/test_tool_contract.py` widened **by exact module name**, one port per ADR — never the
+       `adapters` package as a prefix, because the allowlist's whole value is that widening it is
+       loud. **Found while writing it, and not in any document before:** ADR-0026 §4 makes an
+       uncommitted executor call at-least-once across a crash, and Tool calls live inside that call
+       with their payloads transient (ADR-0028) — so **every Tool call is at-least-once**, and a
+       crash mid-step replays every Tool the model already called. Invisible while Tools were pure
+       (`current_date` twice is `current_date` once); not invisible the moment one touches the
+       world. Hence ADR-0054 §2: **a Tool observes the outside world and does not change it** — its
+       call must be repeatable without a second irreversible consequence, and anything that creates,
+       uploads, publishes, deletes or renders goes in a deterministic `Workflow` step, which is
+       committed. A paid query stays legal (repeating spends again but corrupts nothing); ADR-0028
+       §3's budget is now also the per-step spend bound, where a `REFUSED` call is free and a
+       `FAILED` one already ran. This costs the clipping department nothing — ADR-0053 §4 had
+       already put indexing, cutting and rendering in Workflow steps. `TOOL_SPEC.md` /
+       `TOOL_ACCEPTANCE.md` TLB-01 are amended **with the first such Tool**, in the same change as
+       the allowlist entry, so no document claims a boundary no test checks yet. Still deferred
+       (ADR-0054): richer `ToolValue` kinds — it is `str | int | bool` and a Tool answers with a flat
+       mapping, so a list of clip candidates belongs in the planner's Structured Output unless the
+       kinds are widened by ADR; a per-role `max_tool_calls`; and tracing Tool calls.
     2. **The clip QA criteria + the platform format contract — needs an ADR; the two flagged
        questions are answered (2026-09-20).** Same shape as `qa-agent`: Prompt + Schema + the
        ADR-0034 verdict grammar reused, not reinvented.
