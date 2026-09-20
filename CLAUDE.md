@@ -69,7 +69,7 @@ anything ahead of the queue below — see task 10.
   claim the brief had explicitly forbidden, no client context, ungrounded psychological assertions).
   That shuts the gate — an Approve raises `ArtifactQaNotPassedError` (ADR-0018) — so the real route
   was a rework.
-  **On 2026-09-20 the maintainer asked for that rework, and it ran (see task 21 for what it
+  **On 2026-09-20 the maintainer asked for that rework, and it ran (see task 22 for what it
   found).** Instructions covered the three flags; the factory did exactly what ADR-0032 specifies —
   `review-1` `changes_requested`, re-entry into `RUNNING`, **only Leo** re-executed (`task-3`),
   `artifact-2` `SUPERSEDED`, `artifact-3` `CANDIDATE` **v2** with `supersedes_ref`, `rework_count`
@@ -79,7 +79,7 @@ anything ahead of the queue below — see task 10.
   `flagged` again** — and two of its four flags are ones no rewrite can clear, because
   `ArtifactEvaluator.evaluate(content)` shows QA only the artifact while `qa-agent` v2 judges
   client rules and uniqueness. **`passed` is therefore unreachable on this path; that is now the
-  thing blocking M3, not the wording of the script (task 21).** The Run sits stored at
+  thing blocking M3, not the wording of the script (task 22).** The Run sits stored at
   `waiting_human` with v2 pending. **Every review decision is the maintainer's: a session must not
   approve, request changes or reject on their behalf.**
   **What the pilot does NOT cover:** the `→ Google Docs →` leg. The maintainer cannot create a
@@ -951,12 +951,12 @@ process at the time, not a pattern to keep copying.)
        rework, which ran on `claude-sonnet-5` for $0.020702 and exercised **ADR-0032 and ADR-0052
        live for the first time**: only Leo re-executed, `artifact-2` `SUPERSEDED`, `artifact-3`
        `CANDIDATE` v2, `rework_count` 1/3. **Two things keep M3 open.** (1) Still no human-approved
-       artifact — and the reason changed: QA flagged v2 as well, and **task 21 shows `passed` is
+       artifact — and the reason changed: QA flagged v2 as well, and **task 22 shows `passed` is
        structurally unreachable** while QA sees only the artifact's content but is asked about client
        rules and uniqueness. That is now the blocker, and it is a contract decision, not another
        rework. (2) No Google Docs leg: no service account, so the desk is absent and approval would
        go through the CLI — the maintainer chose the Notion desk of task 19 for this. Closing M3
-       needs task 21 first, then task 19, then a decision on the candidate.
+       needs task 22 first, then task 19's wiring, then a decision on the candidate.
        Original brief: One real brief, real Notion, real Google Docs, real
        Anthropic, real n8n trigger, through to a human-approved artifact. This needs the
        maintainer's real accounts across four external services — not available in this
@@ -1057,33 +1057,6 @@ process at the time, not a pattern to keep copying.)
     whichever session picks it up. Note too that Milestone M3 (16.3) is still open: a green CI is
     not the pilot. A reasonable next session is the ADR for that ordering decision — asked, not
     guessed — while the live pilot waits on the maintainer's accounts.
-
-21. **QA is asked questions its input cannot answer, so `passed` is unreachable — found in the
-    2026-09-20 rework, needs a decision, probably an ADR. This now blocks M3 (16.3).**
-    `ArtifactEvaluator.evaluate(content: str)` (ADR-0018, realized by `LLMArtifactEvaluator`,
-    ADR-0036) passes the QA model **only the candidate Artifact's own content** — not the brief, not
-    a client profile, not the previous version, not the reviewer's instructions. But `qa-agent` v2
-    (task 12.1, from `PROJECT.md` 1.3 §1) judges on criteria that need exactly that: criterion 1
-    asks whether the material repeats the client's own or a competitor's output, criterion 4 asks
-    for "редакционным правилам клиента, присланным в контексте". Neither is decidable from a
-    15-second script in isolation, and the prompt ends with "Если сомневаешься — не ставь passed"
-    (fail closed, `PROJECT.md` §1). So a **correct** QA agent flags the missing context on every
-    iteration: v1 was flagged for it, v2 was flagged for it again in different words, and a third
-    rework would buy a third wording. The gate is behaving as told; the port is what is short.
-    Options to weigh, not to assume:
-    - **Widen the port** so an evaluation receives its context (brief, client profile, human
-      instructions, the superseded version) instead of a bare string. Fixes the cause, but changes
-      an ADR-0018/0036 contract and every implementer — an ADR, and additive per PROJECT.md §4.11
-      (a second method, not a changed signature).
-    - **`qa-agent` v3** restricted to what one artifact's text can support (factual correctness,
-      unsubstantiated claims, internal consistency), with client rules and uniqueness dropped until
-      something can supply them. Cheapest and has a precedent (task 12 was prompt content, reviewed
-      like code, no ADR) — but it narrows the charter's value #1, so say so out loud.
-    - **Supply a client profile** as part of the brief. Does not help on its own: whatever the brief
-      carries, `evaluate(content)` still cannot show it to QA. Only useful together with option 1.
-    Do not "fix" this by rewording the script again, and do not approve around it — the fail-closed
-    gate is correct, and ADR-0018 exists precisely so that a flagged candidate cannot be waved
-    through.
 
 21. **The clipping department (started 2026-09-20, authorized by ADR-0053).** A second department
     alongside the content factory: an existing TV series episode (rights cleared) → short vertical
@@ -1259,6 +1232,34 @@ process at the time, not a pattern to keep copying.)
        the deterministic render step, and one Artifact + one gate per clip candidate.
     7. **Automatic publishing** — wanted by the maintainer, deliberately out of scope for v1. Additive
        Adapters per platform when it is asked for.
+
+22. **QA is asked questions its input cannot answer, so `passed` is unreachable — found in the live
+    2026-09-20 rework, needs a decision, probably an ADR. This now blocks M3 (16.3), and it will
+    bite the clipping department's own QA role (21.2/21.6) the same way.**
+    `ArtifactEvaluator.evaluate(content: str)` (ADR-0018, realized by `LLMArtifactEvaluator`,
+    ADR-0036) passes the QA model **only the candidate Artifact's own content** — not the brief, not
+    a client profile, not the previous version, not the reviewer's instructions. But `qa-agent` v2
+    (task 12.1, from `PROJECT.md` 1.3 §1) judges on criteria that need exactly that: criterion 1
+    asks whether the material repeats the client's own or a competitor's output, criterion 4 asks
+    for "редакционным правилам клиента, присланным в контексте". Neither is decidable from a
+    15-second script in isolation, and the prompt ends with "Если сомневаешься — не ставь passed"
+    (fail closed, `PROJECT.md` §1). So a **correct** QA agent flags the missing context on every
+    iteration: v1 was flagged for it, v2 was flagged for it again in different words, and a third
+    rework would buy a third wording. The gate is behaving as told; the port is what is short.
+    Options to weigh, not to assume:
+    - **Widen the port** so an evaluation receives its context (brief, client profile, human
+      instructions, the superseded version) instead of a bare string. Fixes the cause, but changes
+      an ADR-0018/0036 contract and every implementer — an ADR, and additive per PROJECT.md §4.11
+      (a second method, not a changed signature).
+    - **`qa-agent` v3** restricted to what one artifact's text can support (factual correctness,
+      unsubstantiated claims, internal consistency), with client rules and uniqueness dropped until
+      something can supply them. Cheapest and has a precedent (task 12 was prompt content, reviewed
+      like code, no ADR) — but it narrows the charter's value #1, so say so out loud.
+    - **Supply a client profile** as part of the brief. Does not help on its own: whatever the brief
+      carries, `evaluate(content)` still cannot show it to QA. Only useful together with option 1.
+    Do not "fix" this by rewording the script again, and do not approve around it — the fail-closed
+    gate is correct, and ADR-0018 exists precisely so that a flagged candidate cannot be waved
+    through.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

@@ -117,7 +117,7 @@ it's actually done, step by step against the Setup list above — not all at onc
   ставь passed" — so a correct QA agent flags the missing context every time. The gate is doing
   what it was told; the contract is what is short. No further rework was spent on it: another
   iteration would buy a differently-worded flag, not a verdict. Options for the maintainer are
-  queued in `CLAUDE.md` task 21.
+  queued in `CLAUDE.md` task 22.
 
 - **2026-09-19 — the whole loop ran from a live Notion trigger; the pilot is paused at the human
   gate.** Steps 2 and 5 finished (credential renamed to `Concept Notion (read)`, the leftover
