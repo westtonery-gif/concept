@@ -87,3 +87,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0061](0061-extraction-waits-for-three-real-implementations.md) | The Notion plumbing extraction waits for three *written* implementations | Accepted |
 | [0062](0062-timed-captions-on-the-clip-plan.md) | Timed captions on the clip plan and the render request | Accepted |
 | [0063](0063-v1-renders-without-burning-captions.md) | v1 renders clips without burning captions, and keeps them for when it can | Accepted |
+| [0064](0064-footage-index-on-ffmpeg-and-whisper-cpp.md) | `FootageIndex` on ffmpeg and whisper.cpp — the vendor is dropped | Accepted |

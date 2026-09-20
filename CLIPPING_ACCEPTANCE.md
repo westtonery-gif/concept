@@ -20,7 +20,7 @@
 | `NotionEpisodeBoard` | NEB | **готово** |
 | Заглушка борда | STE | **готово** |
 | `EpisodeSource` (локальный файл) | FSE | **готово**; ждёт только самого файла эпизода |
-| `FootageIndex` | FIX | порт и заглушка **готовы**; адаптер Vyra ждёт аккаунта |
+| `FootageIndex` | FIX | **готово** без вендора: ffprobe + ffmpeg `scdet` + whisper.cpp (`ADR-0064`); ждёт только файла модели |
 | `plan_clips` | CLP | **готово** |
 | `check_clip_format` | RND-01…04 | **готово** |
 | `ClipRenderer` | FCR | **готово** на настоящем ffmpeg 9.0.2; **вжигания субтитров нет** (`ADR-0063`) |

@@ -21,6 +21,33 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **The clipping department has no vendor: `FootageIndex` runs on ffmpeg and whisper.cpp
+  (ADR-0064, queue task 21.6).** `infrastructure/local_footage_index.py` answers all three things
+  the port owes from tools on the operator's own machine: `ffprobe` for the duration, ffmpeg's
+  **`scdet`** filter for scene-change timestamps, and **`whisper-cli`** (whisper.cpp, MIT, one brew
+  formula) for speech with millisecond offsets. Offline end to end — for licensed television, the
+  footage never leaving the machine is not a small point. **Vyra is dropped.** Capability was never
+  the problem: its MCP drives an editor **open in a browser tab** ("No browser connected" is a
+  documented failure mode), while `index()` is called from a Workflow step in `factory_service.py`
+  on a schedule with nobody present. ADR-0053 §3 assumed "MCP" meant a server-side API and never
+  checked — that was the error. Five alternatives were read: **Shorty** is genuinely headless but
+  offers neither transcription nor scene detection; **SynthCut** is open source and has exactly the
+  three tools, but is a Node/Electron app (Windows-only packaged build, a persistent core process,
+  an MCP client dependency, a frame-based API against our millisecond contract) **wrapping
+  whisper.cpp and ffmpeg as external processes** — which we now call directly; the two Claude Code
+  plugins are tools for an agent session, not for a service. **The reason to buy had also gone
+  away**: "buy, don't build" was about moment-finding, and ADR-0058 removed the planner. **The port
+  did not change** — swapping a cloud editor for two local binaries touched one module in
+  `infrastructure/`, which is the layering earning its keep. `silencedetect` is deliberately unused:
+  Whisper's word timings already say where the pauses are, and two derivations of "a pause" would
+  be one too many. Tests: `tests/test_local_footage_index.py` (`FIX`) measure and cut a **real**
+  generated video with a known hard cut, drive transcription through a stub `whisper-cli` (a real
+  model is multi-gigabyte operator setup, not a fixture), and **clean Whisper's output rather than
+  trusting it** — blank, zero-length, overlapping and past-the-end segments are each dropped or
+  clamped, because a transcript is a machine listening to speech, not a contract. One live test
+  runs the real binary when `OMEMO_WHISPER_MODEL` is set and skips honestly when it is not. Suite:
+  1380 passed, 1 skipped. **Still operator setup:** the GGML model file, and then the first real
+  episode — which is also what decides `scdet`'s threshold.
 - **The clipping department renders real files (queue task 21.6; ADR-0063).**
   `infrastructure/ffmpeg_clip_renderer.py` cuts one interval with `ffmpeg` and measures the result
   with `ffprobe` — **the measurements are read back from the produced file, never echoed from the
