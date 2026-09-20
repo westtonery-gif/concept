@@ -35,7 +35,10 @@ from omemo_content_factory.domain.run import Actor, Run, RunStatus
 _PROJECT = root_pkg.__name__
 _SRC = Path(root_pkg.__file__).parent
 _ADAPTERS_SRC = Path(adapters_pkg.__file__).parent
-_ALLOWED_STDLIB = {"__future__", "collections.abc", "dataclasses", "typing"}
+_ALLOWED_STDLIB = {"__future__", "collections.abc", "dataclasses", "enum", "typing"}
+"""``enum`` was added for ``ClipMode`` (ADR-0058 §1): a closed vocabulary on a contract is
+data, like a frozen dataclass, and carries no behaviour. The list stays an allowlist — a
+module widening it must say why here."""
 _IO_STDLIB = {
     "dbm",
     "ftplib",
@@ -347,6 +350,19 @@ def test_adb_05_contracts_name_no_vendor() -> None:
 def test_adb_06_every_contract_module_is_scanned_and_imports_on_its_own() -> None:
     on_disk = {p.stem for p in _ADAPTERS_SRC.glob("*.py")} - {"__init__"}
     importable = {info.name for info in pkgutil.iter_modules(adapters_pkg.__path__)}
-    assert on_disk == importable == {"analytics_sink", "brief_board", "review_desk", "run_store"}
+    assert (
+        on_disk
+        == importable
+        == {
+            "analytics_sink",
+            "brief_board",
+            "clip_renderer",
+            "episode_board",
+            "episode_source",
+            "footage_index",
+            "review_desk",
+            "run_store",
+        }
+    )
     for name in importable:
         importlib.import_module(f"{adapters_pkg.__name__}.{name}")

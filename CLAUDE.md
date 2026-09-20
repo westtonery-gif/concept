@@ -21,6 +21,31 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-20)
+- **The clipping department's contracts and its two pure functions exist (queue task 21.6, first
+  slice; `CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`).** Four new role-named ports in `adapters/`:
+  `EpisodeBoard` (+ `IncomingEpisode`, `ClipMode`, `EpisodeBoardError`), `EpisodeSource`
+  (`locate -> LocatedEpisode`, a **locally readable** path, so a future remote implementation
+  materialises a copy and the renderer never learns about the network), `FootageIndex`
+  (`index -> IndexedFootage(duration_ms, scenes, speech)`, validated: breaks strictly increasing,
+  speech ordered and non-overlapping, both inside the episode) and `ClipRenderer`
+  (`render -> RenderedClip` carrying **its own** measurements — it made the file, which is what lets
+  the format check be arithmetic). Two pure functions in `application/`: `plan_clips` (both modes;
+  `CHUNK` cuts at a configured length with each boundary nudged to the nearer edge of a spoken line
+  when one is within tolerance, `SCENE` merges consecutive scenes under a maximum and splits a
+  longer one by the `CHUNK` rule; **no detected scene plans nothing and is not an error** — guessing
+  "the whole episode is one scene" would be a second copy of a decision that is not ours) and
+  `check_clip_format` (duration and container only — **aspect ratio is deliberately not a
+  violation**, ADR-0058). **The adapter-layer boundary was widened explicitly, not quietly:**
+  `tests/test_adapter_contract.py` gained `enum` to `_ALLOWED_STDLIB` for `ClipMode`, with the
+  reason written beside it, and its module list now names all eight contracts — both tests caught
+  the new modules on the first run, which is what they are for. Tests:
+  `tests/test_episode_board.py` (`EPB`), `tests/test_clip_plan.py` (`CLP`, including a purity scan
+  in the shape of `TLB-01`), `tests/test_clip_format.py` (`RND-01…04`). Suite: 1259 passed.
+  **Still blocked on the environment, and said so in the acceptance's own state table:** ffmpeg is
+  not installed (so the real `ClipRenderer` waits) and Vyra is not configured (so `FootageIndex`'s
+  real adapter waits). **Next:** `InMemoryEpisodeBoard` (`STE`), `NotionEpisodeBoard` (`NEB`, the
+  **third** Notion consumer — after which ADR-0061 says to extract the shared client),
+  `clip_qa_agent@v1` (`CQA`) and the production path (`CRN`).
 - **A real Notion `ReviewDesk` exists (ADR-0060; queue task 19) — not wired yet.**
   `infrastructure/notion_review_desk.py` `NotionReviewDesk` is the **second** implementation of the
   ADR-0023 port, beside `GoogleDocsReviewDesk`; no core change, exactly as `NotionBriefBoard` was

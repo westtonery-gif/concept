@@ -88,9 +88,12 @@
 
 ## 6. План клипов — чистая функция
 
-`skills/`-формы детерминированная функция строит план из `IndexedFootage` и режима:
+Детерминированная функция строит план из `IndexedFootage` и режима. Живёт в
+`application/clip_plan.py`, **не** в `skills/`: библиотека Skills импортирует только чистый stdlib
+и `domain.skill` (`SKB-01`), а плану нужны типы портов — поэтому он прикладной код, а не Skill.
+Чистота от этого не страдает и проверяется отдельно (`CLP-09`).
 
-`plan_clips(indexed, *, mode, chunk_ms, max_ms) -> ClipPlan`
+`plan_clips(indexed, *, episode_ref, mode, chunk_ms, max_ms, pause_tolerance_ms) -> ClipPlan`
 
 `ClipPlan(episode_ref, mode, clips: tuple[PlannedClip, ...])`;
 `PlannedClip(index, start_ms, end_ms, transcript)` — `index` с 1, интервалы не пересекаются и идут
@@ -121,7 +124,8 @@
 техническую пригодность, **не про соотношение сторон**.
 
 **Проверка формата детерминирована и модели не отдаётся** (`ADR-0056` §1). Чистая функция
-`check_clip_format(measured, *, limits) -> tuple[str, ...]` возвращает нарушения. Клип вне спеки —
+`check_clip_format(clip, *, limits: ClipFormatLimits) -> tuple[str, ...]`
+(`application/clip_format.py`) возвращает нарушения. Клип вне спеки —
 **не риск контента**, а рендер, сделавший не то, что ему сказали: это `FAILED` Task со стабильной
 причиной (форма `ADR-0033`), а **не** `flagged`-вердикт в очередь человеку.
 
