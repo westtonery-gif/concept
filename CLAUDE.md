@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 57 ADRs (0001–0057) are Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 58 ADRs (0001–0058) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -297,8 +297,9 @@ anything ahead of the queue below — see task 10.
   work, and its shape), **ADR-0054** (side-effecting Tools over injected ports; Tools observe the
   world rather than change it) **ADR-0055** (the `EpisodeBoard` port and its Notion
   implementation) **ADR-0056** (clip QA: arithmetic is checked deterministically, the model
-  judges meaning) and **ADR-0057** (the two cutting modes restated — `CHUNK` / `STORYLINE`,
-  amending §§ of 0053/0055/0056) are decisions with **no code yet** — queue task 21. All gates green:
+  judges meaning) **ADR-0057** (superseded) and **ADR-0058** (cut at scene
+  boundaries; `CHUNK` / `SCENE`; **v1 has no planner agent**, so ADR-0054 has no consumer yet) are
+  decisions with **no code yet** — queue task 21. All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -1061,42 +1062,46 @@ process at the time, not a pattern to keep copying.)
        judging the rendered pixels (needs a multimodal port), platform caps as configuration, and
        **which evaluator the Director is given when a Run carries many clip Artifacts** — the same
        knot ADR-0055 §6 flagged, for 21.6 to untie.
-    3. **The two cutting modes — restated by the maintainer 2026-09-20 (ADR-0057, which amends
-       ADR-0053 §5, ADR-0055 §2 and ADR-0056 §2).** The distinction is about the **source material**,
-       not the algorithm, and the working note's "find the clip-worthy moments" framing was wrong:
-       - **`CHUNK`** — series that follow essentially one thread, main characters on screen
-         throughout. The episode is continuous, so consecutive two-minute pieces work and nothing
-         needs understanding. No agent, no vendor reasoning call, no ranking; it still wants the
-         transcript, to nudge a boundary to the nearest speech pause.
-       - **`STORYLINE`** — series with many main characters whose scenes are **interleaved** through
-         the episode. Cutting by length there yields two minutes of three unrelated threads. The job
-         is to **follow one thread and gather its scattered scenes into one clip** — de-interleaving,
-         not highlight ranking.
-       `ClipMode` is therefore `CHUNK` / `STORYLINE`; `SEMANTIC` named a method, and `BOTH` is
-       dropped (mark the episode twice). **A storyline clip is a list of segments**, so the clip
-       payload carries `segments` (ordered start/end + transcript) and a chunk clip is the
-       one-segment case — one shape, one QA input, both modes. **Segments stay in episode order**:
-       reordering manufactures events. **QA criterion 2 is restated** — under the old wording ("no
-       splice that invents an exchange") storyline mode would have been forbidden outright, since
-       splicing is its point. It becomes **no invented continuity**: joins only in episode order and
-       only from one thread, never making two moments read as continuous when they are not.
-       Criterion 1 gets *heavier* here — a thread pulled out of its episode must stand alone.
-       **Vyra checked 2026-09-20 (its own product page):** scenes detected, speech transcribed,
-       subjects tagged — but the tags shown are generic (`person`, `indoors`), the product is aimed
-       at short creator footage, and **recurring-character re-identification across a 25-minute
-       episode is nowhere claimed**. So storyline mode is designed to **follow threads through the
-       transcript** — the vendor gives scene boundaries + timed speech, the planner agent reads who
-       speaks, to whom, about what. Needs only advertised capabilities, puts the hard part on the
-       component suited to it, and degrades honestly: a thread carried by silent action will be
-       followed poorly — measure that on the first episode. Putting re-identification to the vendor
-       is the first concrete question for them. **Arithmetic resolved:** 15 clips × 2 min out of 25
-       min looked impossible, but 25 ÷ 2 ≈ 12–13 — those were **chunk-mode numbers all along**.
-       Storyline mode yields fewer, longer clips, as long as the thread needs. **Still open:** a
-       maximum length for a storyline clip, and the gate's granularity — ~450 clips/month means
-       ~450 Approves (~15/day), and whether one Approve may cover a batch of chunk-mode clips from
-       one episode is **not decided, the maintainer wants a test first**. Until then v1 keeps the
-       strict reading: one Artifact, one verdict, one Approve per clip (`PROJECT.md` §12,
-       ADR-0018), and the first pilot is one episode, not thirty.
+    3. **The two cutting modes — simplified by the maintainer 2026-09-20 (ADR-0058, which
+       supersedes ADR-0057 in full and further amends ADR-0053 §5 and ADR-0056 §2).** Cut **where
+       one scene ends and the next begins**. `ClipMode` is `CHUNK` / `SCENE`:
+       - **`CHUNK`** — consecutive pieces of a configured length, each boundary nudged to the
+         nearest speech pause. Unchanged.
+       - **`SCENE`** — boundaries are the vendor's detected scene boundaries; consecutive scenes are
+         merged while under the configured maximum, and a scene longer than that is split at a
+         speech pause rather than emitted out of spec.
+       **Why this is the right simplification, not a retreat:** the complaint was never "give me one
+       character's whole arc" — it was that a length-based cut lands mid-scene and mixes threads. A
+       scene boundary never falls mid-scene and a scene belongs to one thread, so this solves it at
+       the source. It is also cheap: scene detection is the vendor's advertised, mainstream
+       capability, unlike the recurring-character re-identification storyline mode would have needed
+       (ADR-0057 §4 found it claimed nowhere — that reading survives).
+       **Three things were withdrawn before they were ever built:** the `segments` list (nothing in
+       v1 splices, so a clip is one `start`/`end` — ADR-0022 §2's "no field without a reader");
+       QA criterion 2 in both its forms (merging consecutive scenes joins what the episode itself
+       shows consecutively, so it invents nothing); and "no reply cut mid-word" as a *criterion* —
+       it is a property of how boundaries are chosen, checked deterministically, the same split
+       ADR-0056 §1 made for duration. **v1's QA criteria are three:** self-contained, no orphaned
+       punchline (a scene boundary is not a comic boundary), no spoiler (still needs the full
+       episode transcript, ADR-0056 §3).
+       **The real consequence: v1 has no planner agent.** Both modes are deterministic `Workflow`
+       steps — ask the vendor for boundaries + transcript, compute intervals, render, caption. The
+       clip-planner Agent the working note and ADR-0053 §5 assumed does not exist in v1. What
+       remains is the part that needs judgement: `clip_qa_agent@v1`, the fail-closed gate and the
+       human Approve — one model call per clip, no reasoning loop. **So ADR-0054 has no consumer in
+       v1** (no agent queries the vendor mid-reasoning; a Workflow step reaches it through an
+       ordinary Adapter). It is **not wrong and not superseded** — it is the standing answer for the
+       first Tool that needs it, and its at-least-once finding stays true of every Tool call; 21.1
+       is simply a decision with no code to write. The shape is legitimate: `TaskExecutor` is a
+       Protocol and `SkillPreprocessingTaskExecutor` (ADR-0027) is already a non-LLM one.
+       **Given up, deliberately (ADR-0058 §5):** no per-character arc in one clip — a character's
+       scenes arrive as separate coherent clips in episode order. If the material needs arcs,
+       storyline extraction returns as an additive mode from superseded ADR-0057's design.
+       **Still open:** the configured chunk/maximum lengths; whether this vendor's scene boundaries
+       are good on this material (the one vendor question now, answered by the first episode); and
+       the gate's granularity — ~13 clips per episode, each with its own Approve until the
+       maintainer's test says a batch may share one (`PROJECT.md` §12, ADR-0018). First pilot: one
+       episode.
     4. ~~**The board Adapter — the contract ADR.**~~ — done (ADR-0055); the implementation is
        21.6. A second port `EpisodeBoard` beside `BriefBoard` (not an extension of it):
        `fetch_episode -> IncomingEpisode | None`, `report_status(episode_ref, *, run_id, status)`,

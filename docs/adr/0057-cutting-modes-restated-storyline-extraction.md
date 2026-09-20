@@ -1,6 +1,6 @@
 # ADR-0057: The two cutting modes restated — the episode's structure decides, and storyline mode runs on the transcript
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0058
 - **Date:** 2026-09-20
 - **Deciders:** Lead Architect / Domain Architect
 - **Amends:** ADR-0053 §5 (what the two modes are), ADR-0055 §2 (`ClipMode`'s vocabulary),
