@@ -21,6 +21,28 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **The clipping department renders real files (queue task 21.6; ADR-0063).**
+  `infrastructure/ffmpeg_clip_renderer.py` cuts one interval with `ffmpeg` and measures the result
+  with `ffprobe` — **the measurements are read back from the produced file, never echoed from the
+  request**, which is the point of `RenderedClip` carrying them: ADR-0056 §1's format check then
+  compares real numbers, and `FCR-01` proves it by asking for a clip past the end of the episode
+  and getting a shorter one. `infrastructure/file_system_episode_source.py` resolves a
+  `source_ref` to a file inside one configured root, treating the ref as a **file name, never a
+  path**: `..`, `/etc/passwd` and `sub/dir.mp4` are `None`, so a board someone else can edit cannot
+  reach out of its folder. Tests cut a real video ffmpeg generates and read it back with ffprobe;
+  where ffmpeg is absent they **skip**, which for a machine that cannot run them is the honest
+  answer (12 passed, 7 skipped without it).
+  **Captions are not burnt in, and this is recorded rather than hidden (ADR-0063).** The Homebrew
+  ffmpeg 9.0.2 installed here was built without `libass` and without `libfreetype`: checked
+  directly, `ffmpeg -h filter=subtitles` and `-h filter=drawtext` both answer `Unknown filter`, and
+  its `configuration:` line and `brew deps ffmpeg` list neither. It cuts, encodes and measures
+  perfectly; it simply cannot draw text on a picture. The maintainer chose to go without rather
+  than spend an hour building ffmpeg from a third-party tap, because v1 publishes nothing by hand
+  and the platforms caption automatically. **The captions are kept** — on `PlannedClip` and in the
+  clip Artifact — so restoring burn-in is a change inside one adapter and nothing else, which is
+  exactly what ADR-0062 bought. `OMEMO_EPISODE_ROOT` is the one new variable. **Homebrew is on
+  `PATH` through `~/.zprofile`, so an interactive shell finds ffmpeg; a non-interactive one does
+  not, and those tests skip there.**
 - **The clipping department's production path is assembled and proven (queue task 21.6, `CRN`).**
   `application/clip_production.py` `ClipProduction.invoke(episode_ref)` takes one episode from the
   board to a human decision on every clip, as **application code beside `ContentDirector`** — never
