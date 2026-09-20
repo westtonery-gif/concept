@@ -276,7 +276,7 @@ anything ahead of the queue below — see task 10.
   QA role (own `client_for_role` binding), reports a QA failure, prints Evaluations/Reviews and has
   `--request-changes "<text>"` to play the reviewer and drive a real rework. Tests:
   `tests/test_qa_wiring.py` (`QWR`, `EVALUATION_ACCEPTANCE.md` §4.4).
-- **All 58 ADRs (0001–0058) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
+- **All 59 ADRs (0001–0059) are recorded; 0057 is Superseded by 0058, the rest Accepted.** Run/Task/Output/Artifact/Human Review (0003–0007),
   Schema + Output validation (0008), Workflow (0009), Agent boundary + Prompt binding
   (0010/0011), Composition Root (0012), execution topology (0013), structured output (0014),
   Run restoration (0015), provider/model selection ownership (0016), shared `DomainError` base
@@ -298,8 +298,10 @@ anything ahead of the queue below — see task 10.
   world rather than change it) **ADR-0055** (the `EpisodeBoard` port and its Notion
   implementation) **ADR-0056** (clip QA: arithmetic is checked deterministically, the model
   judges meaning) **ADR-0057** (superseded) and **ADR-0058** (cut at scene
-  boundaries; `CHUNK` / `SCENE`; **v1 has no planner agent**, so ADR-0054 has no consumer yet) are
-  decisions with **no code yet** — queue task 21. All gates green:
+  boundaries; `CHUNK` / `SCENE`; **v1 has no planner agent**, so ADR-0054 has no consumer yet) and
+  **ADR-0059** (one Run per episode; the aggregate already carries it, the orchestrator does not)
+  are decisions with **no code yet** — queue task 21. **All the department's decisions are now
+  made; 21.5 (specs) and 21.6 (implementation) are what remain.** All gates green:
   ruff, ruff format, mypy --strict, pytest.
 - **A real model can answer the QA gate, and every QA call is recorded (ROADMAP Stage 8,
   ADR-0036); wired by ADR-0038 (above).** `infrastructure/llm.py`
@@ -1127,6 +1129,35 @@ process at the time, not a pattern to keep copying.)
        Also deferred: the `POST /v1/episodes` route + a second Notion Trigger (ADR-0049's two
        findings apply unchanged — a core write re-triggers the poll, and task 18's lost-trigger hole
        is open on this board too), clip locations reported back, and `InMemoryEpisodeBoard`.
+    4a. **Run granularity — decided (ADR-0059): one Run per episode**, holding ~13 clip Artifacts.
+       **`Run` needs no change, verified in `domain/run.py` rather than assumed:**
+       `open_evaluation(artifact_id, …)` and `open_human_review(artifact_id, …)` are both
+       per-Artifact, the latter carries **no "one pending review" rule**, and
+       `transition_artifact`'s `CANDIDATE -> APPROVED` gate keys on *that* Artifact's approving
+       review and *that* Artifact's latest `PASSED` verdict — so 13 clips are 13 independent
+       fail-closed gates by construction. Run status covers the batch: `RUNNING` → `WAITING_QA`
+       (every clip has a verdict) → `WAITING_HUMAN` (every clip decided) → `COMPLETED`; no new edge.
+       **A clip is not the Run's fate** — a clip that fails QA or is rejected just does not ship;
+       only a failure that stops production fails the Run. **The department does not use
+       `ContentDirector`** and does not modify it: its contract is a *declared* Workflow with
+       positional Task matching ending in one candidate, and a fan-out of unknown width is a
+       different shape. It gets an application module beside it, like `BriefProduction` (ADR-0048);
+       **one Task per clip render**, which is ADR-0032's existing "append a traced Task" mechanism,
+       giving each clip its own Output, Artifact, trace and retry. **Cost named:** that service must
+       keep ADR-0026's commit discipline itself and resume without duplicating a committed Task or
+       verdict — the main risk in 21.6, so the acceptance must crash at every commit point the way
+       `SWR` does. **Found while checking, would have failed silently:**
+       `review_publication.pending_review(run)` returns `pending[-1]` — *the latest* pending review,
+       and `pending_review_package` / `publish_pending_review` / `take_review_decision` all inherit
+       it. With 13 pending reviews they would address one and **leave twelve unpublished with no
+       error**. So the department gets **per-Artifact siblings**, and the existing functions are
+       **not** changed — Stage 10–12's acceptance pins their current behaviour.
+       `latest_qa(run, artifact_id)` is already per-Artifact and is reused as is. **Rework does not
+       apply to a clip** (ADR-0059 §6): with no planner agent there is no producer whose reasoning
+       could be re-run — asking for changes on a cut means wanting a *different* cut, i.e. a
+       different clip. A rejected clip is simply not shipped; no `SUPERSEDED` chain, no rework loop.
+       **Deferred:** the per-clip review desk (same blocker as task 19 / M3 — it will bite here too),
+       and whether ~390 Tasks + ~390 Evaluations a month in one store stays comfortable.
     5. **`CLIPPING_SPEC.md` / `CLIPPING_ACCEPTANCE.md`**, in the shape of the existing per-aggregate
        specs, once 21.1–21.4 land.
     6. **Only then implement:** the episode-source port (local file first), the indexing/transcription
