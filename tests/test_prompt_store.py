@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import omemo_content_factory.composition as composition
+from omemo_content_factory.agents import clip_qa_agent as clip_qa
 from omemo_content_factory.agents import content_researcher as rin
 from omemo_content_factory.agents import qa_agent as qa
 from omemo_content_factory.agents import script_writer as leo
@@ -85,7 +86,12 @@ class _NeverCalledClient:
 def test_pst_01_bundled_catalogue_preserves_migrated_prompts_exactly() -> None:
     prompts = load_prompt_catalogue()
 
-    assert set(prompts) == {rin.PROMPT_REF, leo.PROMPT_REF, qa.PROMPT_REF}
+    assert set(prompts) == {
+        rin.PROMPT_REF,
+        leo.PROMPT_REF,
+        qa.PROMPT_REF,
+        clip_qa.PROMPT_REF,  # the clipping department's QA role (ADR-0056)
+    }
     assert prompts[rin.PROMPT_REF] == Prompt(
         prompt_id="content-researcher",
         version=PromptVersion(2),

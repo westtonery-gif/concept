@@ -20,7 +20,22 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 (§16), but it does not override anything above 6 and it does not itself authorize starting
 anything ahead of the queue below — see task 10.
 
-## Current state (2026-09-20)
+## Current state (2026-09-21)
+- **The clipping department's QA role exists (queue task 21.6, third slice; ADR-0056).**
+  `agents/clip_qa_agent.py` — `clip_qa_agent@v1` → Prompt `clip-qa-agent` v1 (bundled store) →
+  **the same** `qa-verdict@v1` Schema, whose object is *reused* rather than rebuilt: one verdict
+  contract, one decoder, and a second vocabulary would be a second thing to keep honest. No Skills,
+  no Tools; it answers with a verdict, so `validate_workflow_executors` refuses it as a Workflow
+  step exactly as it refuses `qa_agent`. The Prompt carries the **three** criteria
+  (self-contained, no orphaned punchline, no spoiler) and two instructions that matter as much as
+  they do: it is given **the whole episode's transcript beside the clip's**, without which the
+  spoiler criterion has no evidence to apply (ADR-0056 §3), and it is told **not** to judge
+  duration, container, resolution or aspect ratio — that is arithmetic (ADR-0056 §1), and a model
+  spending flags on it would fill a human queue with render defects. Tests:
+  `tests/test_clip_qa_agent.py` (`CQA`), pinning consistency and those two instructions, not
+  wording. **Two pinned sets were widened explicitly, and both caught the change on the first run:**
+  `PST-01`'s bundled-catalogue set now names the fourth prompt, and the adapter-layer scan was
+  widened in the previous slice. Suite: 1309 passed.
 - **Both episode boards exist (queue task 21.6, second slice).** `InMemoryEpisodeBoard`
   (`infrastructure/in_memory_adapters.py`) keeps ADR-0025's shape: a control side **outside** the
   Protocol (`put` = the editor, `reports` = what the outside sees), and it fails **loudly** where
@@ -66,7 +81,7 @@ anything ahead of the queue below — see task 10.
   in the shape of `TLB-01`), `tests/test_clip_format.py` (`RND-01…04`). Suite: 1259 passed.
   **Still blocked on the environment, and said so in the acceptance's own state table:** ffmpeg is
   not installed (so the real `ClipRenderer` waits) and Vyra is not configured (so `FootageIndex`'s
-  real adapter waits). **Next:** `clip_qa_agent@v1` (`CQA`) and the production path (`CRN`).
+  real adapter waits). **Next:** the production path (`CRN`).
 - **A real Notion `ReviewDesk` exists (ADR-0060; queue task 19) — not wired yet.**
   `infrastructure/notion_review_desk.py` `NotionReviewDesk` is the **second** implementation of the
   ADR-0023 port, beside `GoogleDocsReviewDesk`; no core change, exactly as `NotionBriefBoard` was
