@@ -37,6 +37,7 @@ from omemo_content_factory.composition import (
     build_qa_evaluator,
     build_review_desk,
 )
+from omemo_content_factory.domain.run import RunStatus
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
@@ -72,6 +73,17 @@ def _report(invocation: ClipInvocation) -> None:
         return
     safe_print(f"Run {invocation.run_id} — {invocation.status.value if invocation.status else '?'}")
     safe_print(f"  clips: {invocation.clips}")
+    tally = invocation.tally
+    judged = (
+        f"  QA: {tally.passed} passed, {tally.flagged} flagged, {tally.failed} failed"
+        + (f", {tally.unjudged} not judged yet" if tally.unjudged else "")
+        + (f"; {tally.render_failed} clip(s) could not be rendered" if tally.render_failed else "")
+    )
+    safe_print(judged)
+    safe_print(f"  approved: {tally.approved} of {invocation.clips}")
+    if invocation.status is RunStatus.COMPLETED and not tally.approved:
+        # `completed` means every clip is settled, not that any is ready (ADR-0059 §3).
+        safe_print("  nothing is ready to publish: no clip passed QA and was approved")
     if invocation.failure_reason:
         safe_print(f"  the episode could not be produced: {invocation.failure_reason}")
     for task_id in invocation.failed_clips:

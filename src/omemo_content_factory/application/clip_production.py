@@ -64,6 +64,7 @@ __all__ = [
     "ClipProduction",
     "ClipProductionError",
     "ClipSettings",
+    "ClipTally",
     "run_id_for_episode",
 ]
 
@@ -110,6 +111,24 @@ class ClipSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class ClipTally:
+    """Where an episode's clips stand, counted from the Run (task 24.4).
+
+    ``completed`` is a Run status, not a result: a Run whose every clip failed QA completes too,
+    because a clip is not the Run's fate (ADR-0059 §3). These counts are what says whether anything
+    is actually ready. ``render_failed`` are clips that never became an Artifact; the verdicts are
+    each Artifact's latest QA answer, ``unjudged`` those still without one.
+    """
+
+    render_failed: int = 0
+    passed: int = 0
+    flagged: int = 0
+    failed: int = 0
+    unjudged: int = 0
+    approved: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class ClipInvocation:
     """What one invocation did, as data rather than printing (the ADR-0048 shape)."""
 
@@ -125,6 +144,7 @@ class ClipInvocation:
     publish_error: str | None = None
     decision_error: str | None = None
     failure_reason: str | None = None
+    tally: ClipTally = ClipTally()
 
 
 @dataclass
@@ -195,6 +215,7 @@ class ClipProduction:
                 run_id=run_id,
                 status=run.status,
                 clips=len(run.artifacts),
+                tally=_tally(run),
             )
 
         outcome = _Outcome()
@@ -206,6 +227,7 @@ class ClipProduction:
                     run_id=run_id,
                     status=run.status,
                     failure_reason=reason,
+                    tally=_tally(run),
                 )
         self._judge(run, outcome)
         self._review(run, outcome)
@@ -221,6 +243,7 @@ class ClipProduction:
             qa_error=outcome.qa_error,
             publish_error=outcome.publish_error,
             decision_error=outcome.decision_error,
+            tally=_tally(run),
         )
 
     # --- production ---------------------------------------------------------------------
@@ -444,6 +467,26 @@ def _tasks_by_clip(run: Run) -> dict[int, TaskView]:
         if isinstance(index, int):
             recorded[index] = task
     return recorded
+
+
+def _tally(run: Run) -> ClipTally:
+    """Count the clips of ``run`` by where they stand (task 24.4)."""
+    verdicts: dict[EvaluationStatus | None, int] = {}
+    for artifact in run.artifacts:
+        evaluation = latest_qa(run, artifact.artifact_id)
+        status = None if evaluation is None else evaluation.status
+        verdicts[status] = verdicts.get(status, 0) + 1
+    return ClipTally(
+        render_failed=sum(task.status is TaskStatus.FAILED for task in run.tasks),
+        passed=verdicts.get(EvaluationStatus.PASSED, 0),
+        flagged=verdicts.get(EvaluationStatus.FLAGGED, 0),
+        failed=verdicts.get(EvaluationStatus.FAILED, 0),
+        unjudged=verdicts.get(None, 0) + verdicts.get(EvaluationStatus.PENDING, 0),
+        approved=sum(
+            artifact.status in (ArtifactStatus.APPROVED, ArtifactStatus.PUBLISHED)
+            for artifact in run.artifacts
+        ),
+    )
 
 
 def _candidates(run: Run) -> Sequence[ArtifactView]:

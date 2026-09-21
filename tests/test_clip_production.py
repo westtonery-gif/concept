@@ -23,6 +23,7 @@ from omemo_content_factory.application.clip_production import (
     CLIP_KIND,
     ClipProduction,
     ClipSettings,
+    ClipTally,
     run_id_for_episode,
 )
 from omemo_content_factory.application.qa_evaluation import EvaluationResult
@@ -254,6 +255,30 @@ def test_crn_05_an_undecided_episode_waits(factory: _Factory) -> None:
     run = factory.stored()
     assert run is not None
     assert run.status is RunStatus.WAITING_HUMAN
+
+
+def test_crn_11_a_run_that_approved_nothing_says_so(factory: _Factory) -> None:
+    """`completed` with nothing approved is by design; the tally is what makes it legible (24.4)."""
+    factory.evaluator = _Evaluator(
+        {1: EvaluationStatus.FLAGGED, 2: EvaluationStatus.FAILED, 3: EvaluationStatus.FAILED}
+    )
+    first = factory.production().invoke(EPISODE)
+    assert first.status is RunStatus.COMPLETED, "no clip can reach a human, so all are settled"
+    assert first.tally == ClipTally(flagged=1, failed=2)
+
+    again = factory.production().invoke(EPISODE)
+    assert again.status is RunStatus.COMPLETED
+    assert again.tally == first.tally, "a terminal Run still reports where its clips stand"
+
+
+def test_crn_11_the_tally_counts_approvals_and_clips_that_never_rendered(
+    factory: _Factory,
+) -> None:
+    factory.renderer.fail("episode-1-03.mp4")
+    factory.production().invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    invocation = factory.production().invoke(EPISODE)
+    assert invocation.tally == ClipTally(render_failed=1, passed=2, approved=2)
 
 
 # --- CRN-09: nothing to do ---------------------------------------------------------------
