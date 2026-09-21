@@ -36,9 +36,15 @@ from pathlib import Path
 from typing import TypeAlias
 
 from omemo_content_factory.adapters.brief_board import BriefBoard
+from omemo_content_factory.adapters.clip_renderer import ClipRenderer
+from omemo_content_factory.adapters.episode_board import EpisodeBoard
+from omemo_content_factory.adapters.episode_source import EpisodeSource
+from omemo_content_factory.adapters.footage_index import FootageIndex
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
 from omemo_content_factory.application.brief_production import BriefProduction
+from omemo_content_factory.application.clip_format import ClipFormatLimits
+from omemo_content_factory.application.clip_production import ClipProduction, ClipSettings
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
 from omemo_content_factory.application.schema_validation import SchemaBinding
@@ -51,6 +57,11 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
+from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import FfmpegClipRenderer
+from omemo_content_factory.infrastructure.file_system_episode_source import (
+    FileSystemEpisodeSource,
+    episode_root_from_env,
+)
 from omemo_content_factory.infrastructure.google_docs_review_desk import (
     REVIEW_FOLDER_ID_VAR as GOOGLE_REVIEW_FOLDER_ID_VAR,
 )
@@ -66,9 +77,17 @@ from omemo_content_factory.infrastructure.llm import (
     LLMClient,
     LLMTaskExecutor,
 )
+from omemo_content_factory.infrastructure.local_footage_index import (
+    LocalFootageIndex,
+    whisper_settings_from_env,
+)
 from omemo_content_factory.infrastructure.notion_brief_board import (
     NotionBriefBoard,
     notion_settings_from_env,
+)
+from omemo_content_factory.infrastructure.notion_episode_board import (
+    NotionEpisodeBoard,
+    notion_episode_settings_from_env,
 )
 from omemo_content_factory.infrastructure.notion_review_desk import (
     DATABASE_ID_VAR as NOTION_REVIEW_DATABASE_ID_VAR,
@@ -307,6 +326,109 @@ def build_review_desk(environ: Mapping[str, str]) -> ReviewDesk:
         + " for the Notion desk, or "
         + ", ".join(GOOGLE_REVIEW_DESK_VARS)
         + " for the Google Docs desk"
+    )
+
+
+CHUNK_MS_VAR = "OMEMO_CLIP_CHUNK_MS"
+MAX_MS_VAR = "OMEMO_CLIP_MAX_MS"
+PAUSE_TOLERANCE_MS_VAR = "OMEMO_CLIP_PAUSE_TOLERANCE_MS"
+MAX_DURATION_MS_VAR = "OMEMO_CLIP_MAX_DURATION_MS"
+CONTAINERS_VAR = "OMEMO_CLIP_CONTAINERS"
+CLIP_DESTINATION_VAR = "OMEMO_CLIP_DESTINATION"
+
+_CLIP_DEFAULTS = {
+    CHUNK_MS_VAR: 120_000,
+    MAX_MS_VAR: 120_000,
+    PAUSE_TOLERANCE_MS_VAR: 2_000,
+    MAX_DURATION_MS_VAR: 180_000,
+}
+"""Two-minute pieces, a two-minute ceiling, a two-second nudge and a three-minute platform cap.
+
+Unlike the Notion property names (`ADR-0040`), these **do** have defaults: a wrong column name
+silently binds the core to someone else's board, while a clip length is a product choice that is
+safe to start somewhere and tune from the first real episode (`ADR-0064` Deferred).
+"""
+
+
+def _clip_number(environ: Mapping[str, str], name: str) -> int:
+    raw = environ.get(name, "").strip()
+    if not raw:
+        return _CLIP_DEFAULTS[name]
+    try:
+        value = int(raw)
+    except ValueError:
+        raise CompositionError(f"{name} must be a whole number of milliseconds") from None
+    if value <= 0:
+        raise CompositionError(f"{name} must be positive")
+    return value
+
+
+def build_episode_board(environ: Mapping[str, str]) -> EpisodeBoard:
+    """Build the Notion `EpisodeBoard` (ADR-0055); a missing variable fails closed, named."""
+    return NotionEpisodeBoard(notion_episode_settings_from_env(environ))
+
+
+def build_episode_source(environ: Mapping[str, str]) -> EpisodeSource:
+    """Build the filesystem `EpisodeSource` over `OMEMO_EPISODE_ROOT` (ADR-0053 §7)."""
+    return FileSystemEpisodeSource(episode_root_from_env(environ))
+
+
+def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
+    """Build the local ffmpeg + whisper.cpp `FootageIndex` (ADR-0064); no vendor, no account."""
+    return LocalFootageIndex(whisper_settings_from_env(environ))
+
+
+def build_clip_renderer(_environ: Mapping[str, str]) -> ClipRenderer:
+    """Build the ffmpeg `ClipRenderer` (ADR-0063). It takes no configuration yet.
+
+    The environment is accepted anyway so the signature matches its siblings and codec or binary
+    settings can arrive later without every caller changing.
+    """
+    return FfmpegClipRenderer()
+
+
+def build_clip_settings(environ: Mapping[str, str]) -> ClipSettings:
+    """Read the department's production parameters, with the defaults documented above."""
+    raw_containers = environ.get(CONTAINERS_VAR, "").strip() or "mp4"
+    containers = tuple(name.strip() for name in raw_containers.split(",") if name.strip())
+    if not containers:
+        raise CompositionError(f"{CONTAINERS_VAR} must name at least one container")
+    destination = (
+        environ.get(CLIP_DESTINATION_VAR, "").strip() or "clips/{episode_ref}-{index:02d}.mp4"
+    )
+    return ClipSettings(
+        chunk_ms=_clip_number(environ, CHUNK_MS_VAR),
+        max_ms=_clip_number(environ, MAX_MS_VAR),
+        pause_tolerance_ms=_clip_number(environ, PAUSE_TOLERANCE_MS_VAR),
+        limits=ClipFormatLimits(
+            max_duration_ms=_clip_number(environ, MAX_DURATION_MS_VAR), containers=containers
+        ),
+        destination_template=destination,
+    )
+
+
+def build_clip_production(
+    environ: Mapping[str, str],
+    *,
+    evaluator: ArtifactEvaluator,
+    desk: ReviewDesk | None = None,
+) -> ClipProduction:
+    """Assemble the clipping department's production path (ADR-0059).
+
+    Every outside system enters here and nowhere else: the board, the episode file, the footage
+    index, the renderer, the store and — optionally — the review desk. The evaluator is passed in
+    rather than built, because choosing a provider and pricing for a role is `client_for_role`'s
+    job and the caller already holds that decision (`ADR-0016`).
+    """
+    return ClipProduction(
+        build_run_store(environ),
+        build_episode_board(environ),
+        build_episode_source(environ),
+        build_footage_index(environ),
+        build_clip_renderer(environ),
+        evaluator,
+        settings=build_clip_settings(environ),
+        desk=desk,
     )
 
 

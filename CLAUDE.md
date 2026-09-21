@@ -21,6 +21,28 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **The clipping department is assembled and runnable (queue task 21.6).**
+  `composition.build_clip_production(environ, evaluator=, desk=)` is the one place every outside
+  system enters: the Notion episode board, the filesystem episode source, the ffmpeg+whisper.cpp
+  footage index, the ffmpeg renderer, the Run store and — optionally — a review desk. Settings come
+  from `OMEMO_CLIP_*` with **documented defaults** (2-minute pieces, a 2-minute ceiling, a 2-second
+  pause nudge, a 3-minute platform cap, `mp4`). That is a **deliberate departure from ADR-0040's
+  no-defaults rule**, and `CMP-02` pins the reason: a property name is someone else's column and
+  guessing it silently binds the core to the wrong one, while a clip length is a product choice
+  that is safe to start somewhere and tune from the first episode — the model path, being neither,
+  still has no default. `demo_clips.py <episode page id>` runs one invocation, the same code a
+  service would. Tests: `tests/test_clip_composition.py` (`CMP`), build-time only — no model call,
+  no network, no ffmpeg — proving that one missing variable stops the **whole** build, named, so
+  nothing half-built reaches a Run. Suite: 1400 passed.
+  **The operator setup is done on the Notion side:** the database **`Эпизоды к нарезке`**
+  (`3e264b74-a905-81cb-befb-ecee0e94c6b4`) was created through the API with `Name` (title), `Stage`
+  (**select**: `Ready to clip` / `Draft`), `Source` (rich_text), `Mode` (**select**: `scene` /
+  `chunk`), `Run status` and `Run id` (rich_text) — the API route again chosen so the **types** are
+  right, since the UI's obvious choice would be a `status` property the API cannot create. It lives
+  beside the review database on the page now named `Concept — нарезка`, and the integration has
+  workspace-level access, so no sharing step was needed. All eleven variables are in `.env`, and
+  `~/episodes/` exists. **What remains for a first real clip: an episode file in that folder and a
+  card on the board.**
 - **The clipping department has no vendor: `FootageIndex` runs on ffmpeg and whisper.cpp
   (ADR-0064, queue task 21.6).** `infrastructure/local_footage_index.py` answers all three things
   the port owes from tools on the operator's own machine: `ffprobe` for the duration, ffmpeg's
