@@ -20,6 +20,7 @@ sole judge of structural correctness.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -58,6 +59,8 @@ _MIN_THINKING_BUDGET = 1024
 _THINKING_BUDGET_PREFIX = "budget:"
 _STRUCTURED_TOOL_NAME = "emit_fields"
 _INPUT_PLACEHOLDER = "{input}"
+_CONTEXT_PLACEHOLDER = "{context}"
+_PLACEHOLDERS = re.compile(r"\{input\}|\{context\}")
 _TOKENS_PER_MILLION = Decimal(1_000_000)
 
 
@@ -470,6 +473,16 @@ def _render(user_template: str, task_input: str) -> str:
     return user_template.replace(_INPUT_PLACEHOLDER, task_input)
 
 
+def _render_with_context(user_template: str, task_input: str, context: str) -> str:
+    """Place both the input and the context, in one pass (ADR-0068 §4).
+
+    One pass, so a transcript that happens to contain the text ``{input}`` is not substituted
+    again.
+    """
+    values = {_INPUT_PLACEHOLDER: task_input, _CONTEXT_PLACEHOLDER: context}
+    return _PLACEHOLDERS.sub(lambda match: values[match.group(0)], user_template)
+
+
 def _serialize(fields: Mapping[str, str]) -> str:
     """Serialize ``payload_fields -> payload`` (`ADR-0014` §6, §7): deterministic and faithful.
 
@@ -575,10 +588,25 @@ class LLMArtifactEvaluator:
                 raise ValueError(f"LLMArtifactEvaluator requires a non-blank {name}")
 
     def evaluate(self, content: str) -> EvaluationResult:
+        if _CONTEXT_PLACEHOLDER in self.user_template:
+            # The Prompt promises the model a context this call does not carry (ADR-0068 §4).
+            raise ValueError(
+                f"{self.prompt_ref} expects a context; use evaluate_in_context, not evaluate"
+            )
+        return self._ask(_render(self.user_template, content))
+
+    def evaluate_in_context(self, content: str, context: str) -> EvaluationResult:
+        """Judge ``content`` with ``context`` placed where the Prompt says (ADR-0068 §4)."""
+        if _CONTEXT_PLACEHOLDER not in self.user_template:
+            # The context would be dropped silently — the defect ADR-0068 exists to close.
+            raise ValueError(f"{self.prompt_ref} has no {_CONTEXT_PLACEHOLDER} for the context")
+        return self._ask(_render_with_context(self.user_template, content, context))
+
+    def _ask(self, user: str) -> EvaluationResult:
         try:
             completion = self.client.complete(
                 system=self.system_prompt,
-                user=_render(self.user_template, content),
+                user=user,
                 fields=self.output_fields,
                 toolbox=self.toolbox,
             )

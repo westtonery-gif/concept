@@ -7,17 +7,21 @@ not the Prompt's wording, which is content reviewed like content (PROJECT.md §1
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
 from omemo_content_factory.agents import clip_qa_agent, qa_agent
 from omemo_content_factory.application.qa_evaluation import QA_VERDICT_FIELDS
 from omemo_content_factory.composition import (
     CompositionError,
+    build_qa_evaluator,
     load_prompt_catalogue,
     validate_workflow_executors,
 )
 from omemo_content_factory.domain.schema import SchemaStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
+from omemo_content_factory.infrastructure.llm import LLMArtifactEvaluator, LLMCompletion
 
 
 def _prompt() -> object:
@@ -86,10 +90,64 @@ def test_cqa_03_the_prompt_keeps_the_adr_0034_verdict_grammar() -> None:
     assert all(field in system for field in QA_VERDICT_FIELDS)
 
 
-def test_cqa_04_the_prompt_asks_for_the_whole_episode_next_to_the_clip() -> None:
-    """Criterion 3 cannot be applied without it — the clip alone never reveals a later beat."""
-    system = load_prompt_catalogue()[clip_qa_agent.PROMPT_REF].system
-    assert "расшифровку всей серии" in system
+class _RecordingClient:
+    """An ``LLMClient`` that remembers the user message it was sent and answers ``passed``."""
+
+    def __init__(self) -> None:
+        self.users: list[str] = []
+
+    def complete(
+        self, *, system: str, user: str, fields: Sequence[str], toolbox: object = None
+    ) -> LLMCompletion:
+        self.users.append(user)
+        return LLMCompletion(fields={"verdict": "passed", "flags": "[]"}, metrics=())
+
+
+def _evaluator(client: _RecordingClient) -> LLMArtifactEvaluator:
+    return build_qa_evaluator(clip_qa_agent.CLIP_QA_AGENT, None, client, clip_qa_agent.SCHEMAS)
+
+
+def test_cqa_04_the_evaluator_is_sent_the_whole_episode_next_to_the_clip() -> None:
+    """What the model **receives**, not what the Prompt says (ADR-0068).
+
+    The v1 test checked the Prompt's wording and stayed green while no code path delivered the
+    episode transcript; the first real run found every clip unjudgeable on criterion 3.
+    """
+    client = _RecordingClient()
+    clip = '{"start_ms": 227000, "end_ms": 340000, "transcript": "Умным людям там не место"}'
+    episode = "[1000–2000] Что-то раньше.\n[227000–229000] Умным людям там не место"
+    _evaluator(client).evaluate_in_context(clip, episode)
+    (user,) = client.users
+    assert clip in user
+    assert episode in user
+    assert user.index(episode) < user.index(clip), "the per-episode prefix comes first (§3)"
+
+
+def test_cqa_06_a_prompt_and_a_call_that_disagree_are_refused_before_any_call() -> None:
+    """Dropping the context silently is the bug; a v2 Prompt without one is the same bug (§4)."""
+    client = _RecordingClient()
+    with pytest.raises(ValueError, match="evaluate_in_context"):
+        _evaluator(client).evaluate('{"transcript": "x"}')
+
+    content_only = LLMArtifactEvaluator(
+        client=client,
+        system_prompt="s",
+        user_template="Клип: {input}",
+        output_fields=QA_VERDICT_FIELDS,
+        prompt_ref="p@v1",
+        evaluator_ref="clip_qa_agent@v1",
+    )
+    with pytest.raises(ValueError, match="context"):
+        content_only.evaluate_in_context('{"transcript": "x"}', "the episode")
+    assert client.users == [], "no model was called"
+
+
+def test_cqa_06_the_context_is_placed_once_even_if_it_looks_like_a_placeholder() -> None:
+    client = _RecordingClient()
+    _evaluator(client).evaluate_in_context("CLIP", "a line that says {input}")
+    (user,) = client.users
+    assert "a line that says {input}" in user
+    assert user.count("CLIP") == 1
 
 
 def test_cqa_05_the_role_is_refused_as_a_workflow_step() -> None:

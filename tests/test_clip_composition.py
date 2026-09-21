@@ -47,6 +47,9 @@ class _Evaluator:
     def evaluate(self, content: str) -> EvaluationResult:
         raise AssertionError("no model is called while building")
 
+    def evaluate_in_context(self, content: str, context: str) -> EvaluationResult:
+        raise AssertionError("no model is called while building")
+
 
 def _episode_env(tmp_path: Path) -> dict[str, str]:
     model = tmp_path / "model.bin"

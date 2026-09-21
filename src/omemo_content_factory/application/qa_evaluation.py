@@ -20,7 +20,7 @@ Evaluation through the evaluator's ``evaluator_ref`` (ADR-0036).
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -130,6 +130,17 @@ class ArtifactEvaluator(Protocol):
     def evaluate(self, content: str) -> EvaluationResult: ...
 
 
+class ContextualArtifactEvaluator(ArtifactEvaluator, Protocol):
+    """An ``ArtifactEvaluator`` that can also be shown what the content alone cannot (ADR-0068 §1).
+
+    Additive: ``evaluate`` keeps its contract, and a caller that has context to give uses
+    ``evaluate_in_context``. The context is derived from the Run by the caller and is not stored on
+    the Evaluation — the Run already holds it.
+    """
+
+    def evaluate_in_context(self, content: str, context: str) -> EvaluationResult: ...
+
+
 def evaluate_artifact(
     run: Run,
     evaluator: ArtifactEvaluator,
@@ -160,9 +171,40 @@ def record_verdict(run: Run, evaluator: ArtifactEvaluator, evaluation_id: Evalua
     Evaluation (ADR-0036 §3). Fail closed as above: an evaluator exception propagates and the
     evaluation stays ``PENDING`` — a :class:`MeasuredEvaluatorError` after its calls are recorded.
     """
+    _record(run, evaluator.evaluate, evaluation_id)
+
+
+def evaluate_artifact_in_context(
+    run: Run,
+    evaluator: ContextualArtifactEvaluator,
+    artifact_id: ArtifactId,
+    context: str,
+    *,
+    kind: str = QA_KIND,
+) -> EvaluationId:
+    """:func:`evaluate_artifact`, with ``context`` shown to the evaluator (ADR-0068 §1)."""
+    evaluation_id = run.open_evaluation(
+        artifact_id, kind=kind, by=Actor.CONTENT_DIRECTOR, evaluator_ref=evaluator.evaluator_ref
+    )
+    record_verdict_in_context(run, evaluator, evaluation_id, context)
+    return evaluation_id
+
+
+def record_verdict_in_context(
+    run: Run,
+    evaluator: ContextualArtifactEvaluator,
+    evaluation_id: EvaluationId,
+    context: str,
+) -> None:
+    """:func:`record_verdict`, with ``context`` shown to the evaluator (ADR-0068 §1)."""
+    _record(run, lambda content: evaluator.evaluate_in_context(content, context), evaluation_id)
+
+
+def _record(run: Run, ask: Callable[[str], EvaluationResult], evaluation_id: EvaluationId) -> None:
+    """The one path both entry points share: ask, record the calls, then the verdict."""
     artifact_ref = run.evaluation(evaluation_id).artifact_ref
     try:
-        result = evaluator.evaluate(run.artifact(artifact_ref).content)
+        result = ask(run.artifact(artifact_ref).content)
     except MeasuredEvaluatorError as exc:
         _record_calls(run, evaluation_id, exc.analytics)
         raise

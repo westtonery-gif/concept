@@ -29,7 +29,7 @@ from omemo_content_factory.adapters.footage_index import FootageIndexError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.agents import clip_qa_agent
 from omemo_content_factory.application.clip_production import ClipInvocation, ClipProduction
-from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
+from omemo_content_factory.application.qa_evaluation import ContextualArtifactEvaluator
 from omemo_content_factory.composition import (
     GOOGLE_REVIEW_DESK_VARS,
     NOTION_REVIEW_DESK_VARS,
@@ -53,7 +53,7 @@ def _build_desk(environ: Mapping[str, str]) -> ReviewDesk | None:
     return build_review_desk(environ)
 
 
-def _build_evaluator() -> ArtifactEvaluator:
+def _build_evaluator() -> ContextualArtifactEvaluator:
     """Compile the clip QA role on its own provider/model binding (ADR-0038 §2)."""
     return build_qa_evaluator(
         clip_qa_agent.CLIP_QA_AGENT,

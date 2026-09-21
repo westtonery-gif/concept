@@ -36,7 +36,11 @@ from omemo_content_factory.adapters.episode_source import (
     EpisodeSourceError,
     LocatedEpisode,
 )
-from omemo_content_factory.adapters.footage_index import FootageIndex, FootageIndexError
+from omemo_content_factory.adapters.footage_index import (
+    FootageIndex,
+    FootageIndexError,
+    IndexedFootage,
+)
 from omemo_content_factory.adapters.review_desk import ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.clip_format import ClipFormatLimits, check_clip_format
@@ -46,9 +50,16 @@ from omemo_content_factory.application.clip_review import (
     publish_clip_reviews,
     take_clip_decisions,
 )
+from omemo_content_factory.application.footage_record import (
+    FOOTAGE_SCHEMA_REF,
+    FootageRecordError,
+    episode_transcript,
+    footage_from_payload,
+    footage_to_payload,
+)
 from omemo_content_factory.application.qa_evaluation import (
-    ArtifactEvaluator,
-    evaluate_artifact,
+    ContextualArtifactEvaluator,
+    evaluate_artifact_in_context,
 )
 from omemo_content_factory.application.review_decision import FetchedDecision
 from omemo_content_factory.application.review_publication import latest_qa
@@ -84,10 +95,15 @@ STEP_REF = "render-clip"
 AGENT_REF = "clip_renderer@v1"
 """The clip step names no LLM role: rendering is mechanical (ADR-0058 §4)."""
 
+INDEX_STEP_REF = "index-footage"
+INDEX_AGENT_REF = "footage_index@v1"
+"""The index step: recorded once per Run, so QA and resumption read it back (ADR-0068 §2)."""
+
 SOURCE_MISSING_REASON = "EPISODE_SOURCE_MISSING"
 INDEX_FAILED_REASON = "FOOTAGE_INDEX_FAILED"
 RENDER_FAILED_REASON = "CLIP_RENDER_FAILED"
 FORMAT_REASON = "CLIP_FORMAT_VIOLATION"
+NO_INDEX_ERROR = "NO_FOOTAGE_INDEX"
 
 
 class ClipProductionError(Exception):
@@ -170,7 +186,7 @@ class ClipProduction:
         source: EpisodeSource,
         index: FootageIndex,
         renderer: ClipRenderer,
-        evaluator: ArtifactEvaluator,
+        evaluator: ContextualArtifactEvaluator,
         *,
         settings: ClipSettings,
         desk: ReviewDesk | None = None,
@@ -256,10 +272,12 @@ class ClipProduction:
         located = self._source.locate(episode.source_ref)
         if located is None:
             return self._fail(run, SOURCE_MISSING_REASON)
-        try:
-            footage = self._index.index(located)
-        except (FootageIndexError, EpisodeSourceError):
-            return self._fail(run, INDEX_FAILED_REASON)
+        if run.status is RunStatus.QUEUED:
+            run.transition(RunStatus.RUNNING, Actor.CONTENT_DIRECTOR)
+            self._store.save(run)
+        footage = self._footage(run, located)
+        if footage is None:
+            return INDEX_FAILED_REASON
 
         plan = plan_clips(
             footage,
@@ -269,9 +287,6 @@ class ClipProduction:
             max_ms=self._settings.max_ms,
             pause_tolerance_ms=self._settings.pause_tolerance_ms,
         )
-        if run.status is RunStatus.QUEUED:
-            run.transition(RunStatus.RUNNING, Actor.CONTENT_DIRECTOR)
-            self._store.save(run)
 
         # Resumption: the plan is a pure function of the footage (CLP-09), so re-planning gives
         # exactly the clips a crashed invocation was producing. A Task already recorded for a clip
@@ -288,6 +303,42 @@ class ClipProduction:
         run.transition(RunStatus.WAITING_QA, Actor.CONTENT_DIRECTOR)
         self._store.save(run)
         return None
+
+    def _footage(self, run: Run, located: LocatedEpisode) -> IndexedFootage | None:
+        """The episode's index: read back if recorded, else indexed and recorded (ADR-0068 §2).
+
+        Returns ``None`` after failing the Run when the episode cannot be indexed. A Task a crashed
+        invocation left ``RUNNING`` is finished rather than opened a second time (ADR-0026 §3).
+        """
+        task = _index_task(run)
+        if task is not None and task.status is TaskStatus.SUCCEEDED and task.output is not None:
+            return footage_from_payload(task.output.payload)
+        if task is None:
+            task_input = json.dumps({"source_ref": located.source_ref}, ensure_ascii=False)
+            task_id = run.open_task(
+                INDEX_STEP_REF, INDEX_AGENT_REF, task_input, Actor.CONTENT_DIRECTOR
+            )
+            run.transition_task(task_id, TaskStatus.RUNNING, Actor.CONTENT_DIRECTOR)
+            self._store.save(run)  # committed before the outside call (ADR-0026 §2)
+        else:
+            task_id = task.task_id
+        try:
+            footage = self._index.index(located)
+        except (FootageIndexError, EpisodeSourceError):
+            run.transition_task(
+                task_id, TaskStatus.FAILED, Actor.CONTENT_DIRECTOR, reason=INDEX_FAILED_REASON
+            )
+            self._fail(run, INDEX_FAILED_REASON)
+            return None
+        run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)
+        run.record_output(
+            task_id,
+            payload=footage_to_payload(footage),
+            schema_ref=FOOTAGE_SCHEMA_REF,
+            by=Actor.CONTENT_DIRECTOR,
+        )
+        self._store.save(run)
+        return footage
 
     def _render_one(
         self,
@@ -384,11 +435,17 @@ class ClipProduction:
         """Ask QA about every candidate that has no verdict yet, one Evaluation each."""
         if run.status is not RunStatus.WAITING_QA:
             return
+        context = _recorded_transcript(run)
         for artifact in _candidates(run):
             if latest_qa(run, artifact.artifact_id) is not None:
                 continue
+            if context is None:
+                # A Run from before ADR-0068 has no recorded index: nothing to judge criterion 3
+                # with, so no verdict at all rather than one given blind (§5).
+                outcome.qa_error = f"{NO_INDEX_ERROR}: the Run has no recorded footage index"
+                return
             try:
-                evaluate_artifact(run, self._evaluator, artifact.artifact_id)
+                evaluate_artifact_in_context(run, self._evaluator, artifact.artifact_id, context)
             except Exception as exc:
                 outcome.qa_error = f"{type(exc).__name__}: {exc}"
                 self._store.save(run)
@@ -460,6 +517,8 @@ def _tasks_by_clip(run: Run) -> dict[int, TaskView]:
     """The Task already recorded for each clip index, read back from its stored input."""
     recorded: dict[int, TaskView] = {}
     for task in run.tasks:
+        if task.workflow_step_ref != STEP_REF:
+            continue
         try:
             index = json.loads(task.task_input)["index"]
         except (ValueError, KeyError, TypeError):  # pragma: no cover - our own input shape
@@ -467,6 +526,22 @@ def _tasks_by_clip(run: Run) -> dict[int, TaskView]:
         if isinstance(index, int):
             recorded[index] = task
     return recorded
+
+
+def _index_task(run: Run) -> TaskView | None:
+    """The Run's index Task, if one was opened (ADR-0068 §2)."""
+    return next((task for task in run.tasks if task.workflow_step_ref == INDEX_STEP_REF), None)
+
+
+def _recorded_transcript(run: Run) -> str | None:
+    """The whole-episode transcript QA is shown, read from the recorded index (ADR-0068 §3)."""
+    task = _index_task(run)
+    if task is None or task.output is None:
+        return None
+    try:
+        return episode_transcript(footage_from_payload(task.output.payload))
+    except FootageRecordError:
+        return None
 
 
 def _tally(run: Run) -> ClipTally:
@@ -477,7 +552,10 @@ def _tally(run: Run) -> ClipTally:
         status = None if evaluation is None else evaluation.status
         verdicts[status] = verdicts.get(status, 0) + 1
     return ClipTally(
-        render_failed=sum(task.status is TaskStatus.FAILED for task in run.tasks),
+        render_failed=sum(
+            task.status is TaskStatus.FAILED and task.workflow_step_ref == STEP_REF
+            for task in run.tasks
+        ),
         passed=verdicts.get(EvaluationStatus.PASSED, 0),
         flagged=verdicts.get(EvaluationStatus.FLAGGED, 0),
         failed=verdicts.get(EvaluationStatus.FAILED, 0),

@@ -91,3 +91,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0065](0065-generation-department-ordering-and-shape.md) | The generation department is the next work, and the shape it takes | Accepted |
 | [0066](0066-generation-ports-and-the-two-call-pipeline.md) | The generation ports — `ImageGenerator` and `VideoGenerator`, and a two-call pipeline | Accepted |
 | [0067](0067-generation-vendor-adapters-over-urllib.md) | The generation vendor adapters — Gemini and Higgsfield over stdlib `urllib` | Accepted |
+| [0068](0068-evaluation-context-and-the-recorded-footage-index.md) | An evaluation can be given its context — the episode index is recorded in the Run | Accepted |

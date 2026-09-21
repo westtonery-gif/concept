@@ -4,6 +4,7 @@
 - **Date:** 2026-09-20
 - **Deciders:** Lead Architect / Domain Architect
 - **Serves:** `CLAUDE.md` queue task 21.2 (the clipping department, ADR-0053)
+- **Amended by:** ADR-0068 (§3 — how the episode transcript actually reaches QA)
 
 ## Context
 

@@ -15,22 +15,28 @@ from pathlib import Path
 import pytest
 
 from omemo_content_factory.adapters.episode_board import ClipMode, IncomingEpisode
+from omemo_content_factory.adapters.episode_source import LocatedEpisode
 from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
 from omemo_content_factory.adapters.review_desk import ReviewDecision, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.clip_format import ClipFormatLimits
 from omemo_content_factory.application.clip_production import (
     CLIP_KIND,
+    INDEX_STEP_REF,
     ClipProduction,
     ClipSettings,
     ClipTally,
     run_id_for_episode,
 )
+from omemo_content_factory.application.footage_record import (
+    episode_transcript,
+    footage_from_payload,
+)
 from omemo_content_factory.application.qa_evaluation import EvaluationResult
 from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
-from omemo_content_factory.domain.run import Run, RunStatus
+from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.task import TaskStatus
 from omemo_content_factory.infrastructure.in_memory_adapters import (
     InMemoryEpisodeBoard,
@@ -63,10 +69,15 @@ class _Evaluator:
     def __init__(self, verdicts: dict[int, EvaluationStatus] | None = None) -> None:
         self._verdicts = verdicts or {}
         self.calls: list[str] = []
+        self.contexts: list[str] = []
         self.raises = False
 
     def evaluate(self, content: str) -> EvaluationResult:
+        raise AssertionError("clip QA is always asked in context (ADR-0068)")
+
+    def evaluate_in_context(self, content: str, context: str) -> EvaluationResult:
         self.calls.append(content)
+        self.contexts.append(context)
         if self.raises:
             raise RuntimeError("QA is down")
         index = len(self.calls)
@@ -173,7 +184,9 @@ def test_crn_01_an_episode_becomes_one_run_with_a_task_and_artifact_per_clip(
     run = factory.stored()
     assert run is not None
     assert invocation.run_id == run_id_for_episode(EPISODE)
-    assert len(run.tasks) == 3 == len(run.artifacts)
+    index, *clips = run.tasks
+    assert index.workflow_step_ref == INDEX_STEP_REF, "the index is recorded before any clip"
+    assert len(clips) == 3 == len(run.artifacts)
     assert all(task.status is TaskStatus.SUCCEEDED for task in run.tasks)
     assert {a.kind for a in run.artifacts} == {CLIP_KIND}
     assert run.status is RunStatus.WAITING_HUMAN
@@ -232,7 +245,7 @@ def test_crn_04_a_rejected_clip_is_simply_not_shipped(factory: _Factory) -> None
     assert run is not None
     assert not [a for a in run.artifacts if a.status is ArtifactStatus.APPROVED]
     assert not [a for a in run.artifacts if a.status is ArtifactStatus.SUPERSEDED]
-    assert len(run.tasks) == 3, "no rework Task was appended"
+    assert len(run.tasks) == 1 + 3, "the index and three clips; no rework Task was appended"
     assert run.status is RunStatus.COMPLETED
 
 
@@ -321,7 +334,11 @@ def test_rnd_05_a_clip_out_of_spec_fails_its_task_and_never_reaches_a_human(
     run = factory.stored()
     assert run is not None
     assert len(invocation.failed_clips) == 3
-    assert all(task.status is TaskStatus.FAILED for task in run.tasks)
+    assert all(
+        task.status is TaskStatus.FAILED
+        for task in run.tasks
+        if task.workflow_step_ref != INDEX_STEP_REF
+    )
     assert run.artifacts == ()
     assert run.evaluations == (), "a render defect is not a content risk"
     assert run.human_reviews == (), "and it is never queued for a person"
@@ -385,6 +402,82 @@ def test_crn_08_a_crash_after_any_commit_resumes_without_duplicating_work(
     assert len(run.evaluations) == 3, "no evaluation was recorded twice"
     assert len(factory.evaluator.calls) >= qa_before
     assert len(factory.renderer.requests) >= renders_before
+
+
+# --- CRN-12: the episode index is recorded, and QA reads the episode from it (ADR-0068) ---
+
+
+def test_crn_12_the_index_is_recorded_and_every_clip_is_judged_against_the_episode(
+    factory: _Factory,
+) -> None:
+    factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    index = run.tasks[0]
+    assert index.workflow_step_ref == INDEX_STEP_REF
+    assert index.output is not None
+    footage = footage_from_payload(index.output.payload)
+    assert footage == factory.index.index(LocatedEpisode(source_ref=SOURCE, path=PATH))
+    assert not [a for a in run.artifacts if a.output_ref == index.output.output_id], (
+        "the index is a trace, not a deliverable"
+    )
+    expected = episode_transcript(footage)
+    assert "a line" in expected
+    assert factory.evaluator.contexts == [expected] * 3
+
+
+def test_crn_12_a_resumed_invocation_judges_without_indexing_again(factory: _Factory) -> None:
+    factory.evaluator.raises = True
+    factory.production().invoke(EPISODE)
+    indexed = len(factory.index.calls)
+    factory.index.fail(PATH)  # were it asked again, it would refuse
+
+    factory.evaluator.raises = False
+    invocation = factory.production().invoke(EPISODE)
+    assert invocation.qa_error is None
+    assert len(factory.index.calls) == indexed
+    assert factory.evaluator.contexts and all("a line" in c for c in factory.evaluator.contexts)
+
+
+def test_crn_12_an_index_that_fails_fails_its_task_and_the_run(factory: _Factory) -> None:
+    factory.index.fail(PATH)
+    factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    (index,) = run.tasks
+    assert index.status is TaskStatus.FAILED
+    assert index.failure_reason == "FOOTAGE_INDEX_FAILED"
+
+
+def test_crn_12_a_run_with_no_recorded_index_gets_no_verdict(factory: _Factory) -> None:
+    """A Run from before ADR-0068: criterion 3 has no evidence, so nothing is judged (§5)."""
+    run = Run.create(
+        run_id=run_id_for_episode(EPISODE),
+        content_brief_ref=EPISODE,
+        workflow_version_ref="episode-to-clips@v1",
+    )
+    run.transition(RunStatus.QUEUED, Actor.CONTENT_DIRECTOR)
+    run.transition(RunStatus.RUNNING, Actor.CONTENT_DIRECTOR)
+    task_id = run.open_task(
+        "render-clip", "clip_renderer@v1", '{"index": 1}', Actor.CONTENT_DIRECTOR
+    )
+    run.transition_task(task_id, TaskStatus.RUNNING, Actor.CONTENT_DIRECTOR)
+    run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)
+    output_id = run.record_output(
+        task_id, payload="{}", schema_ref="clip-artifact@v1", by=Actor.CONTENT_DIRECTOR
+    )
+    artifact_id = run.create_artifact(output_id, kind=CLIP_KIND, by=Actor.CONTENT_DIRECTOR)
+    run.transition_artifact(artifact_id, ArtifactStatus.CANDIDATE, Actor.CONTENT_DIRECTOR)
+    run.transition(RunStatus.WAITING_QA, Actor.CONTENT_DIRECTOR)
+    SqliteRunStore(factory.path).save(run)
+
+    invocation = factory.production().invoke(EPISODE)
+    assert invocation.qa_error is not None and "NO_FOOTAGE_INDEX" in invocation.qa_error
+    stored = factory.stored()
+    assert stored is not None
+    assert stored.evaluations == ()
+    assert stored.status is RunStatus.WAITING_QA
+    assert factory.evaluator.calls == []
 
 
 # --- the desk is optional and its outages never change the Run ---------------------------

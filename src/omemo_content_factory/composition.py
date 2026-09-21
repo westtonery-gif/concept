@@ -46,7 +46,10 @@ from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
 from omemo_content_factory.application.clip_production import ClipProduction, ClipSettings
 from omemo_content_factory.application.content_director import ContentDirector
-from omemo_content_factory.application.qa_evaluation import ArtifactEvaluator
+from omemo_content_factory.application.qa_evaluation import (
+    ArtifactEvaluator,
+    ContextualArtifactEvaluator,
+)
 from omemo_content_factory.application.schema_validation import SchemaBinding
 from omemo_content_factory.application.skill_execution import (
     SkillPreprocessingTaskExecutor,
@@ -410,7 +413,7 @@ def build_clip_settings(environ: Mapping[str, str]) -> ClipSettings:
 def build_clip_production(
     environ: Mapping[str, str],
     *,
-    evaluator: ArtifactEvaluator,
+    evaluator: ContextualArtifactEvaluator,
     desk: ReviewDesk | None = None,
 ) -> ClipProduction:
     """Assemble the clipping department's production path (ADR-0059).

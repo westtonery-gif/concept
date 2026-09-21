@@ -113,7 +113,15 @@ PENDING ──► PASSED    (пройдено)
   `evaluate(content: str) -> EvaluationResult`;
 - `evaluate_artifact(run, evaluator, artifact_id, *, kind="qa") -> EvaluationId` — открывает
   оценку с `evaluator_ref` оценщика, передаёт ему содержимое артефакта, записывает его вызовы и
-  вердикт.
+  вердикт;
+- `ContextualArtifactEvaluator` — **аддитивный** протокол-наследник (`ADR-0068` §1): тот же
+  `ArtifactEvaluator` плюс `evaluate_in_context(content: str, context: str) -> EvaluationResult`;
+  `evaluate_artifact_in_context(run, evaluator, artifact_id, context, *, kind="qa")` и
+  `record_verdict_in_context` — те же пути, что без контекста, отличаются только тем, что оценщик
+  получает контекст. Контекст **не** хранится в Evaluation: он выводится из Run.
+  `LLMArtifactEvaluator` подставляет `{context}` рядом с `{input}` за один проход и отказывает
+  (`ValueError`, до вызова модели) в двух несовпадениях: контекст для шаблона без `{context}` и
+  вызов без контекста для шаблона с `{context}`.
 
 Исключения оценщика **не перехватываются** (PROJECT §10): Evaluation остаётся `PENDING`, гейт
 закрыт. Вердикта по умолчанию нет. Единственный перехват — `MeasuredEvaluatorError`
