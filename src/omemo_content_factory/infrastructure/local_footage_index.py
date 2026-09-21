@@ -55,6 +55,22 @@ _TIMEOUT_SECONDS = 3600.0
 
 _SCENE_TIME = re.compile(r"lavfi\.scd\.time=([0-9]+(?:\.[0-9]+)?)")
 
+_LOOP_LENGTH = 3
+"""This many consecutive segments saying the same thing are a decoder loop, not dialogue.
+
+Whisper's classic failure on music is to repeat one phrase segment after segment; two identical
+lines in a row are ordinary speech ("Нет. Нет."), three are the loop's signature (task 24.2).
+"""
+
+_NOT_A_WORD = re.compile(r"[\W_]+")
+
+_ANTI_LOOP_FLAGS = ("-mc", "0", "-sns")
+"""Stop the loop at its cause: carry no text context from one window into the next (``-mc 0``),
+and suppress non-speech tokens (``-sns``). On the first real episode the default carry-over turned
+the title music into «Девушки отдыхают» for 137 seconds and swallowed the dialogue of the cold open
+with it; with these flags the dialogue came back (task 24.2).
+"""
+
 
 class WhisperSettings:
     """Where the model is and what language to expect. ``__slots__``, built from the environment."""
@@ -212,6 +228,7 @@ class LocalFootageIndex:
                 "-of",
                 str(stem),
                 "-np",
+                *_ANTI_LOOP_FLAGS,
             ]
             if self._settings.language != "auto":
                 command += ["-l", self._settings.language]
@@ -286,7 +303,31 @@ def _spans(report: object, duration_ms: int) -> tuple[SpeechSpan, ...]:
             continue
         spans.append(SpeechSpan(start_ms=start, end_ms=end, text=text.strip()))
         end_of_previous = end
-    return tuple(spans)
+    return _without_loops(spans)
+
+
+def _without_loops(spans: list[SpeechSpan]) -> tuple[SpeechSpan, ...]:
+    """Drop every run of ``_LOOP_LENGTH`` or more consecutive spans saying the same phrase.
+
+    The whole run goes, not all but one: a looping decoder is repeating something it heard once or
+    never, and a surviving copy would still be a line nobody said, placed where nobody said it —
+    poisoning both the transcript QA reads and the pauses the planner cuts against.
+    """
+    kept: list[SpeechSpan] = []
+    run: list[SpeechSpan] = []
+    for span in [*spans, None]:
+        if span is not None and run and _said(span) == _said(run[0]):
+            run.append(span)
+            continue
+        if len(run) < _LOOP_LENGTH:
+            kept.extend(run)
+        run = [] if span is None else [span]
+    return tuple(kept)
+
+
+def _said(span: SpeechSpan) -> str:
+    """The words of a span with case, punctuation and spacing ignored."""
+    return _NOT_A_WORD.sub(" ", span.text.casefold()).strip()
 
 
 def _last_line(stderr: str) -> str:

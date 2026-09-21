@@ -207,6 +207,88 @@ def test_fix_03_ill_formed_segments_are_dropped_or_clamped(
     assert actual == resolved
 
 
+@needs_ffmpeg
+def test_fix_09_whisper_is_told_not_to_loop(episode: Path, tmp_path: Path) -> None:
+    """No text context carried across windows and no non-speech tokens (task 24.2).
+
+    The real episode's title music became one phrase repeated for over two minutes, and the loop
+    swallowed the dialogue after it; ``-mc 0`` is what brought the dialogue back.
+    """
+    argv_file = tmp_path / "argv.json"
+    script = tmp_path / "whisper-cli"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "argv = sys.argv\n"
+        f"open({str(argv_file)!r}, 'w').write(json.dumps(argv))\n"
+        "out = argv[argv.index('-of') + 1]\n"
+        f"open(out + '.json', 'w').write(json.dumps({json.dumps(TRANSCRIPT)}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    _index(tmp_path, script).index(LocatedEpisode(source_ref="episode.mp4", path=str(episode)))
+    argv = json.loads(argv_file.read_text(encoding="utf-8"))
+    assert argv[argv.index("-mc") + 1] == "0"
+    assert "-sns" in argv
+
+
+def _loop(text: str, count: int, *, start: int = 0) -> list[dict[str, object]]:
+    return [
+        {"offsets": {"from": start + 300 * n, "to": start + 300 * (n + 1)}, "text": text}
+        for n in range(count)
+    ]
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize(
+    ("segments", "expected"),
+    [
+        # The first real episode, in miniature: a loop, then the dialogue it sat on.
+        (
+            [*_loop(" Девушки отдыхают", 5), *_loop(" Рик и Морти", 1, start=1_500)],
+            ["Рик и Морти"],
+        ),
+        # Case, punctuation and spacing do not disguise a loop.
+        (
+            [
+                {"offsets": {"from": 0, "to": 500}, "text": " Девушки отдыхают."},
+                {"offsets": {"from": 500, "to": 900}, "text": "девушки  отдыхают"},
+                {"offsets": {"from": 900, "to": 1_300}, "text": " Девушки отдыхают!"},
+            ],
+            [],
+        ),
+        # Two in a row is ordinary speech, and so is a phrase that comes back later.
+        (_loop(" Нет.", 2), ["Нет.", "Нет."]),
+        (
+            [
+                *_loop(" Морти!", 2),
+                {"offsets": {"from": 600, "to": 900}, "text": " Что?"},
+                *_loop(" Морти!", 1, start=900),
+            ],
+            ["Морти!", "Морти!", "Что?", "Морти!"],
+        ),
+    ],
+)
+def test_fix_10_a_repeated_phrase_is_a_loop_and_is_dropped(
+    episode: Path, tmp_path: Path, segments: list[object], expected: list[str]
+) -> None:
+    """Three or more consecutive segments saying one thing go, the whole run (task 24.2)."""
+    script = tmp_path / "whisper-cli"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "argv = sys.argv\n"
+        "out = argv[argv.index('-of') + 1]\n"
+        f"open(out + '.json', 'w').write(json.dumps({json.dumps({'transcription': segments})}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    footage = _index(tmp_path, script).index(
+        LocatedEpisode(source_ref="episode.mp4", path=str(episode))
+    )
+    assert [span.text for span in footage.speech] == expected
+
+
 # --- 3. Refusals -------------------------------------------------------------------------
 
 
