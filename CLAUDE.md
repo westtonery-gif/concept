@@ -1526,6 +1526,58 @@ process at the time, not a pattern to keep copying.)
        tool that inspired it has no callable API (ADR-0065 Context). Do not start before the
        vendor-calling skeleton (subtasks 1–8) is proven on a real generation.
 
+24. **Findings from the first real clipping run (2026-09-21) — the pipeline works, nothing was
+    approvable.** Episode: a 22-minute Rick and Morty episode (`~/episodes/rick morty.mp4`, 1080p,
+    Russian dub), board card `3e264b74-a905-8188-a875-d9be84bb98a4`, mode `scene`, Run
+    `run-episode-3e264b74-a905-8188-a875-d9be84bb98a4`. Mechanically clean end to end: ffprobe +
+    `scdet` + whisper.cpp (`ggml-large-v3-turbo`) indexed it, 12 clips rendered, 12 QA verdicts,
+    **$0.091** of QA tokens, exit 0. Result: **6 `failed` + 6 `flagged`, 0 reviews opened, Run
+    `completed`.** The QA was right — the flags quote real defects. Four findings, in priority order:
+    1. **Bug — the clip QA never receives the whole-episode transcript it is promised. Blocks every
+       approval.** ADR-0056 §3 decided the QA input carries the full episode transcript, and
+       `clip-qa-agent` v1's System Prompt tells the model "Тебе дают расшифровку самого клипа и
+       расшифровку всей серии" — but no code path passes it: `evaluate_artifact` hands
+       `ArtifactEvaluator.evaluate(content: str)` only the clip Artifact's own payload (its own
+       `transcript`). The model then correctly reports "Нет расшифровки всей серии для сверки на
+       спойлеры — критерий 3 невозможно проверить" and fails closed. **This is task 22 biting the
+       clipping department exactly as task 22 predicted**, now confirmed live — so decide task 22
+       and this together, not twice. The clipping case is narrower and easier than the content
+       factory's: the missing context (the episode transcript) is already computed in the same
+       invocation (`IndexedFootage.speech`), so options include putting it into the clip payload
+       (grows every Artifact and the store — ~15 copies per episode), a per-evaluation context
+       argument on the port (task 22's "widen the port", additive second method), or an evaluator
+       built per episode with the transcript bound in (no port change; `ClipProduction` already
+       builds nothing per episode, so check the Composition Root seam). An ADR either way — it
+       amends ADR-0056 §3's delivery, which was decided but never realised. Until it lands, **no
+       clip can pass**: criterion 3 is unanswerable on every clip, by construction.
+    2. **Whisper hallucinates on the title music.** The opening theme became dozens of repetitions
+       of «Девушки отдыхают» — the classic Whisper repetition loop on music/non-speech. It poisons
+       the clip transcript QA reads (one clip failed on it alone) and, worse, the speech spans the
+       planner nudges boundaries against. whisper.cpp has knobs for exactly this (VAD, `-mc 0` /
+       no context carry-over, `--suppress-nst`, entropy/logprob thresholds); `_spans` in
+       `local_footage_index.py` could also drop a segment whose text repeats one phrase. Check which
+       ones this whisper-cli build supports before choosing (`whisper-cli --help`), and add a
+       `FIX` row with a repeated-phrase transcript. Small, no ADR unless the port changes.
+    3. **Scene mode cuts mid-utterance and merges different storylines into one clip.** QA flagged
+       clips starting on «Я хочу сказать, что умным людям там не место, Джерри» and one that jumps
+       from Rick and Morty to Jerry at Beth's hospital mid-clip. Two causes to separate: `scdet`'s
+       threshold (default 10.0 — ADR-0064 deferred exactly this "to the first real episode"; for a
+       cartoon with hard cuts every few seconds it likely finds shot changes, not scene changes),
+       and ADR-0058 §1's merge rule (consecutive scenes merged up to the maximum), which joins
+       different threads whenever the episode intercuts them — the very interleaving ADR-0058 was
+       meant to avoid. Also: a boundary should never land inside a speech span even in `SCENE`
+       mode. Tune on this episode (log the detected scene count and gaps first), then decide
+       whether the merge rule needs an ADR amendment. Cost to re-run is ~$0.09 of QA per pass.
+    4. **A Run that approved nothing reads `completed`.** Per ADR-0059 §3 "a clip is not the Run's
+       fate", so `COMPLETED` with zero approved is by design — but on the Notion board the operator
+       sees `completed` and reasonably reads "clips are ready". Make it legible without changing
+       `Run`: e.g. report the approved/total count next to the status on the board, or have
+       `demo_clips.py` print the verdict breakdown (today it prints only `completed` / `clips: 12`).
+       Small; the board-side option touches `EpisodeBoard.report_status`'s contract (additive).
+    **Re-running the same episode:** the Run is terminal, so a re-invocation just reports it. After
+    fixing 1–3, re-run under a fresh board card (new page id → new Run id) or delete the stored Run
+    (`.omemo/runs.sqlite3`); the rendered clips from this run are in the renderer's output folder.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
