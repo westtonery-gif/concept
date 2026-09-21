@@ -830,14 +830,10 @@ process at the time, not a pattern to keep copying.)
       a Skill + a Tool + captured metrics + the externally-stored prompt. The DoD's "invalid output
       -> contract error" line turned out to be unmet (an `INVALID` Output was chained and turned
       into an Artifact) and is now an error state; the retry half is deferred (ADR-0033 §3).
-9. **(Not yet — Stage 13, after the Stage 12 MVP.)** Real media production: AI image/video
-   generation and TTS voiceover via paid provider subscriptions, plus automated video/photo
-   editing (splicing, audio overlay) via editor APIs. Decision made 2026-09-15: deliberately
-   deferred to Stage 13, not pulled forward — see ROADMAP.md Stage 13's new paragraph for the
-   architectural shape (new Adapters for image-gen/video-gen/TTS/video-editing, Tools where an
-   agent needs to invoke one mid-reasoning, editing/overlay likely a deterministic `Workflow`
-   step rather than an agent decision). Don't start this before Stage 12 without asking first —
-   it was an explicit, deliberate call, not an oversight.
+9. ~~**(Not yet — Stage 13, after the Stage 12 MVP.)**~~ — **started 2026-09-21 (ADR-0065)**, as
+   task 23's narrow v1 slice (image + video generation to one approved file). Original scope
+   (TTS, automated splicing/overlay across formats, the rest of Stage 13's agents) is still not
+   authorized — only what ADR-0065 states. See task 23 for the subtask breakdown.
 10. **(Not yet — read `CONTENT_FACTORY_THOUGHTS.md` in full before touching this.)** Once task 8
     (Stage 7, M2) is closed, the maintainer has a detailed exploratory design for the eventual
     video vertical slice — a full product vision (multi-tenant faceless-reel factory: idea
@@ -1454,6 +1450,62 @@ process at the time, not a pattern to keep copying.)
     Do not "fix" this by rewording the script again, and do not approve around it — the fail-closed
     gate is correct, and ADR-0018 exists precisely so that a flagged candidate cannot be waved
     through.
+
+23. **The generation department — ordering decided (ADR-0065, 2026-09-21), broken into subtasks
+    here so a session can pick one up without re-deriving the plan.** A third additive department,
+    the same shape clipping (task 21) proved out: photo + a human-written prompt in, image + video
+    generation via role-named ports (Google Gemini/"Nano Banana" for images, Higgsfield/Kling for
+    video), QA, Human Approval, one approved video file out — no auto-publish, no prompt-crafting
+    agent in v1 (both explicitly deferred, ADR-0065 §5/Deferred). Subtasks, roughly the order
+    clipping's own history took:
+    1. **Ports ADR — check real vendor capability first, do not guess.** Design the two role-named
+       ports (`adapters/`, working names `ImageGenerator`/`VideoGenerator`) and resolve ADR-0065's
+       open question against the actual APIs (`docs.higgsfield.ai`, Gemini's image-generation
+       docs): does Higgsfield/Kling need a Nano Banana-produced image as input, or can it generate
+       video straight from a photo + text prompt? This decides whether the pipeline has one vendor
+       call or two. Async Higgsfield job handling mirrors `ProductionService`'s queued shape
+       (ADR-0049); check whether Gemini's call is fast enough to be synchronous instead of assumed.
+    2. **Vendor implementations in `infrastructure/`** — `infrastructure/gemini_image_generator.py`
+       / `infrastructure/higgsfield_video_generator.py` (working names), auth via
+       `OMEMO_GEMINI_*` / `OMEMO_HIGGSFIELD_*` env vars, fail-closed with no defaults (ADR-0040's
+       rule), no SDK/vendor shape leaking past `infrastructure/` (`tests/test_adapter_contract.py`
+       boundary). One new third-party dependency each, most likely — decide the library
+       (official Google/Higgsfield SDKs vs. raw REST over `urllib`, the choice already made twice
+       for Notion and ffmpeg/whisper.cpp) inside this subtask, not before.
+    3. **QA criteria for generated video — ask the maintainer, don't invent.** A different
+       judgement than clip QA (ADR-0056): coherence with the prompt, visual/temporal artifacts,
+       platform-safety, nothing scripted-fiction-specific applies. Its own small ADR, reusing
+       `qa-verdict@v1`'s Schema/decoder the way `clip_qa_agent@v1` did (one verdict contract, not a
+       second one) unless the maintainer's criteria genuinely need a different shape.
+    4. **The board — a Notion database** (mirroring `EPISODE_BOARD`, ADR-0055): title, readiness
+       property, reference-photo location, the manual generation prompt field, `Run status` /
+       `Run id`. Create it through the API the way the episode database was (so property *types*
+       are right, not just labels) and confirm the integration has access — task 21.4 already found
+       this "read-only token" worry was a misreading once checked, so check here rather than
+       assume the same blocker exists.
+    5. **Run granularity — confirm, don't assume "one Run per episode" applies here.** One
+       generation request probably does not fan out into many artifacts the way one episode fans
+       out into ~13 clips (ADR-0059), so this is likely one Run per request — state it in its own
+       small ADR or fold into the ports ADR if it turns out trivial.
+    6. **`GENERATION_SPEC.md` / `GENERATION_ACCEPTANCE.md`**, in the shape of `CLIPPING_SPEC.md`,
+       once the ADRs above land — open with an honest implementation-state table the way
+       `CLIPPING_ACCEPTANCE.md` did (real credentials/quota are operator setup, not something a
+       session has).
+    7. **Assemble the department and give it an entrypoint** — `composition.build_generation_...`
+       (mirroring `build_clip_production`) + `demo_generation.py` (mirroring `demo_clips.py`), one
+       application module beside `ContentDirector` (mirroring `ClipProduction`, ADR-0059 §1's
+       reasoning: `ContentDirector`'s declared-Workflow contract doesn't fit a two-vendor pipeline
+       with its own gate any better than clipping's fan-out did).
+    8. **Real environment + a first real generation — the maintainer's action, not a session's.**
+       Gemini API key, Higgsfield API key pair (`HF_API_KEY_ID`/`HF_API_KEY_SECRET`), the Notion
+       database shared with the integration, a reference photo and a hand-written prompt (from the
+       GPT Store tool or otherwise). Mirrors `CLIPPING_RUNBOOK.md` — write the equivalent runbook
+       in the same subtask once there is something to run.
+    9. **(Later, not v1 — ADR-0065 §5.)** The prompt-crafting Agent: photo (+ maybe a short brief)
+       in, a generation prompt out, built on this repo's own Claude integration
+       (`client_for_role`, the Prompt store) — never an OpenAI integration, since the GPT Store
+       tool that inspired it has no callable API (ADR-0065 Context). Do not start before the
+       vendor-calling skeleton (subtasks 1–8) is proven on a real generation.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
