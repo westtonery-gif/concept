@@ -1450,6 +1450,10 @@ process at the time, not a pattern to keep copying.)
     Do not "fix" this by rewording the script again, and do not approve around it — the fail-closed
     gate is correct, and ADR-0018 exists precisely so that a flagged candidate cannot be waved
     through.
+    **Update 2026-09-21:** option 1's port now exists — ADR-0068 added
+    `ContextualArtifactEvaluator.evaluate_in_context` for the clipping department (task 24.1). What
+    remains here is deciding *what* the factory's context is (brief, client profile, superseded
+    version), a `qa-agent` v3 with `{context}`, and wiring `ContentDirector`'s QA call to it.
 
 23. **The generation department — ordering decided (ADR-0065, 2026-09-21), broken into subtasks
     here so a session can pick one up without re-deriving the plan.** A third additive department,
@@ -1577,6 +1581,47 @@ process at the time, not a pattern to keep copying.)
     **Re-running the same episode:** the Run is terminal, so a re-invocation just reports it. After
     fixing 1–3, re-run under a fresh board card (new page id → new Run id) or delete the stored Run
     (`.omemo/runs.sqlite3`); the rendered clips from this run are in the renderer's output folder.
+    **Status (2026-09-21): 1, 2, 4 done; 3 done as far as a deterministic rule can go.**
+    - 24.1 — done (ADR-0068): additive `ContextualArtifactEvaluator.evaluate_in_context`; the
+      episode index is a recorded `index-footage` Task whose Output QA reads the transcript from
+      (and resumption re-plans from, without re-running whisper); `clip-qa-agent` v2. CQA-04 now
+      checks what the model receives — v1's test checked the Prompt's wording and was green while
+      nothing was sent. Task 22 can now use the same port.
+    - 24.2 — done: whisper-cli runs with `-mc 0 -sns`. On this episode the loop had swallowed not
+      just the title music but the whole cold open's dialogue (30–137 s); with the flags the full
+      22 minutes show no loop. `_spans` also drops ≥3 consecutive identical segments (FIX-09/10).
+      One 29-second «Девушки отдыхают» segment at 0 s survives (single, not a loop); whisper's VAD
+      (`--vad`, needs a separate Silero model file) would likely remove it — operator setup, not
+      done.
+    - 24.3 — done per ADR-0069: measured, no `scdet` threshold separates scenes from shots (337
+      cuts at 10, 245 of them mid-line), and pause-gated cuts find almost nothing because whisper's
+      segments abut. `SCENE` now never puts a boundary inside a line (CLP-13/14): 15 clips, 0
+      mid-line edges on this episode. Interleaved storylines are **not** fixed — see task 25.
+    - 24.4 — done: `ClipInvocation.tally` + `demo_clips.py` prints QA breakdown and "approved N of
+      M", and says outright when nothing is ready. **Found while doing it:** the board never shows
+      a status at all — see task 26.
+    - **Still owed — the maintainer's action:** re-run the episode under a fresh board card and see
+      whether any clip passes now (~$0.09 of QA per pass; the QA input is now ~12k tokens/clip
+      bigger, so expect more).
+
+25. **A scene/storyline planner for `SCENE` mode — ADR-0069 §3 queued it, not started.** Pixels and
+    speech timing cannot say where a scene or a thread begins (ADR-0069's measurements); a planner
+    reading the timestamped transcript (already recorded per Run, ADR-0068 §2) plus the detected
+    cut list could choose boundaries at cuts and keep one thread per clip. It restores an agent
+    ADR-0058 §4 removed and is the capability ADR-0057 described, so it needs its own ADR: role,
+    Prompt, output contract (boundaries must still be validated deterministically — inside the
+    episode, at a detected cut or a line edge, under the maximum), and cost per episode. Decide
+    only after a re-run with 24.1–24.3 in place shows how much QA still flags storyline jumps.
+
+26. **The episode board's `Run status` / `Run id` are never written — found 2026-09-21 in 24.4.**
+    `EpisodeBoard.report_status` exists and `NotionEpisodeBoard` implements it (ADR-0055), and the
+    runbook tells the operator "их заполняет система", but nothing in `ClipProduction` calls it —
+    the brief side has `BriefStatusReporter` (ADR-0041), the episode side has no equivalent. The
+    `completed` the operator saw came from `demo_clips.py`'s output, not the board. Wire a
+    reporter the ADR-0041 way (a `RunStore` wrapper, a refused report never changes the Run) in
+    `build_clip_production`; then decide whether the approved/total count belongs on the board as
+    well (an additive `report_status` argument or a second property — touches ADR-0055's
+    contract, so a small ADR).
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

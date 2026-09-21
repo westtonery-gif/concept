@@ -103,10 +103,19 @@ def _scene_bounds(
     No detected scene means no ``SCENE`` clips. That is deliberately not an error and deliberately
     not "treat the whole episode as one scene": the service found nothing, and guessing here would
     be a second copy of a decision that is not ours (CLIPPING_ACCEPTANCE CLP-06).
+
+    A detected cut **inside a spoken line** is not a boundary (ADR-0069 §2): on real footage the
+    detector reports shot changes, and a shot changes mid-sentence all the time. Cuts that survive
+    are in pauses; if none does, the episode is one long scene and is split like a chunk.
     """
     if not indexed.scenes:
         return []
-    edges = [0, *(scene.at_ms for scene in indexed.scenes), indexed.duration_ms]
+    breaks = [
+        scene.at_ms
+        for scene in indexed.scenes
+        if _inside_speech(scene.at_ms, indexed.speech) is None
+    ]
+    edges = [0, *breaks, indexed.duration_ms]
     scenes = [(start, end) for start, end in pairwise(edges) if end > start]
 
     bounds: list[tuple[int, int]] = []
@@ -117,7 +126,7 @@ def _scene_bounds(
             if open_start is not None:
                 bounds.append((open_start, open_end))
                 open_start = None
-            bounds.extend(_split(start, end, indexed, chunk_ms, tolerance_ms))
+            bounds.extend(_split(start, end, indexed, chunk_ms, tolerance_ms, never_mid_line=True))
             continue
         if open_start is None:
             open_start, open_end = start, end
@@ -132,13 +141,27 @@ def _scene_bounds(
 
 
 def _split(
-    start: int, end: int, indexed: IndexedFootage, chunk_ms: int, tolerance_ms: int
+    start: int,
+    end: int,
+    indexed: IndexedFootage,
+    chunk_ms: int,
+    tolerance_ms: int,
+    *,
+    never_mid_line: bool = False,
 ) -> list[tuple[int, int]]:
-    """Cut ``[start, end)`` into pieces of ``chunk_ms``, each cut nudged to the nearest pause."""
+    """Cut ``[start, end)`` into pieces of ``chunk_ms``, each cut nudged to the nearest pause.
+
+    ``never_mid_line`` is ``SCENE``'s stricter rule (ADR-0069 §2): a cut the nudge could not free
+    moves back to the start of the line it falls in, which keeps the piece under ``chunk_ms``.
+    """
     cuts = [start]
     while cuts[-1] + chunk_ms < end:
         ideal = cuts[-1] + chunk_ms
         nudged = _nudge(ideal, indexed.speech, tolerance_ms)
+        if never_mid_line:
+            line = _inside_speech(nudged, indexed.speech)
+            if line is not None and line.start_ms > cuts[-1]:
+                nudged = line.start_ms
         cuts.append(nudged if nudged > cuts[-1] else ideal)
     cuts.append(end)
     return [(a, b) for a, b in pairwise(cuts) if b > a]
@@ -157,6 +180,11 @@ def _nudge(at_ms: int, speech: tuple[SpeechSpan, ...], tolerance_ms: int) -> int
             nearer = span.start_ms if before <= after else span.end_ms
             return nearer if min(before, after) <= tolerance_ms else at_ms
     return at_ms
+
+
+def _inside_speech(at_ms: int, speech: tuple[SpeechSpan, ...]) -> SpeechSpan | None:
+    """The spoken line ``at_ms`` falls strictly inside, if any. A line's own edges are pauses."""
+    return next((span for span in speech if span.start_ms < at_ms < span.end_ms), None)
 
 
 def _captions(speech: tuple[SpeechSpan, ...], start_ms: int, end_ms: int) -> tuple[Caption, ...]:

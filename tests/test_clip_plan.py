@@ -92,6 +92,50 @@ def test_clp_05_a_scene_longer_than_the_maximum_is_split_like_a_chunk() -> None:
     ]
 
 
+def test_clp_13_a_detected_cut_inside_a_spoken_line_is_not_a_scene_boundary() -> None:
+    """The first real episode: 245 of 337 detected cuts fell mid-line (ADR-0069 §1)."""
+    speech = (
+        SpeechSpan(start_ms=20_000, end_ms=40_000, text="Я хочу сказать, что умным людям..."),
+        SpeechSpan(start_ms=55_000, end_ms=58_000, text="Джерри!"),
+    )
+    scenes = (SceneBreak(30_000), SceneBreak(50_000))  # the first cuts through a line
+    plan = _plan(
+        IndexedFootage(duration_ms=90_000, scenes=scenes, speech=speech),
+        mode=ClipMode.SCENE,
+        max_ms=60_000,
+    )
+    assert [(c.start_ms, c.end_ms) for c in plan.clips] == [(0, 50_000), (50_000, 90_000)]
+
+
+def test_clp_13_when_every_cut_is_mid_line_the_episode_is_one_scene_split_like_a_chunk() -> None:
+    """Not CLP-06: cuts were found, none was a boundary — the episode is still planned."""
+    speech = (SpeechSpan(start_ms=0, end_ms=5 * MINUTE, text="один бесконечный монолог"),)
+    scenes = (SceneBreak(MINUTE), SceneBreak(3 * MINUTE))
+    plan = _plan(
+        IndexedFootage(duration_ms=5 * MINUTE, scenes=scenes, speech=speech), mode=ClipMode.SCENE
+    )
+    assert plan.clips, "a plan, not an empty one"
+    _contiguous(plan)
+
+
+def test_clp_14_a_scene_split_never_lands_inside_a_line() -> None:
+    """With no pause inside the tolerance, SCENE moves the cut back to where the line starts."""
+    speech = (
+        SpeechSpan(start_ms=100_000, end_ms=130_000, text="долгая реплика через точку разреза"),
+    )
+    indexed = IndexedFootage(
+        duration_ms=5 * MINUTE, scenes=(SceneBreak(5 * MINUTE - 1),), speech=speech
+    )
+    scene = _plan(indexed, mode=ClipMode.SCENE, tolerance_ms=2_000)
+    assert scene.clips[0].end_ms == 100_000, "moved back to the line's start, under the maximum"
+    for clip in scene.clips:
+        for boundary in (clip.start_ms, clip.end_ms):
+            assert not any(s.start_ms < boundary < s.end_ms for s in speech)
+
+    chunk = _plan(indexed, mode=ClipMode.CHUNK, tolerance_ms=2_000)
+    assert chunk.clips[0].end_ms == TWO_MINUTES, "CHUNK keeps CLP-03: the cut stays"
+
+
 def test_clp_06_scene_mode_with_no_detected_scene_plans_nothing_and_does_not_raise() -> None:
     plan = _plan(IndexedFootage(duration_ms=25 * MINUTE), mode=ClipMode.SCENE)
     assert plan.clips == ()
