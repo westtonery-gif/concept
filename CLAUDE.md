@@ -1468,13 +1468,29 @@ process at the time, not a pattern to keep copying.)
        found `RUNNING` on resume is failed, never resubmitted. Local paths in/out; no vendor URL
        ever reaches the core. The port *code* lands with the spec (23.6), per "no code before its
        spec".
-    2. **Vendor implementations in `infrastructure/`** — `infrastructure/gemini_image_generator.py`
-       / `infrastructure/higgsfield_video_generator.py` (working names), auth via
-       `OMEMO_GEMINI_*` / `OMEMO_HIGGSFIELD_*` env vars, fail-closed with no defaults (ADR-0040's
-       rule), no SDK/vendor shape leaking past `infrastructure/` (`tests/test_adapter_contract.py`
-       boundary). One new third-party dependency each, most likely — decide the library
-       (official Google/Higgsfield SDKs vs. raw REST over `urllib`, the choice already made twice
-       for Notion and ffmpeg/whisper.cpp) inside this subtask, not before.
+    2. ~~**Vendor implementations in `infrastructure/`**~~ — done as code (ADR-0067,
+       `GENERATION_SPEC.md` §1–§4 / `GENERATION_ACCEPTANCE.md` GNP/MED/GIG/HVG/LIV), **not yet
+       proven against the real vendors.** The ports landed here after all (`adapters/
+       image_generator.py`, `adapters/video_generator.py`, exactly ADR-0066's shape) because the
+       adapters need them and the spec now covers them. Both adapters are **stdlib `urllib`, no new
+       dependency**: `higgsfield-client` pulls `httpx` and its headline `subscribe` is the blocking
+       shape ADR-0066 refused; `google-genai` pulls ten packages for one `POST`. Gemini goes through
+       `POST /v1beta/interactions` with `store: false`; the photo's aspect is matched to Gemini's
+       nearest listed ratio and an answer off it by >3% is refused. Higgsfield: presigned upload
+       for both frames (no credentials to storage or the CDN), **one** `POST /<model>`, never
+       retried; `collect` = one status `GET` + download + atomic write. The video model must be on
+       an allowlist of endpoints that take `last_image_url` (`kling-video/v3.0/{std,pro,4k}/
+       image-to-video`). Measurements come from the bytes via stdlib `infrastructure/
+       media_measure.py` (PNG/JPEG/WebP headers, MP4 `mvhd` + the `vide` track) — no ffprobe
+       needed. Seven required variables (`OMEMO_GEMINI_API_KEY`/`_IMAGE_MODEL`/`_IMAGE_SIZE`,
+       `OMEMO_HIGGSFIELD_API_KEY_ID`/`_SECRET`/`_VIDEO_MODEL`/`_SOUND`), in `.env.example`. Tests
+       run the real `urllib` code against local servers playing Gemini and Higgsfield + storage +
+       CDN; `MED-05` reads a real ffmpeg MP4. **What is still owed — "подключимся":**
+       `tests/test_live_generation.py` (`LIV`) calls both vendors for real and skips unless
+       `OMEMO_LIVE_GENERATION=1` + the keys + `OMEMO_LIVE_REFERENCE_PHOTO` are set. It spends money
+       and has never run: the maintainer supplies a Gemini key and a Higgsfield key pair with
+       credits, then it is run once together, and the acceptance's state table is updated with
+       what the real services actually answered.
     3. **QA criteria for generated video — ask the maintainer, don't invent.** A different
        judgement than clip QA (ADR-0056): coherence with the prompt, visual/temporal artifacts,
        platform-safety, nothing scripted-fiction-specific applies. Its own small ADR, reusing

@@ -90,3 +90,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0064](0064-footage-index-on-ffmpeg-and-whisper-cpp.md) | `FootageIndex` on ffmpeg and whisper.cpp — the vendor is dropped | Accepted |
 | [0065](0065-generation-department-ordering-and-shape.md) | The generation department is the next work, and the shape it takes | Accepted |
 | [0066](0066-generation-ports-and-the-two-call-pipeline.md) | The generation ports — `ImageGenerator` and `VideoGenerator`, and a two-call pipeline | Accepted |
+| [0067](0067-generation-vendor-adapters-over-urllib.md) | The generation vendor adapters — Gemini and Higgsfield over stdlib `urllib` | Accepted |

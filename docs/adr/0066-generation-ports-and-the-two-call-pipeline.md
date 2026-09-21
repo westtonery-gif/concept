@@ -82,18 +82,21 @@ Gemini answers in one HTTP round trip, so the port is one blocking method, shape
 ```python
 @dataclass(frozen=True, slots=True)
 class ImageGenerationRequest:
-    reference: str        # local path of the reference photo
-    prompt: str           # non-blank
-    destination: str      # local path to write the image to
+    reference: str  # local path of the reference photo
+    prompt: str  # non-blank
+    destination: str  # local path to write the image to
+
 
 @dataclass(frozen=True, slots=True)
 class GeneratedImage:
     path: str
     width: int
     height: int
-    media_type: str       # e.g. "image/png"
+    media_type: str  # e.g. "image/png"
+
 
 class ImageGeneratorError(Exception): ...
+
 
 class ImageGenerator(Protocol):
     def generate(self, request: ImageGenerationRequest, /) -> GeneratedImage: ...
@@ -119,25 +122,29 @@ one blocking call.** A blocking `generate` would leave nothing in the Run betwee
 ```python
 @dataclass(frozen=True, slots=True)
 class VideoGenerationRequest:
-    first_frame: str      # local path — the reference photo
-    last_frame: str       # local path — the generated ending frame
-    prompt: str           # non-blank
-    duration_s: int       # within the configured model's range
+    first_frame: str  # local path — the reference photo
+    last_frame: str  # local path — the generated ending frame
+    prompt: str  # non-blank
+    duration_s: int  # within the configured model's range
+
 
 @dataclass(frozen=True, slots=True)
 class VideoJob:
-    job_id: str           # opaque to the core; Higgsfield's request_id today
+    job_id: str  # opaque to the core; Higgsfield's request_id today
+
 
 class VideoJobState(Enum):
-    PENDING = "pending"       # queued or in progress — ask again later
+    PENDING = "pending"  # queued or in progress — ask again later
     COMPLETED = "completed"
     FAILED = "failed"
-    REJECTED = "rejected"     # the vendor's content moderation said no ("nsfw")
+    REJECTED = "rejected"  # the vendor's content moderation said no ("nsfw")
+
 
 @dataclass(frozen=True, slots=True)
 class VideoJobResult:
     state: VideoJobState
-    video: GeneratedVideo | None = None   # set exactly when COMPLETED
+    video: GeneratedVideo | None = None  # set exactly when COMPLETED
+
 
 @dataclass(frozen=True, slots=True)
 class GeneratedVideo:
@@ -147,7 +154,9 @@ class GeneratedVideo:
     height: int
     container: str
 
+
 class VideoGeneratorError(Exception): ...
+
 
 class VideoGenerator(Protocol):
     def submit(self, request: VideoGenerationRequest, /) -> VideoJob: ...
