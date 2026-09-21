@@ -1458,13 +1458,16 @@ process at the time, not a pattern to keep copying.)
     video), QA, Human Approval, one approved video file out — no auto-publish, no prompt-crafting
     agent in v1 (both explicitly deferred, ADR-0065 §5/Deferred). Subtasks, roughly the order
     clipping's own history took:
-    1. **Ports ADR — check real vendor capability first, do not guess.** Design the two role-named
-       ports (`adapters/`, working names `ImageGenerator`/`VideoGenerator`) and resolve ADR-0065's
-       open question against the actual APIs (`docs.higgsfield.ai`, Gemini's image-generation
-       docs): does Higgsfield/Kling need a Nano Banana-produced image as input, or can it generate
-       video straight from a photo + text prompt? This decides whether the pipeline has one vendor
-       call or two. Async Higgsfield job handling mirrors `ProductionService`'s queued shape
-       (ADR-0049); check whether Gemini's call is fast enough to be synchronous instead of assumed.
+    1. ~~**Ports ADR — check real vendor capability first, do not guess.**~~ — done (ADR-0066,
+       vendor docs checked 2026-09-21). Kling image-to-video *can* go straight from photo + prompt,
+       but the maintainer chose **two calls**: Nano Banana makes the ending frame from the photo,
+       Kling (Standard/Pro/4K — Turbo takes no `last_image_url`) animates photo → that frame.
+       `ImageGenerator.generate` is synchronous (Gemini returns bytes inline); `VideoGenerator` is
+       `submit` + `collect`, because Higgsfield submissions have **no idempotency key**: the
+       `job_id` is committed as a succeeded Task's Output right after submit, and a submit Task
+       found `RUNNING` on resume is failed, never resubmitted. Local paths in/out; no vendor URL
+       ever reaches the core. The port *code* lands with the spec (23.6), per "no code before its
+       spec".
     2. **Vendor implementations in `infrastructure/`** — `infrastructure/gemini_image_generator.py`
        / `infrastructure/higgsfield_video_generator.py` (working names), auth via
        `OMEMO_GEMINI_*` / `OMEMO_HIGGSFIELD_*` env vars, fail-closed with no defaults (ADR-0040's
