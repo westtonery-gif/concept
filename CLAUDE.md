@@ -14,6 +14,11 @@ the source of truth — code must never contradict them; on conflict, the docs w
 6. `docs/adr/` — Architecture Decision Records (technical decisions)
 7. Code in `src/`, tests in `tests/`
 
+**Running things** (not normative, but read before touching either department in anger):
+`CLIPPING_RUNBOOK.md` — how to cut an episode end to end, including the two things that bite a
+first run (**nothing loads `.env`**, and Homebrew is only on an interactive shell's `PATH`);
+`n8n/README.md` — the content factory's operator setup and the verification log for both.
+
 `CONTENT_FACTORY_THOUGHTS.md` sits **outside** this hierarchy — explicitly non-normative
 (says so in its own header), a product/architecture exploration of the full video-factory vision
 reconciled against the repo as of commit `063cfde`. Read it for context and the proposed sequence
@@ -21,6 +26,17 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **`CLIPPING_RUNBOOK.md` exists, and writing it found two gaps that would have broken the first
+  real run.** (1) **Nothing reads `.env`** — every entrypoint takes `os.environ`, so the file is a
+  record, not a loader, and the operator must `set -a && source .env && set +a`. (2) **The clip QA
+  role had no provider binding**: `client_for_role("clip_qa_agent@v1", …)` would have raised
+  `ProviderModelSelectionError` at build time, because `.env` carried bindings only for the three
+  original roles. Both are now written down, and the binding was added mirroring `qa_agent@v1`'s
+  (`claude-sonnet-5`, `adaptive` thinking) — a deliberate copy, not a default, and the runbook says
+  where to change it. The runbook also covers what "normal" looks like, so a correct refusal is not
+  read as a fault: a `flagged` clip is never approved, a rejected clip is simply not shipped, one
+  bad clip does not fail the episode, an empty plan in `scene` mode is not an error, and a re-run is
+  safe because committed work is reused. `CLAUDE.md`'s hierarchy section now points at it.
 - **The clipping department is assembled and runnable (queue task 21.6).**
   `composition.build_clip_production(environ, evaluator=, desk=)` is the one place every outside
   system enters: the Notion episode board, the filesystem episode source, the ffmpeg+whisper.cpp
