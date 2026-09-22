@@ -297,3 +297,24 @@ def test_clp_15_without_zones_the_plan_is_unchanged() -> None:
         (2 * MINUTE, 4 * MINUTE),
         (4 * MINUTE, 6 * MINUTE),
     ]
+
+
+def test_clp_16_a_zone_swallows_the_lines_that_straddle_it() -> None:
+    """Episode 2's dub credit, 30.0–32.3 s, ran past the titles' 30.9 s edge (ADR-0077)."""
+    speech = (
+        SpeechSpan(start_ms=30_000, end_ms=32_320, text="Перевел Женя Спицын, озвучился индук."),
+        SpeechSpan(start_ms=33_080, end_ms=35_800, text="Считается, что коллекционирование монет"),
+        SpeechSpan(start_ms=100_000, end_ms=101_000, text="Мам."),
+        SpeechSpan(start_ms=101_500, end_ms=112_000, text="Субтитры создавал DimaTorzok"),
+    )
+    indexed = IndexedFootage(
+        duration_ms=120_000,
+        speech=speech,
+        skips=(SkipZone(0, 30_890), SkipZone(110_000, 115_000)),
+    )
+    plan = _plan(indexed)
+    assert plan.clips[0].start_ms == 32_320, "the clip starts after the voice-over"
+    assert not plan.clips[0].transcript.startswith("Перевел")
+    ends = {clip.end_ms for clip in plan.clips}
+    assert 101_500 in ends, "the hallucination straddling the end zone goes with it"
+    assert "Субтитры" not in " ".join(c.transcript for c in plan.clips)

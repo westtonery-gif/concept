@@ -101,14 +101,33 @@ def _stretches(indexed: IndexedFootage) -> list[tuple[int, int]]:
     if not indexed.skips:
         return [(0, indexed.duration_ms)]
     edges = [0]
-    for zone in indexed.skips:
-        edges.extend((zone.start_ms, zone.end_ms))
+    for start, end in _swallowing(indexed):
+        edges.extend((start, end))
     edges.append(indexed.duration_ms)
     return [
         (start, end)
         for start, end in zip(edges[::2], edges[1::2], strict=True)
         if end - start >= MIN_STRETCH_MS
     ]
+
+
+def _swallowing(indexed: IndexedFootage) -> list[tuple[int, int]]:
+    """Skip zones widened over every spoken line that overlaps them, merged (ADR-0077).
+
+    A dub credit spoken over the theme's last seconds runs past the zone's edge; left alone it
+    would open the next clip, or be cut in half by it.
+    """
+    widened: list[tuple[int, int]] = []
+    for zone in indexed.skips:
+        start, end = zone.start_ms, zone.end_ms
+        for span in indexed.speech:
+            if span.start_ms < end and span.end_ms > start:
+                start, end = min(start, span.start_ms), max(end, span.end_ms)
+        if widened and start <= widened[-1][1]:
+            widened[-1] = (widened[-1][0], max(widened[-1][1], end))
+        else:
+            widened.append((start, end))
+    return widened
 
 
 def _scene_bounds(

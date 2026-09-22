@@ -100,3 +100,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0074](0074-titles-and-credits-found-by-audio-fingerprint.md) | Opening titles and end credits are found by audio fingerprint, and no clip covers them | Accepted |
 | [0075](0075-a-vertical-canvas-with-bars-reserved-for-banners.md) | Clips are rendered on a vertical canvas, with the bars above and below kept for banners | Accepted |
 | [0076](0076-render-quality-a-4k-canvas-and-crf-18.md) | Render quality — a 4K vertical canvas and CRF 18, so the picture is not shrunk | Accepted |
+| [0077](0077-a-skip-zone-swallows-the-lines-that-straddle-it.md) | A skip zone swallows the spoken lines that straddle it | Accepted |
