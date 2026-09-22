@@ -1524,11 +1524,30 @@ process at the time, not a pattern to keep copying.)
        database shared with the integration, a reference photo and a hand-written prompt (from the
        GPT Store tool or otherwise). Mirrors `CLIPPING_RUNBOOK.md` — write the equivalent runbook
        in the same subtask once there is something to run.
-    9. **(Later, not v1 — ADR-0065 §5.)** The prompt-crafting Agent: photo (+ maybe a short brief)
-       in, a generation prompt out, built on this repo's own Claude integration
-       (`client_for_role`, the Prompt store) — never an OpenAI integration, since the GPT Store
-       tool that inspired it has no callable API (ADR-0065 Context). Do not start before the
-       vendor-calling skeleton (subtasks 1–8) is proven on a real generation.
+    9. ~~**(Later, not v1 — ADR-0065 §5.)**~~ — **pulled into v1 by ADR-0080 (2026-09-22)**; see
+       23.10. The GPT-Store note stands: it is this repo's own Agent on Claude.
+    **Re-plan 2026-09-22 (maintainer: "да добавляем нового агента и добавляем дешевый адаптер —
+    переходить расти будем по мере того как будет расти канал").** The department is to be run by
+    agents end to end; the human keeps only the final Approve. Two ADRs, no code yet:
+    - **ADR-0080** reverses ADR-0065 §5: `generation_prompt_writer@v1` (Prompt
+      `generation-prompt-writer`, Schema `generation-prompts@v1` = `image_prompt` + `video_prompt`)
+      reads the reference **photo** + a one-line **idea** from the card and writes both prompts, as
+      the first committed step `write-prompts`. It needs image input, so an **additive**
+      `ImageAwareLLMClient.complete_with_images(..., images=<local paths>)` beside `LLMClient`
+      (ADR-0068's pattern); `LLMClient` is unchanged. No manual-prompt override; no rework loop yet.
+    - **ADR-0081** adds `VeoVideoGenerator` (**Veo 3.1 Lite, 720p, $0.05/s**) behind the unchanged
+      `VideoGenerator` port — ending-frame support (`lastFrame`) checked on Google's own docs
+      2026-09-22; Seedance 2.0 Fast could not be verified. Reuses `OMEMO_GEMINI_API_KEY`; new
+      `OMEMO_VEO_VIDEO_MODEL` (allowlist) + `OMEMO_VEO_RESOLUTION`; `build_video_generator` picks by
+      presence, both vendors configured = error. Growth = `.env` edits: 1080p → Veo Fast → Kling.
+      ~$0.50 per 8-second video vs ~$1–1.45 on Kling Pro. Google keeps output only **2 days**.
+    New subtasks, in order with the rest:
+    - **23.2b `VeoVideoGenerator`** — spec rows in `GENERATION_SPEC.md` §4 + acceptance, then code
+      against a local server playing the Gemini API; `LIV` gains a Veo leg.
+    - **23.10 the prompt writer** — `ImageAwareLLMClient` (Anthropic + Fake), the role, Prompt,
+      Schema, Root check that the bound client has the capability. Spec before code.
+    - 23.3 (QA criteria) and 23.4 (board: now an **idea** property, not prompt fields) still need
+      the maintainer's answers; 23.8's live run now needs only the Gemini key for both vendors.
 
 24. **Findings from the first real clipping run (2026-09-21) — the pipeline works, nothing was
     approvable.** Episode: a 22-minute Rick and Morty episode (`~/episodes/rick morty.mp4`, 1080p,
