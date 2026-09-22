@@ -1688,6 +1688,15 @@ process at the time, not a pattern to keep copying.)
     and a publish Task found `RUNNING` on resume is **failed, never re-posted** — unless upload-post
     offers an idempotency key, which the ADR must check in its docs. Needs: ADR + spec, the
     maintainer's upload-post API key and connected accounts.
+    **Environment done 2026-09-22:** upload-post account on the Free plan ("Default"), profile
+    **`concept`** created (the API's `user` parameter, case-sensitive), **YouTube connected** to it
+    through upload-post's own OAuth (no Google Cloud project of ours). `.env` carries
+    `OMEMO_UPLOAD_POST_API_KEY` and `OMEMO_UPLOAD_POST_PROFILE="concept"`; the key was checked with
+    `GET https://api.upload-post.com/api/uploadposts/me` → "Token is valid". Their public docs
+    mention no idempotency key and no upload-status endpoint — confirm against
+    `docs.upload-post.com/openapi.json` in the ADR. Also: **ffmpeg with libass is installed**
+    (`homebrew-ffmpeg/ffmpeg`, 9.0.2; `subtitles` and `drawtext` filters present) — task 29 is
+    unblocked.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
