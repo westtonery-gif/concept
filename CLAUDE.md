@@ -1611,6 +1611,13 @@ process at the time, not a pattern to keep copying.)
       start, clip 15 whole) — candidates for a "no speech-content" filter. **Cost: $0.531, 232k
       input tokens** (vs $0.091 before) — the per-clip episode transcript; ADR-0056 §3's deferred
       prefix caching is now worth doing. 7.5 min wall time.
+    - **Approved 2026-09-22 by the maintainer in Notion** (`Решение = Одобрено` on the review
+      page); the next invocation read it back through `NotionReviewDesk.fetch_decision`, recorded
+      `review-1` `approved`, moved `artifact-1` to **`APPROVED`** and the Run to **`completed`**
+      (approved 1 of 15). **The first human-approved artifact in this repo, and the first live
+      round-trip through the Notion review desk (task 19's desk, ADR-0060)** — publish → human
+      decision → fetch → gate, with the QA `passed` + human Approve both required (ADR-0018).
+      The approved file: `clips/rerun-24/3e264b74-a905-8188-a875-d9be84bb98a4-01.mp4` (0–120 s).
 
 25. **A scene/storyline planner for `SCENE` mode — ADR-0069 §3 queued it, not started.** Pixels and
     speech timing cannot say where a scene or a thread begins (ADR-0069's measurements); a planner
