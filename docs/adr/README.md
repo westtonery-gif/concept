@@ -101,3 +101,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0075](0075-a-vertical-canvas-with-bars-reserved-for-banners.md) | Clips are rendered on a vertical canvas, with the bars above and below kept for banners | Accepted |
 | [0076](0076-render-quality-a-4k-canvas-and-crf-18.md) | Render quality — a 4K vertical canvas and CRF 18, so the picture is not shrunk | Accepted |
 | [0077](0077-a-skip-zone-swallows-the-lines-that-straddle-it.md) | A skip zone swallows the spoken lines that straddle it | Accepted |
+| [0078](0078-a-headline-and-branding-in-the-bars-at-posting-time.md) | The post's title as a headline in the top bar and branding in the bottom one, added at posting time | Accepted |

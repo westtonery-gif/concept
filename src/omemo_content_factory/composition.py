@@ -463,6 +463,9 @@ def build_clip_production(
     )
 
 
+CLIP_FOOTER_VAR = "OMEMO_CLIP_FOOTER"
+"""The branding line in a posted clip's bottom bar (ADR-0078); unset = none."""
+
 POSTS_PER_RUN_VAR = "OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN"
 """How many approved clips start posting per invocation (unset = all) — pacing a schedule."""
 
@@ -477,9 +480,17 @@ def build_posting(environ: Mapping[str, str]) -> Posting:
         raise CompositionError(f"{POSTS_PER_RUN_VAR} must be a whole number") from None
     if limit is not None and limit < 1:
         raise CompositionError(f"{POSTS_PER_RUN_VAR} must be at least 1")
+    renderer = build_clip_renderer(environ)
+    # Only a canvas has bars to frame into (ADR-0078 §1).
+    finisher = (
+        renderer if isinstance(renderer, FfmpegClipRenderer) and renderer.has_canvas else None
+    )
+    footer = environ.get(CLIP_FOOTER_VAR, "").strip() or None
     return Posting(
         publisher=UploadPostPublisher(settings),
         platforms=settings.platforms,
+        finisher=finisher,
+        footer=footer,
         max_new_per_invocation=limit,
     )
 

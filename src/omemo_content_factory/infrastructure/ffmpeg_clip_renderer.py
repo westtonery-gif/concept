@@ -21,6 +21,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from omemo_content_factory.adapters.clip_renderer import (
     Caption,
     ClipRendererError,
     ClipRenderRequest,
+    FinishRequest,
     RenderedClip,
 )
 
@@ -85,6 +87,11 @@ class FfmpegClipRenderer:
         self._crf = crf
         self._preset = preset
 
+    @property
+    def has_canvas(self) -> bool:
+        """Whether clips get bars — the only place a headline and footer can go (ADR-0078)."""
+        return self._canvas is not None
+
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
         """Write the clip with its captions burnt in; return what ffprobe says it actually is."""
         source = Path(request.located.path)
@@ -134,6 +141,52 @@ class FfmpegClipRenderer:
                     str(destination),
                 ],
                 what="cut the clip",
+            )
+        if not destination.is_file():
+            raise ClipRendererError(f"ffmpeg reported success but wrote no file: {destination}")
+        return self._measure(destination)
+
+    def finish(self, request: FinishRequest, /) -> RenderedClip:
+        """Burn the headline into the top bar and the footer into the bottom one (ADR-0078)."""
+        if self._canvas is None:
+            raise ClipRendererError("a clip without a canvas has no bars to frame")
+        source = Path(request.source_path)
+        if not source.is_file():
+            raise ClipRendererError(f"the clip to frame is missing: {request.source_path}")
+        destination = Path(request.destination)
+        width, height = self._canvas
+        with tempfile.TemporaryDirectory() as workspace:
+            script = Path(workspace) / "frame.ass"
+            script.write_text(
+                _frame_ass(
+                    request.headline,
+                    request.footer,
+                    width=width,
+                    height=height,
+                    font=self._caption_font,
+                ),
+                encoding="utf-8",
+            )
+            self._run(
+                [
+                    self._ffmpeg,
+                    "-nostdin",
+                    "-y",
+                    "-i",
+                    str(source),
+                    "-vf",
+                    f"subtitles=filename={_filter_path(script)}",
+                    "-c:v",
+                    self._video_codec,
+                    "-crf",
+                    str(self._crf),
+                    "-preset",
+                    self._preset,
+                    "-c:a",
+                    "copy",
+                    str(destination),
+                ],
+                what="frame the clip",
             )
         if not destination.is_file():
             raise ClipRendererError(f"ffmpeg reported success but wrote no file: {destination}")
@@ -228,6 +281,60 @@ def _ass(captions: Sequence[Caption], *, font: str, size: int) -> str:
         for caption in captions
     ]
     return header + "".join(lines)
+
+
+def _frame_ass(headline: str, footer: str | None, *, width: int, height: int, font: str) -> str:
+    """One ASS script on the canvas: the headline centred in the top bar, the footer in the bottom.
+
+    The bars are what the 16:9 picture leaves of the canvas; sizes are fractions of the canvas
+    width so the layout holds at 1080 and at 2160 wide.
+    """
+    bar = (height - width * 9 // 16) // 2
+    head_size = width * 7 // 100
+    foot_size = width * 4 // 100
+    margin = width // 20
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "WrapStyle: 0\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Head,{font},{head_size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
+        f"-1,0,0,0,100,100,0,0,1,0,0,5,{margin},{margin},0,1\n"
+        f"Style: Foot,{font},{foot_size},&H00B0B0B0,&H00B0B0B0,&H00000000,&H00000000,"
+        f"0,0,0,0,100,100,0,0,1,0,0,5,{margin},{margin},0,1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    whole = "0:00:00.00,9:59:59.99"
+    lines = [
+        f"Dialogue: 0,{whole},Head,,0,0,0,,{{\\pos({width // 2},{bar // 2})}}"
+        f"{_ass_text(_drawable(headline))}\n"
+    ]
+    if footer is not None:
+        lines.append(
+            f"Dialogue: 0,{whole},Foot,,0,0,0,,{{\\pos({width // 2},{height - bar // 2})}}"
+            f"{_ass_text(_drawable(footer))}\n"
+        )
+    return header + "".join(lines)
+
+
+def _drawable(text: str) -> str:
+    """Text a plain font can draw: emoji, pictographs and their modifiers dropped (ADR-0078 §3)."""
+    kept = "".join(
+        char
+        for char in text
+        if (ord(char) <= 0xFFFF and unicodedata.category(char) not in ("So", "Cs", "Mn", "Cf"))
+        or char.isalnum()
+    )
+    return " ".join(kept.split())
 
 
 def _ass_time(milliseconds: int) -> str:

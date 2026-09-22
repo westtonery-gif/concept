@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from omemo_content_factory.adapters.clip_renderer import FinishRequest, RenderedClip
 from omemo_content_factory.adapters.episode_board import ClipMode, IncomingEpisode
 from omemo_content_factory.adapters.episode_source import LocatedEpisode
 from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
@@ -728,6 +729,39 @@ def test_crn_15_pacing_posts_one_clip_per_invocation_in_clip_order(factory: _Fac
     third = paced().invoke(EPISODE)
     assert third.status is RunStatus.COMPLETED
     assert len(publisher.submissions) == 3
+
+
+def test_crn_15_the_posted_file_is_framed_with_the_approved_title(factory: _Factory) -> None:
+    """ADR-0078: finished right before submit, from the approved text; that file is posted."""
+
+    class _Finisher:
+        def __init__(self) -> None:
+            self.requests: list[FinishRequest] = []
+
+        def finish(self, request: FinishRequest, /) -> RenderedClip:
+            self.requests.append(request)
+            return RenderedClip(
+                path=request.destination,
+                duration_ms=1_000,
+                width=2160,
+                height=3840,
+                container="mp4",
+            )
+
+    publisher = InMemoryClipPublisher()
+    finisher = _Finisher()
+    production = _posting_production(factory, publisher)
+    production._posting = Posting(
+        publisher=publisher, platforms=("youtube",), finisher=finisher, footer="@concept"
+    )
+    production.invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    production.invoke(EPISODE)
+    assert len(finisher.requests) == 3
+    first = finisher.requests[0]
+    assert first.headline.startswith("Заголовок") and first.footer == "@concept"
+    assert first.destination == "episode-1-01-post.mp4"
+    assert publisher.published()[0].video_path == "episode-1-01-post.mp4"
 
 
 @pytest.mark.parametrize("dies_after", range(1, 12))

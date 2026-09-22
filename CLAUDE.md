@@ -1748,6 +1748,17 @@ process at the time, not a pattern to keep copying.)
     month. Seen live: right after a submit, upload-post's status says `not_found` for a moment —
     exactly the window ADR-0073 §3's `Idempotency-Key` covers.
 
+35. **The author's framing in the bars — done (ADR-0078, 2026-09-22).** The maintainer asked for
+    mirroring, semi-transparent stripes, zoom/crop, music and sound changes; **declined** — that set
+    is Content-ID / duplicate-detection circumvention, and the platforms say it does not count as
+    original. Offered instead, and chosen: a headline + branding. `ClipFinisher.finish` (additive
+    port; `FfmpegClipRenderer` implements it) burns the **approved** post title into the top bar
+    and `OMEMO_CLIP_FOOTER` into the bottom one, right before `submit`, writing `<clip>-post.mp4`,
+    which is what is posted; emoji/pictographs are dropped from burnt text (Arial has none). FCR-10,
+    CRN-15. **Open:** the footer text (unset = none) — the maintainer's; and the legitimate
+    alternatives still on the table: Content ID whitelisting by the rights holder, commentary /
+    reaction layers, themed compilations.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions

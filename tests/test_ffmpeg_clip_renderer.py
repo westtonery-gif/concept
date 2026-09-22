@@ -20,13 +20,17 @@ from omemo_content_factory.adapters.clip_renderer import (
     ClipRenderer,
     ClipRendererError,
     ClipRenderRequest,
+    FinishRequest,
 )
 from omemo_content_factory.adapters.episode_source import (
     EpisodeSource,
     EpisodeSourceError,
     LocatedEpisode,
 )
-from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import FfmpegClipRenderer
+from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import (
+    FfmpegClipRenderer,
+    _drawable,
+)
 from omemo_content_factory.infrastructure.file_system_episode_source import (
     EPISODE_ROOT_VAR,
     FileSystemEpisodeSource,
@@ -278,6 +282,64 @@ def test_fcr_09_a_canvas_needs_two_positive_even_sides() -> None:
     for bad in ((0, 1920), (1081, 1920), (1080,)):
         with pytest.raises(ValueError, match="canvas"):
             FfmpegClipRenderer(canvas=bad)  # type: ignore[arg-type]
+
+
+@needs_libass
+def test_fcr_10_the_headline_and_footer_go_into_the_bars(tmp_path: Path) -> None:
+    """ADR-0078: text in the top and bottom bars, the picture band untouched by it."""
+    black = _black_episode(tmp_path)
+    renderer = FfmpegClipRenderer(canvas=(360, 640))
+    clip = renderer.render(_request(black, tmp_path / "clip.mp4", start_ms=0, end_ms=2_000))
+    framed = renderer.finish(
+        FinishRequest(
+            source_path=clip.path,
+            headline="Рик и Морти 😂 в полях",
+            footer="@concept",
+            destination=str(tmp_path / "clip-post.mp4"),
+        )
+    )
+    assert (framed.width, framed.height) == (360, 640)
+    frame = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0.5",
+            "-i",
+            framed.path,
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    rows = [frame[row * 360 : (row + 1) * 360] for row in range(640)]
+    lit = [row for row in range(640) if any(value > 100 for value in rows[row])]
+    bar = (640 - 360 * 9 // 16) // 2
+    assert any(row < bar for row in lit), "the headline is in the top bar"
+    assert any(row > 640 - bar for row in lit), "the footer is in the bottom bar"
+    assert not any(bar + 5 < row < 640 - bar - 5 for row in lit), "the picture band is left alone"
+
+
+def test_fcr_10_a_render_without_a_canvas_has_no_bars_to_frame(tmp_path: Path) -> None:
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"0")
+    with pytest.raises(ClipRendererError, match="canvas"):
+        FfmpegClipRenderer().finish(
+            FinishRequest(source_path=str(source), headline="x", footer=None, destination="out.mp4")
+        )
+
+
+def test_fcr_10_emoji_are_dropped_from_burnt_text() -> None:
+    assert _drawable("Рик сделал пса умным 🐶 ❤️ ok") == "Рик сделал пса умным ok"
 
 
 def test_fcr_08_an_ffmpeg_without_libass_is_refused_by_name(

@@ -101,3 +101,32 @@ class ClipRenderer(Protocol):
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
         """Write the clip and return its path and measurements."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class FinishRequest:
+    """The author's framing for a rendered clip: a headline above it, a footer below (ADR-0078)."""
+
+    source_path: str
+    headline: str
+    footer: str | None
+    destination: str
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("source_path", self.source_path),
+            ("headline", self.headline),
+            ("destination", self.destination),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"a finish request needs a non-blank {name}")
+        if self.footer is not None and not self.footer.strip():
+            raise ValueError("a footer must not be blank when given")
+
+
+class ClipFinisher(Protocol):
+    """Adds the author's framing to a rendered clip, into the bars of its canvas (ADR-0078)."""
+
+    def finish(self, request: FinishRequest, /) -> RenderedClip:
+        """Write the framed clip to ``request.destination`` and return what it actually is."""
+        ...

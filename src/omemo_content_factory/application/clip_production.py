@@ -33,9 +33,11 @@ from omemo_content_factory.adapters.clip_publisher import (
     PublishStatus,
 )
 from omemo_content_factory.adapters.clip_renderer import (
+    ClipFinisher,
     ClipRenderer,
     ClipRendererError,
     ClipRenderRequest,
+    FinishRequest,
 )
 from omemo_content_factory.adapters.episode_board import EpisodeBoard, IncomingEpisode
 from omemo_content_factory.adapters.episode_source import (
@@ -169,6 +171,9 @@ class Posting:
 
     publisher: ClipPublisher
     platforms: tuple[str, ...]
+    finisher: ClipFinisher | None = None
+    """Frames the clip with the approved title and ``footer`` just before posting (ADR-0078)."""
+    footer: str | None = None
     max_new_per_invocation: int | None = None
     """At most this many clips start posting per invocation, in clip order; ``None`` = all.
 
@@ -645,7 +650,7 @@ class ClipProduction:
             task_id, request_id, platforms = job
             try:
                 status = self._look_then_submit(artifact, request_id, post, platforms)
-            except ClipPublisherError as exc:
+            except (ClipPublisherError, ClipRendererError) as exc:
                 outcome.posting_error = f"{type(exc).__name__}: {exc}"
                 return
             if status.state in (PublishState.PENDING, PublishState.NOT_FOUND):
@@ -697,10 +702,22 @@ class ClipProduction:
         status = publisher.status(request_id)
         if status.state is not PublishState.NOT_FOUND:
             return status
+        video_path = str(json.loads(artifact.content)["path"])
+        if self._posting.finisher is not None:
+            # The approved title framed into the bars — local and repeatable (ADR-0078 §2).
+            stem, dot, suffix = video_path.rpartition(".")
+            video_path = self._posting.finisher.finish(
+                FinishRequest(
+                    source_path=video_path,
+                    headline=post.title,
+                    footer=self._posting.footer,
+                    destination=f"{stem}-post{dot}{suffix}" if dot else f"{video_path}-post",
+                )
+            ).path
         publisher.submit(
             PublishRequest(
                 request_id=request_id,
-                video_path=str(json.loads(artifact.content)["path"]),
+                video_path=video_path,
                 post=post,
                 platforms=platforms,
             )
