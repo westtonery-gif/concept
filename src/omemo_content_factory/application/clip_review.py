@@ -15,21 +15,63 @@ Nothing here mutates the store. A caller publishes, applies and then saves, exac
 
 from __future__ import annotations
 
-from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewPackage
+import json
+
+from omemo_content_factory.adapters.review_desk import PostDraft, ReviewDesk, ReviewPackage
 from omemo_content_factory.application.review_decision import FetchedDecision
 from omemo_content_factory.application.review_publication import PublishedReview, latest_qa
 from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import HumanReviewView, ReviewStatus
+from omemo_content_factory.domain.output import OutputStatus
 from omemo_content_factory.domain.run import Actor, Run
+from omemo_content_factory.domain.task import TaskStatus
 
 __all__ = [
+    "POST_SCHEMA_REF",
+    "POST_STEP_REF",
     "clip_review_package",
+    "latest_post",
     "open_clip_reviews",
     "pending_clip_reviews",
+    "post_task_input",
     "publish_clip_reviews",
     "take_clip_decisions",
 ]
+
+
+POST_STEP_REF = "post-text"
+"""The step of every post text a clip has, the model's draft or the reviewer's edit (ADR-0072)."""
+
+POST_SCHEMA_REF = "clip-post@v1"
+
+
+def post_task_input(artifact_id: str, /, **extra: str) -> str:
+    """The canonical input of a ``post-text`` Task: which clip it is for, plus anything else."""
+    return json.dumps({"artifact_ref": artifact_id, **extra}, ensure_ascii=False, sort_keys=True)
+
+
+def latest_post(run: Run, artifact_id: str, /) -> PostDraft | None:
+    """The text a clip would be posted with: its latest valid ``post-text`` Output (§4).
+
+    The reviewer's edit when there is one, the model's draft otherwise, ``None`` when neither
+    exists or the latest cannot be posted.
+    """
+    latest: PostDraft | None = None
+    for task in run.tasks:
+        if task.workflow_step_ref != POST_STEP_REF or task.status is not TaskStatus.SUCCEEDED:
+            continue
+        output = task.output
+        if output is None or output.status is not OutputStatus.VALID:
+            continue
+        try:
+            if json.loads(task.task_input).get("artifact_ref") != artifact_id:
+                continue
+            fields = json.loads(output.payload)
+            latest = PostDraft(title=fields["title"], description=fields["description"])
+        except (ValueError, KeyError, TypeError, AttributeError):
+            latest = None
+    return latest
 
 
 def pending_clip_reviews(run: Run) -> tuple[HumanReviewView, ...]:
@@ -71,6 +113,7 @@ def clip_review_package(run: Run, review: HumanReviewView) -> ReviewPackage:
         candidate=candidate,
         brief=run.content_brief_ref,
         qa_flags=evaluation.flags if evaluation is not None else (),
+        post=latest_post(run, candidate.artifact_id),
     )
 
 
@@ -117,6 +160,7 @@ def take_clip_decisions(run: Run, desk: ReviewDesk) -> tuple[FetchedDecision, ..
                 decision=decision.decision,
                 reason=decision.reason,
                 applied=applied,
+                post=decision.post,
             )
         )
     return tuple(taken)

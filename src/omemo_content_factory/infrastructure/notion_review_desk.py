@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from omemo_content_factory.adapters.review_desk import (
+    PostDraft,
     ReviewDecision,
     ReviewDeskError,
     ReviewPackage,
@@ -52,6 +53,9 @@ REVIEW_ID_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_REVIEW_ID_PROPERTY"
 DECISION_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_DECISION_PROPERTY"
 REASON_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_REASON_PROPERTY"
 FINGERPRINT_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_FINGERPRINT_PROPERTY"
+POST_TITLE_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_POST_TITLE_PROPERTY"
+POST_DESCRIPTION_PROPERTY_VAR = "OMEMO_REVIEW_NOTION_POST_DESCRIPTION_PROPERTY"
+"""Optional, together or not at all: where the post text is shown and edited (ADR-0072 §3)."""
 
 _DECISION_TYPES = ("select", "status")
 """The Notion API cannot create ``status`` properties, only ``select`` — both are read the same."""
@@ -84,6 +88,13 @@ class NotionReviewSettings:
     decision_property: str
     reason_property: str
     fingerprint_property: str
+    post_title_property: str | None = None
+    post_description_property: str | None = None
+
+    @property
+    def edits_posts(self) -> bool:
+        """Whether this database has the two post-text properties (ADR-0072 §3)."""
+        return self.post_title_property is not None
 
     def __post_init__(self) -> None:
         for name in (
@@ -98,6 +109,11 @@ class NotionReviewSettings:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"Notion review settings need a non-blank {name}")
+        post = (self.post_title_property, self.post_description_property)
+        if (post[0] is None) != (post[1] is None):
+            raise ValueError("the post title and description properties are set together")
+        if any(value is not None and not value.strip() for value in post):
+            raise ValueError("a post property name must not be blank")
 
 
 def notion_review_settings_from_env(environ: Mapping[str, str]) -> NotionReviewSettings:
@@ -115,6 +131,11 @@ def notion_review_settings_from_env(environ: Mapping[str, str]) -> NotionReviewS
     missing = [name for name in names if not values[name]]
     if missing:
         raise ReviewDeskError("the Notion review desk is not configured; set " + ", ".join(missing))
+    post_title = environ.get(POST_TITLE_PROPERTY_VAR, "").strip()
+    post_description = environ.get(POST_DESCRIPTION_PROPERTY_VAR, "").strip()
+    if bool(post_title) != bool(post_description):
+        absent = POST_DESCRIPTION_PROPERTY_VAR if post_title else POST_TITLE_PROPERTY_VAR
+        raise ReviewDeskError(f"the post text properties are set together; set {absent}")
     return NotionReviewSettings(
         token=values[TOKEN_VAR],
         database_id=values[DATABASE_ID_VAR],
@@ -123,6 +144,8 @@ def notion_review_settings_from_env(environ: Mapping[str, str]) -> NotionReviewS
         decision_property=values[DECISION_PROPERTY_VAR],
         reason_property=values[REASON_PROPERTY_VAR],
         fingerprint_property=values[FINGERPRINT_PROPERTY_VAR],
+        post_title_property=post_title or None,
+        post_description_property=post_description or None,
     )
 
 
@@ -181,7 +204,19 @@ class NotionReviewDesk:
                 f"the decision property holds {name!r}, which is none of the three options"
             )
         reason = self._text_property(page, self._settings.reason_property)
-        return ReviewDecision(decision=decision, reason=reason or None)
+        return ReviewDecision(decision=decision, reason=reason or None, post=self._post(page))
+
+    def _post(self, page: dict[str, Any]) -> PostDraft | None:
+        """The post text as the reviewer left it; ``None`` if absent or not postable (§4)."""
+        settings = self._settings
+        if settings.post_title_property is None or settings.post_description_property is None:
+            return None
+        title = self._text_property(page, settings.post_title_property)
+        description = self._text_property(page, settings.post_description_property)
+        try:
+            return PostDraft(title=title, description=description)
+        except ValueError:
+            return None
 
     # --- reading ------------------------------------------------------------------------
 
@@ -246,6 +281,7 @@ class NotionReviewDesk:
                 settings.title_property: _title(_page_title(package)),
                 settings.review_id_property: _rich_text(package.review_id),
                 settings.fingerprint_property: _rich_text(fingerprint),
+                **self._post_properties(package),
             },
             "children": blocks[:_MAX_CHILDREN],
         }
@@ -262,6 +298,19 @@ class NotionReviewDesk:
                 body={"children": blocks[start : start + _MAX_CHILDREN]},
             )
         return page
+
+    def _post_properties(self, package: ReviewPackage) -> dict[str, Any]:
+        settings = self._settings
+        if (
+            package.post is None
+            or settings.post_title_property is None
+            or settings.post_description_property is None
+        ):
+            return {}
+        return {
+            settings.post_title_property: _rich_text(package.post.title),
+            settings.post_description_property: _rich_text(package.post.description),
+        }
 
     # --- transport ----------------------------------------------------------------------
 
@@ -321,6 +370,16 @@ def _blocks(package: ReviewPackage) -> list[dict[str, Any]]:
         blocks.extend(_bullet(flag) for flag in package.qa_flags)
     else:
         blocks.append(_paragraph("Нет."))
+    if package.post is not None:
+        blocks.append(_heading("Текст поста"))
+        blocks.append(
+            _paragraph(
+                "Черновик модели. Исправьте его в свойствах страницы до того, как выставить "
+                "решение: опубликован будет текст из свойств на момент решения."
+            )
+        )
+        blocks.append(_paragraph(package.post.title))
+        blocks.extend(_paragraphs(package.post.description))
     blocks.append(_heading("Материал"))
     blocks.extend(_paragraphs(candidate.content))
     return blocks
@@ -378,6 +437,12 @@ def _fingerprint(package: ReviewPackage) -> str:
             "content": candidate.content,
             "brief": package.brief,
             "qa_flags": list(package.qa_flags),
+            # Only when present, so a page published before ADR-0072 still matches (§3).
+            **(
+                {"post": [package.post.title, package.post.description]}
+                if package.post is not None
+                else {}
+            ),
         },
         ensure_ascii=False,
         sort_keys=True,

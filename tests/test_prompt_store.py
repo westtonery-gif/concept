@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import omemo_content_factory.composition as composition
+from omemo_content_factory.agents import clip_post_writer as clip_post
 from omemo_content_factory.agents import clip_qa_agent as clip_qa
 from omemo_content_factory.agents import content_researcher as rin
 from omemo_content_factory.agents import qa_agent as qa
@@ -91,6 +92,7 @@ def test_pst_01_bundled_catalogue_preserves_migrated_prompts_exactly() -> None:
         leo.PROMPT_REF,
         qa.PROMPT_REF,
         clip_qa.PROMPT_REF,  # the clipping department's QA role (ADR-0056)
+        clip_post.PROMPT_REF,  # the clip's post text (ADR-0072)
     }
     assert prompts[rin.PROMPT_REF] == Prompt(
         prompt_id="content-researcher",

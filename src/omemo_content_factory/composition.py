@@ -42,9 +42,14 @@ from omemo_content_factory.adapters.episode_source import EpisodeSource
 from omemo_content_factory.adapters.footage_index import FootageIndex
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
+from omemo_content_factory.agents import clip_post_writer
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
-from omemo_content_factory.application.clip_production import ClipProduction, ClipSettings
+from omemo_content_factory.application.clip_production import (
+    ClipProduction,
+    ClipSettings,
+    PostWriting,
+)
 from omemo_content_factory.application.content_director import ContentDirector
 from omemo_content_factory.application.qa_evaluation import (
     ArtifactEvaluator,
@@ -415,6 +420,7 @@ def build_clip_production(
     *,
     evaluator: ContextualArtifactEvaluator,
     desk: ReviewDesk | None = None,
+    post_writer: PostWriting | None = None,
 ) -> ClipProduction:
     """Assemble the clipping department's production path (ADR-0059).
 
@@ -432,6 +438,23 @@ def build_clip_production(
         evaluator,
         settings=build_clip_settings(environ),
         desk=desk,
+        post_writer=post_writer,
+    )
+
+
+def build_post_writing(client: LLMClient, *, prompts: PromptCatalogueInput = None) -> PostWriting:
+    """Compile ``clip_post_writer@v1`` into its executor and Schema binding (ADR-0072 §1).
+
+    The same catalogue lookups as every producer (``build_executor_map`` / ``build_schema_map``);
+    the client comes from ``client_for_role`` in the caller, which owns the provider decision.
+    """
+    resolved = _resolve_prompts(prompts)
+    agents = clip_post_writer.AGENTS
+    executors = build_executor_map(agents, resolved, client, clip_post_writer.SCHEMAS)
+    bindings = build_schema_map(agents, resolved, clip_post_writer.SCHEMAS)
+    return PostWriting(
+        executor=executors[clip_post_writer.AGENT_REF],
+        schema_binding=bindings[clip_post_writer.AGENT_REF],
     )
 
 

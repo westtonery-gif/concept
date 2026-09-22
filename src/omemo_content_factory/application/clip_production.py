@@ -46,7 +46,11 @@ from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.clip_format import ClipFormatLimits, check_clip_format
 from omemo_content_factory.application.clip_plan import PlannedClip, plan_clips
 from omemo_content_factory.application.clip_review import (
+    POST_SCHEMA_REF,
+    POST_STEP_REF,
+    latest_post,
     open_clip_reviews,
+    post_task_input,
     publish_clip_reviews,
     take_clip_decisions,
 )
@@ -63,6 +67,12 @@ from omemo_content_factory.application.qa_evaluation import (
 )
 from omemo_content_factory.application.review_decision import FetchedDecision
 from omemo_content_factory.application.review_publication import latest_qa
+from omemo_content_factory.application.schema_validation import SchemaBinding
+from omemo_content_factory.application.task_execution import (
+    TaskExecutor,
+    finish_task,
+    start_task,
+)
 from omemo_content_factory.domain.artifact import ArtifactStatus, ArtifactView
 from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
@@ -76,6 +86,7 @@ __all__ = [
     "ClipProductionError",
     "ClipSettings",
     "ClipTally",
+    "PostWriting",
     "run_id_for_episode",
 ]
 
@@ -94,6 +105,10 @@ WORKFLOW_REF = "episode-to-clips@v1"
 STEP_REF = "render-clip"
 AGENT_REF = "clip_renderer@v1"
 """The clip step names no LLM role: rendering is mechanical (ADR-0058 §4)."""
+
+POST_WRITER_REF = "clip_post_writer@v1"
+REVIEWER_REF = "human_reviewer"
+"""The ``agent_ref`` of a post text the reviewer edited on the review page (ADR-0072 §4)."""
 
 INDEX_STEP_REF = "index-footage"
 INDEX_AGENT_REF = "footage_index@v1"
@@ -124,6 +139,14 @@ class ClipSettings:
     pause_tolerance_ms: int
     limits: ClipFormatLimits
     destination_template: str = "{episode_ref}-{index:02d}.mp4"
+
+
+@dataclass(frozen=True, slots=True)
+class PostWriting:
+    """The post-text role, compiled: its executor and the Schema its Output is validated against."""
+
+    executor: TaskExecutor
+    schema_binding: SchemaBinding
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +184,7 @@ class ClipInvocation:
     decision_error: str | None = None
     failure_reason: str | None = None
     tally: ClipTally = ClipTally()
+    post_error: str | None = None
 
 
 @dataclass
@@ -174,6 +198,7 @@ class _Outcome:
     qa_error: str | None = None
     publish_error: str | None = None
     decision_error: str | None = None
+    post_error: str | None = None
 
 
 class ClipProduction:
@@ -190,6 +215,7 @@ class ClipProduction:
         *,
         settings: ClipSettings,
         desk: ReviewDesk | None = None,
+        post_writer: PostWriting | None = None,
     ) -> None:
         self._store = store
         self._board = board
@@ -199,6 +225,7 @@ class ClipProduction:
         self._evaluator = evaluator
         self._settings = settings
         self._desk = desk
+        self._post_writer = post_writer
 
     @property
     def has_desk(self) -> bool:
@@ -260,6 +287,7 @@ class ClipProduction:
             publish_error=outcome.publish_error,
             decision_error=outcome.decision_error,
             tally=_tally(run),
+            post_error=outcome.post_error,
         )
 
     # --- production ---------------------------------------------------------------------
@@ -460,12 +488,15 @@ class ClipProduction:
         """Open, publish and read back a review per clip, then complete when all are decided."""
         if run.status is not RunStatus.WAITING_HUMAN:
             return
+        self._write_posts(run, outcome)
         if self._desk is not None:
             try:
-                outcome.decisions.extend(take_clip_decisions(run, self._desk))
+                taken = take_clip_decisions(run, self._desk)
             except Exception as exc:
                 outcome.decision_error = f"{type(exc).__name__}: {exc}"
             else:
+                outcome.decisions.extend(taken)
+                self._record_edited_posts(run, taken)
                 self._store.save(run)
 
         self._approve(run, outcome)
@@ -479,6 +510,76 @@ class ClipProduction:
             except Exception as exc:
                 outcome.publish_error = f"{type(exc).__name__}: {exc}"
         self._complete(run)
+
+    def _write_posts(self, run: Run, outcome: _Outcome) -> None:
+        """Draft the post text of every QA-passed candidate that has none yet (ADR-0072 §2).
+
+        One ``post-text`` Task per clip, committed before the model call; one left ``RUNNING`` by
+        a crash is finished, not opened again. A failed draft does not hold the review back.
+        """
+        if self._post_writer is None:
+            return
+        for artifact in _candidates(run):
+            evaluation = latest_qa(run, artifact.artifact_id)
+            if evaluation is None or evaluation.status is not EvaluationStatus.PASSED:
+                continue
+            existing = _post_tasks(run, artifact.artifact_id)
+            if any(task.status is not TaskStatus.RUNNING for task in existing):
+                continue
+            if existing:
+                task_id = existing[-1].task_id
+            else:
+                clip = json.loads(artifact.content)
+                task_id = start_task(
+                    run,
+                    workflow_step_ref=POST_STEP_REF,
+                    agent_ref=POST_WRITER_REF,
+                    task_input=post_task_input(
+                        artifact.artifact_id,
+                        transcript=str(clip.get("transcript", "")),
+                        episode_file=_source_ref(run),
+                    ),
+                )
+                self._store.save(run)  # committed before the model call (ADR-0026 §2)
+            try:
+                finish_task(
+                    run,
+                    self._post_writer.executor,
+                    task_id,
+                    schema_binding=self._post_writer.schema_binding,
+                )
+            except Exception as exc:
+                outcome.post_error = f"{type(exc).__name__}: {exc}"
+                return
+            self._store.save(run)
+
+    def _record_edited_posts(self, run: Run, taken: Sequence[FetchedDecision]) -> None:
+        """Record the reviewer's text for each recorded approval that changed it (§4)."""
+        for decision in taken:
+            if not decision.applied or decision.decision is not ReviewStatus.APPROVED:
+                continue
+            if decision.post is None:
+                continue
+            artifact_ref = run.human_review(decision.review_id).artifact_ref
+            if decision.post == latest_post(run, artifact_ref):
+                continue
+            task_id = start_task(
+                run,
+                workflow_step_ref=POST_STEP_REF,
+                agent_ref=REVIEWER_REF,
+                task_input=post_task_input(artifact_ref, review_ref=decision.review_id),
+            )
+            run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)
+            run.record_output(
+                task_id,
+                payload=json.dumps(
+                    {"title": decision.post.title, "description": decision.post.description},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                schema_ref=POST_SCHEMA_REF,
+                by=Actor.CONTENT_DIRECTOR,
+            )
 
     def _approve(self, run: Run, outcome: _Outcome) -> None:
         """Approve every candidate whose review said so and whose latest verdict passed."""
@@ -526,6 +627,29 @@ def _tasks_by_clip(run: Run) -> dict[int, TaskView]:
         if isinstance(index, int):
             recorded[index] = task
     return recorded
+
+
+def _post_tasks(run: Run, artifact_id: str) -> list[TaskView]:
+    """The model-drafted ``post-text`` Tasks of one clip, in opening order."""
+    tasks: list[TaskView] = []
+    for task in run.tasks:
+        if task.workflow_step_ref != POST_STEP_REF or task.agent_ref != POST_WRITER_REF:
+            continue
+        try:
+            if json.loads(task.task_input).get("artifact_ref") == artifact_id:
+                tasks.append(task)
+        except (ValueError, AttributeError):  # pragma: no cover - our own input shape
+            continue
+    return tasks
+
+
+def _source_ref(run: Run) -> str:
+    """The episode's file name, from the index Task's input — the one hint of the series' name."""
+    task = _index_task(run)
+    try:
+        return str(json.loads(task.task_input)["source_ref"]) if task is not None else ""
+    except (ValueError, KeyError, TypeError):  # pragma: no cover - our own input shape
+        return ""
 
 
 def _index_task(run: Run) -> TaskView | None:

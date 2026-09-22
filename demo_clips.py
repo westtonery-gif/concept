@@ -27,13 +27,18 @@ from omemo_content_factory.adapters.episode_board import EpisodeBoardError
 from omemo_content_factory.adapters.episode_source import EpisodeSourceError
 from omemo_content_factory.adapters.footage_index import FootageIndexError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
-from omemo_content_factory.agents import clip_qa_agent
-from omemo_content_factory.application.clip_production import ClipInvocation, ClipProduction
+from omemo_content_factory.agents import clip_post_writer, clip_qa_agent
+from omemo_content_factory.application.clip_production import (
+    ClipInvocation,
+    ClipProduction,
+    PostWriting,
+)
 from omemo_content_factory.application.qa_evaluation import ContextualArtifactEvaluator
 from omemo_content_factory.composition import (
     GOOGLE_REVIEW_DESK_VARS,
     NOTION_REVIEW_DESK_VARS,
     build_clip_production,
+    build_post_writing,
     build_qa_evaluator,
     build_review_desk,
 )
@@ -63,8 +68,20 @@ def _build_evaluator() -> ContextualArtifactEvaluator:
     )
 
 
+def _build_post_writer(environ: Mapping[str, str]) -> PostWriting | None:
+    """The post-text role (ADR-0072), when it has a provider binding; otherwise no drafts."""
+    if not environ.get("OMEMO_PROVIDER__CLIP_POST_WRITER_V1", "").strip():
+        return None
+    return build_post_writing(client_for_role(clip_post_writer.AGENT_REF, environ))
+
+
 def _build(environ: Mapping[str, str]) -> ClipProduction:
-    return build_clip_production(environ, evaluator=_build_evaluator(), desk=_build_desk(environ))
+    return build_clip_production(
+        environ,
+        evaluator=_build_evaluator(),
+        desk=_build_desk(environ),
+        post_writer=_build_post_writer(environ),
+    )
 
 
 def _report(invocation: ClipInvocation) -> None:
@@ -99,6 +116,7 @@ def _report(invocation: ClipInvocation) -> None:
         ("QA", invocation.qa_error),
         ("publication", invocation.publish_error),
         ("decision", invocation.decision_error),
+        ("post text", invocation.post_error),
     ):
         if error:
             safe_print(f"  {label} error (retried next invocation): {error}")

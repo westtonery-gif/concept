@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from omemo_content_factory.adapters.review_desk import ReviewDesk
+from omemo_content_factory.adapters.review_desk import PostDraft, ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.review_publication import (
     latest_qa,
@@ -42,6 +42,8 @@ class FetchedDecision:
     decision: ReviewStatus
     reason: str | None
     applied: bool
+    post: PostDraft | None = None
+    """The post text the reviewer left, when the desk reads one (ADR-0072 §3)."""
 
 
 def apply_review_decision(run: Run, desk: ReviewDesk) -> FetchedDecision | None:

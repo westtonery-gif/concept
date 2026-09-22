@@ -312,6 +312,8 @@ Run меняется только в памяти: сохраняет его и 
 как прежде; отказ площадки печатается, запуск идёт дальше. Ручные `--approve` / `--request-changes` / `--reject` важнее площадки. Приёмка —
 `ADAPTER_ACCEPTANCE.md` §12.
 
+**Текст поста (ADR-0072).** `ReviewPackage.post` и `ReviewDecision.post` — необязательный `PostDraft(title, description)` (оба непустые, заголовок ≤ 100 символов): черновик показывается ревьюеру, решение несёт текст таким, каким его оставили. Google Docs-стол его не читает (`None`). У Notion-стола — два необязательных свойства `OMEMO_REVIEW_NOTION_POST_TITLE_PROPERTY` / `…_POST_DESCRIPTION_PROPERTY` (только парой): `publish` пишет в них черновик, `fetch_decision` читает; непостабельный текст → `None`; отпечаток включает черновик, только если он есть.
+
 **Реализация на Notion (ADR-0060).** `infrastructure/notion_review_desk.py` `NotionReviewDesk` —
 вторая реализация порта, рядом с `GoogleDocsReviewDesk`, ядро не меняется. Ревью — страница
 **отдельной** базы; пакет пишется в блоки страницы, ответ ревьюера читается из **типизированных

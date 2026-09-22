@@ -95,3 +95,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0069](0069-scene-mode-never-cuts-a-line-and-scenes-need-meaning.md) | `SCENE` never cuts inside a spoken line — and real scenes need meaning, not pixels | Accepted |
 | [0070](0070-clip-qa-blocks-only-what-must-not-ship.md) | Clip QA blocks only what must not ship — boundary remarks become hints | Accepted |
 | [0071](0071-captions-are-burnt-at-render-time.md) | Captions are burnt in at render time, so the reviewer approves what ships | Accepted |
+| [0072](0072-a-post-text-drafted-by-a-model-and-approved-with-the-clip.md) | A post text drafted by a model, shown on the review page, approved with the clip | Accepted |

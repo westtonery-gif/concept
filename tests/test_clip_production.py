@@ -8,6 +8,8 @@ restart builds a fresh ``ClipProduction`` over the same file, the way a new proc
 
 from __future__ import annotations
 
+import contextlib
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,8 +19,14 @@ import pytest
 from omemo_content_factory.adapters.episode_board import ClipMode, IncomingEpisode
 from omemo_content_factory.adapters.episode_source import LocatedEpisode
 from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
-from omemo_content_factory.adapters.review_desk import ReviewDecision, ReviewDeskError
+from omemo_content_factory.adapters.review_desk import (
+    PostDraft,
+    ReviewDecision,
+    ReviewDeskError,
+    ReviewPackage,
+)
 from omemo_content_factory.adapters.run_store import RunStore
+from omemo_content_factory.agents import clip_post_writer
 from omemo_content_factory.application.clip_format import ClipFormatLimits
 from omemo_content_factory.application.clip_production import (
     CLIP_KIND,
@@ -26,13 +34,17 @@ from omemo_content_factory.application.clip_production import (
     ClipProduction,
     ClipSettings,
     ClipTally,
+    PostWriting,
     run_id_for_episode,
 )
+from omemo_content_factory.application.clip_review import latest_post
 from omemo_content_factory.application.footage_record import (
     episode_transcript,
     footage_from_payload,
 )
 from omemo_content_factory.application.qa_evaluation import EvaluationResult
+from omemo_content_factory.application.schema_validation import SchemaBinding
+from omemo_content_factory.application.task_execution import ExecutionResult
 from omemo_content_factory.domain.artifact import ArtifactStatus
 from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
@@ -478,6 +490,132 @@ def test_crn_12_a_run_with_no_recorded_index_gets_no_verdict(factory: _Factory) 
     assert stored.evaluations == ()
     assert stored.status is RunStatus.WAITING_QA
     assert factory.evaluator.calls == []
+
+
+# --- CRN-13 / CRN-14: the post text (ADR-0072) ------------------------------------------
+
+
+class _PostWriter:
+    """A post-text executor whose answer is scripted; counts its calls."""
+
+    def __init__(self, *, fails: bool = False) -> None:
+        self.inputs: list[str] = []
+        self.fails = fails
+
+    def execute(self, task_input: str) -> ExecutionResult:
+        self.inputs.append(task_input)
+        if self.fails:
+            return ExecutionResult(succeeded=False, failure_reason="LLM execution failed: down")
+        fields = {"title": f"Заголовок {len(self.inputs)}", "description": "Описание #shorts"}
+        return ExecutionResult(
+            succeeded=True,
+            output=json.dumps(fields, ensure_ascii=False, sort_keys=True),
+            schema_ref=clip_post_writer.SCHEMA_REF,
+            payload_fields=fields,
+        )
+
+
+def _published(factory: _Factory) -> list[ReviewPackage]:
+    run = factory.stored()
+    assert run is not None
+    packages = [factory.desk.published(view.review_id) for view in run.human_reviews]
+    return [package for package in packages if package is not None]
+
+
+def _with_posts(factory: _Factory, writer: _PostWriter) -> ClipProduction:
+    return ClipProduction(
+        SqliteRunStore(factory.path),
+        factory.board,
+        factory.source,
+        factory.index,
+        factory.renderer,
+        factory.evaluator,
+        settings=SETTINGS,
+        desk=factory.desk,
+        post_writer=PostWriting(
+            executor=writer,
+            schema_binding=SchemaBinding(
+                schema_ref=clip_post_writer.SCHEMA_REF, schema=clip_post_writer.CLIP_POST_SCHEMA
+            ),
+        ),
+    )
+
+
+def test_crn_13_a_passed_clip_gets_a_drafted_text_and_the_reviewer_sees_it(
+    factory: _Factory,
+) -> None:
+    factory.evaluator = _Evaluator({2: EvaluationStatus.FLAGGED})
+    writer = _PostWriter()
+    _with_posts(factory, writer).invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert len(writer.inputs) == 2, "a clip that did not pass QA is never posted, so no text"
+    assert all(json.loads(i)["episode_file"] == SOURCE for i in writer.inputs)
+    published = _published(factory)
+    assert len(published) == 2
+    assert all(package.post is not None for package in published)
+    for artifact in run.artifacts:
+        if latest_post(run, artifact.artifact_id) is not None:
+            assert any(p.candidate.artifact_id == artifact.artifact_id for p in published)
+
+
+def test_crn_13_a_failed_draft_does_not_hold_the_review_back(factory: _Factory) -> None:
+    writer = _PostWriter(fails=True)
+    invocation = _with_posts(factory, writer).invoke(EPISODE)
+    assert invocation.post_error is None, "a managed failure is a failed Task, not an error"
+    assert len(_published(factory)) == 3
+    assert all(package.post is None for package in _published(factory))
+    _with_posts(factory, writer).invoke(EPISODE)
+    assert len(writer.inputs) == 3, "a failed draft is not retried on every invocation"
+
+
+def test_crn_14_the_reviewers_edit_is_recorded_as_the_text_to_post(factory: _Factory) -> None:
+    writer = _PostWriter()
+    _with_posts(factory, writer).invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    reviews = [v for v in run.human_reviews if v.status is ReviewStatus.PENDING]
+    edited = PostDraft(title="Мой заголовок", description="Моё описание")
+    factory.desk.decide(
+        reviews[0].review_id, ReviewDecision(decision=ReviewStatus.APPROVED, post=edited)
+    )
+    unchanged = latest_post(run, reviews[1].artifact_ref)
+    factory.desk.decide(
+        reviews[1].review_id, ReviewDecision(decision=ReviewStatus.APPROVED, post=unchanged)
+    )
+    _with_posts(factory, writer).invoke(EPISODE)
+
+    run = factory.stored()
+    assert run is not None
+    assert latest_post(run, reviews[0].artifact_ref) == edited
+    assert latest_post(run, reviews[1].artifact_ref) == unchanged
+    by_reviewer = [t for t in run.tasks if t.agent_ref == "human_reviewer"]
+    assert len(by_reviewer) == 1, "an unchanged text is not recorded twice"
+
+
+@pytest.mark.parametrize("dies_after", range(1, 24))
+def test_crn_13_a_crash_around_a_draft_never_drafts_a_clip_twice(
+    factory: _Factory, dies_after: int
+) -> None:
+    """ADR-0026 §2 for the post step: at most one model-drafted text per clip, ever."""
+    writer = _PostWriter()
+
+    def production(dies: int | None = None) -> ClipProduction:
+        store: RunStore = SqliteRunStore(factory.path)
+        if dies is not None:
+            store = _DyingStore(store, dies)
+        built = _with_posts(factory, writer)
+        built._store = store  # the same wiring, a store that dies
+        return built
+
+    with contextlib.suppress(_CrashError):
+        production(dies_after).invoke(EPISODE)
+    production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    drafted = [t for t in run.tasks if t.agent_ref == "clip_post_writer@v1"]
+    assert len(drafted) == 3, "one draft Task per passed clip, never a second"
+    assert all(latest_post(run, a.artifact_id) is not None for a in run.artifacts)
 
 
 # --- the desk is optional and its outages never change the Run ---------------------------

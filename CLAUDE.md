@@ -1670,7 +1670,7 @@ process at the time, not a pattern to keep copying.)
     watching the clean cut), style (large, bottom-centre, readable on a letterboxed 16:9 clip in a
     9:16 feed), and whether the burnt file is a new Artifact or a derived file of the approved one.
 
-30. **Post text written by a model, approved with the clip — decided 2026-09-22.** A small LLM role
+30. ~~**Post text written by a model, approved with the clip**~~ — done (ADR-0072, 2026-09-22): `clip_post_writer@v1` (Prompt `clip-post-writer` v1, Schema `clip-post@v1` = `title` + `description`, hashtags in the description) drafts a `post-text` Task for every QA-passed clip before its review is published; `ReviewPackage.post` / `ReviewDecision.post` (`PostDraft`, title ≤ 100 = YouTube's limit) carry it to the Notion page's new rich_text properties «Заголовок поста» / «Описание поста» (created via the API; `OMEMO_REVIEW_NOTION_POST_*_PROPERTY` in `.env`) and back; an approval with an edited text records it as a `post-text` Task by `human_reviewer`. **Task 31 posts `latest_post(run, artifact_id)`.** `.env` got a `CLIP_POST_WRITER_V1` binding copied from clip QA's. Live check on clip 1: «Рик хотел взорвать человечество ради Морти 💣» + description + 6 hashtags, $0.005. Original brief: A small LLM role
     drafts the description + hashtags from the clip transcript **before review**; it appears on
     the Notion review page and is approved together with the clip (the maintainer can edit it
     there). ADR-0058 dropped the draft caption because nothing read it; auto-posting (task 31) is
