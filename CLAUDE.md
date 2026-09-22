@@ -1727,6 +1727,18 @@ process at the time, not a pattern to keep copying.)
     request and before any review was decided — **outside the Run's trace**: the Run still reflects
     the first render, whose QA verdicts and post texts are unchanged and still apply.
 
+34. **First real post, and paced posting (2026-09-22).** The maintainer approved 10 of episode 2's
+    clips and asked for one every 2 hours, in order. `Posting.max_new_per_invocation`
+    (`OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN="1"` in `.env`) starts at most N clips per invocation in
+    clip order and always collects uploads in flight. The first invocation recorded all 10
+    approvals and submitted clip 1: **live on YouTube, unlisted —
+    https://www.youtube.com/watch?v=ywunac3EcRk** (upload-post status `completed`); the Run records
+    it as `PUBLISHED` on the next invocation. `scripts/run_clips.sh <card>` (loads `.env`, Homebrew
+    on `PATH`, logs to `.omemo/clips-<card>.log`) + `scripts/com.concept.clip-posting.plist`
+    (launchd, every 7200 s, not at load) — **the session was not allowed to install a persistent
+    agent; the maintainer installs it** (`cp` to `~/Library/LaunchAgents/` + `launchctl bootstrap`).
+    Free upload-post plan: 10 uploads/month, exactly these 10.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
