@@ -62,16 +62,23 @@ def test_cqa_02_the_two_qa_roles_are_distinct_but_answer_the_same_shape() -> Non
     assert clip_qa_agent.PROMPT_REF != qa_agent.PROMPT_REF
 
 
-def test_cqa_03_the_prompt_carries_exactly_the_three_criteria() -> None:
+def test_cqa_03_only_two_things_block_a_clip() -> None:
+    """ADR-0070: a spoiler and a clip with no content block; boundary remarks do not."""
     system = load_prompt_catalogue()[clip_qa_agent.PROMPT_REF].system
     numbered = [
         line.strip() for line in system.splitlines() if line.strip()[:2] in {"1)", "2)", "3)", "4)"}
     ]
-    assert len(numbered) == 3, (
-        "ADR-0058 §3 withdrew the fourth criterion; a stale one must not linger"
-    )
-    assert numbered[0].startswith("1)")
-    assert numbered[2].startswith("3)")
+    assert len(numbered) == 2, "only the spoiler and the no-content criteria gate a clip"
+    assert "спойлер" in numbered[0]
+    assert "заставк" in numbered[1] and "титр" in numbered[1]
+
+
+def test_cqa_03_boundary_remarks_are_hints_under_a_passed_verdict() -> None:
+    """They reach the reviewer as flags on a `passed` verdict, which ADR-0034 allows."""
+    system = load_prompt_catalogue()[clip_qa_agent.PROMPT_REF].system
+    assert "Подсказка:" in system
+    assert "Ставь passed" in system
+    assert "Если сомневаешься — не ставь passed" not in system, "doubt blocks only spoilers"
 
 
 def test_cqa_03_the_prompt_tells_the_model_not_to_judge_the_format() -> None:

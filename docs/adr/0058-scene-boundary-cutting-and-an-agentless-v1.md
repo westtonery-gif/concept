@@ -5,7 +5,7 @@
 - **Deciders:** Lead Architect / Domain Architect
 - **Supersedes:** ADR-0057 in full. Further amends ADR-0053 §5 and ADR-0056 §2.
 - **Serves:** `CLAUDE.md` queue task 21
-- **Amended by:** ADR-0069 (§1 — a detected cut inside a spoken line is not a boundary)
+- **Amended by:** ADR-0069 (§1 — a detected cut inside a spoken line is not a boundary); ADR-0070 (§3 — clip criteria that gate)
 
 ## Context
 

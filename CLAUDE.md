@@ -1640,6 +1640,55 @@ process at the time, not a pattern to keep copying.)
     well (an additive `report_status` argument or a second property — touches ADR-0055's
     contract, so a small ADR).
 
+27. ~~**Soften clip QA — the maintainer's call after watching the re-run (2026-09-22).**~~ — done
+    (ADR-0070, `clip-qa-agent` **v3**). The maintainer judged all 15 re-run clips acceptable while
+    QA flagged 14, nearly all for boundaries. Now only **a spoiler** (unsure → `flagged`) and **a
+    clip with no content** (titles/credits/theme/dubbing credits → `failed`) block; boundary and
+    storyline remarks come back as «Подсказка:» flags on a `passed` verdict, which ADR-0034 already
+    allows and the review page already shows. Gate, grammar and decoder unchanged. **Not yet run
+    live** — the next episode's run is the check.
+
+28. **Skip the opening titles and end credits — decided direction 2026-09-22, waiting on a second
+    episode.** Found by the maintainer; confirmed in the re-run (clip 15 is all credits, clip 3
+    opens on the intro; here ~128–157 s and ~1264 s–end). Plan, **not started**: (1) find them by
+    **audio fingerprint across two episodes of the same season** (`fpcalc` from `brew install
+    chromaprint`, the Jellyfin Intro Skipper / Netflix approach — the theme sounds identical in
+    every episode, the cold open's length does not matter), remembered per series; (2) a manual
+    fallback — skip ranges on the Notion episode card — when there is no match or only one episode.
+    Either way the ranges become **forbidden zones in `plan_clips`**: no clip overlaps them, a
+    boundary snaps to their edge (deterministic, in the spirit of ADR-0069). First step before any
+    ADR: try the fingerprint match on the two real files once the next episode lands in
+    `~/episodes/`. Needs an ADR (it changes what `FootageIndex` or the board reports).
+
+29. **Burn subtitles into approved clips — decided 2026-09-22, waiting on the environment.** The
+    maintainer chose burn-in and will install an ffmpeg with `libass` (`brew uninstall ffmpeg &&
+    brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg`); check with
+    `ffmpeg -h filter=subtitles`. Captions are already on every plan and clip Artifact (ADR-0062),
+    so this is inside `FfmpegClipRenderer` only (ADR-0063's promise). Open design points for the
+    ADR that supersedes ADR-0063: burn at render time or **after approval** (the maintainer said
+    "после одобрения" — a second render step keyed to `APPROVED`, which also keeps the reviewer
+    watching the clean cut), style (large, bottom-centre, readable on a letterboxed 16:9 clip in a
+    9:16 feed), and whether the burnt file is a new Artifact or a derived file of the approved one.
+
+30. **Post text written by a model, approved with the clip — decided 2026-09-22.** A small LLM role
+    drafts the description + hashtags from the clip transcript **before review**; it appears on
+    the Notion review page and is approved together with the clip (the maintainer can edit it
+    there). ADR-0058 dropped the draft caption because nothing read it; auto-posting (task 31) is
+    the reader, so it returns — needs an ADR (role, Prompt, where the text lives in the clip
+    payload, and how a human edit on the page is read back).
+
+31. **Auto-posting through upload-post — chosen by the maintainer 2026-09-22; environment "без
+    спешки".** Checked 2026-09-22: upload-post Free = 10 uploads/month, no TikTok; Basic $24/mo
+    ($16 annual) = unlimited, all platforms incl. TikTok; Ayrshare starts at $149/mo. ~450
+    clips/month means the paid tier eventually; the free tier is enough to prove the chain on
+    YouTube/Instagram. Shape: a role-named `ClipPublisher` port, upload-post behind it in
+    `infrastructure/` (stdlib `urllib`, like every other vendor here), fired after approval (and
+    after task 29's burn-in), `APPROVED → PUBLISHED` (the transition exists, ADR-0007). **A post is
+    irreversible**, so it follows ADR-0066's submit rule: the attempt is committed before the call
+    and a publish Task found `RUNNING` on resume is **failed, never re-posted** — unless upload-post
+    offers an idempotency key, which the ADR must check in its docs. Needs: ADR + spec, the
+    maintainer's upload-post API key and connected accounts.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
