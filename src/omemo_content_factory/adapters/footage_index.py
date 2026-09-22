@@ -47,17 +47,34 @@ class SpeechSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class SkipZone:
+    """A stretch no clip may cover — opening titles, end credits (ADR-0074), in milliseconds."""
+
+    start_ms: int
+    end_ms: int
+
+    def __post_init__(self) -> None:
+        for name, value in (("start_ms", self.start_ms), ("end_ms", self.end_ms)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"a skip zone needs a whole, non-negative {name}")
+        if self.end_ms <= self.start_ms:
+            raise ValueError("a skip zone must end after it starts")
+
+
+@dataclass(frozen=True, slots=True)
 class IndexedFootage:
     """What the service understood: how long the episode is, where scenes break, who says what.
 
     ``scenes`` are strictly increasing and inside the episode; ``speech`` is ordered and
     non-overlapping. Both may be empty — an episode with no detected scene simply yields no
-    ``SCENE`` clips, which is not an error (CLIPPING_ACCEPTANCE CLP-06).
+    ``SCENE`` clips, which is not an error (CLIPPING_ACCEPTANCE CLP-06). ``skips`` are the
+    stretches no clip may cover, ordered and non-overlapping (ADR-0074).
     """
 
     duration_ms: int
     scenes: tuple[SceneBreak, ...] = ()
     speech: tuple[SpeechSpan, ...] = ()
+    skips: tuple[SkipZone, ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -66,10 +83,22 @@ class IndexedFootage:
             or self.duration_ms <= 0
         ):
             raise ValueError("indexed footage needs a positive duration")
-        if not isinstance(self.scenes, tuple) or not isinstance(self.speech, tuple):
-            raise ValueError("indexed footage keeps scenes and speech in tuples")
+        if not all(isinstance(items, tuple) for items in (self.scenes, self.speech, self.skips)):
+            raise ValueError("indexed footage keeps scenes, speech and skips in tuples")
         self._verify_scenes()
         self._verify_speech()
+        self._verify_skips()
+
+    def _verify_skips(self) -> None:
+        end = 0
+        for zone in self.skips:
+            if not isinstance(zone, SkipZone):
+                raise ValueError("every skip zone must be a SkipZone")
+            if zone.start_ms < end:
+                raise ValueError("skip zones must be ordered and must not overlap")
+            if zone.end_ms > self.duration_ms:
+                raise ValueError("a skip zone falls outside the episode")
+            end = zone.end_ms
 
     def _verify_scenes(self) -> None:
         previous = -1

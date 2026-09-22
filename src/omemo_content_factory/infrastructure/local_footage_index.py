@@ -31,8 +31,10 @@ from omemo_content_factory.adapters.footage_index import (
     FootageIndexError,
     IndexedFootage,
     SceneBreak,
+    SkipZone,
     SpeechSpan,
 )
+from omemo_content_factory.infrastructure.recurring_audio import title_zones
 
 __all__ = [
     "LANGUAGE_VAR",
@@ -63,6 +65,10 @@ lines in a row are ordinary speech ("Нет. Нет."), three are the loop's sig
 """
 
 _NOT_A_WORD = re.compile(r"[\W_]+")
+
+_VIDEO_SUFFIXES = frozenset({".mp4", ".mkv", ".mov", ".avi", ".m4v", ".webm"})
+_MAX_SIBLINGS = 4
+"""How many other episodes in the folder the titles are looked for in (ADR-0074 §2)."""
 
 _ANTI_LOOP_FLAGS = ("-mc", "0", "-sns")
 """Stop the loop at its cause: carry no text context from one window into the next (``-mc 0``),
@@ -118,12 +124,14 @@ class LocalFootageIndex:
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         whisper: str = "whisper-cli",
+        fpcalc: str = "fpcalc",
         timeout: float = _TIMEOUT_SECONDS,
     ) -> None:
         self._settings = settings
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
         self._whisper = whisper
+        self._fpcalc = fpcalc
         self._timeout = timeout
 
     def index(self, located: LocatedEpisode, /) -> IndexedFootage:
@@ -134,7 +142,49 @@ class LocalFootageIndex:
         duration_ms = self._duration_ms(source)
         scenes = self._scenes(source, duration_ms)
         speech = self._speech(source, duration_ms)
-        return IndexedFootage(duration_ms=duration_ms, scenes=scenes, speech=speech)
+        skips = self._skips(source, duration_ms)
+        return IndexedFootage(duration_ms=duration_ms, scenes=scenes, speech=speech, skips=skips)
+
+    # --- titles and credits -------------------------------------------------------------
+
+    def _skips(self, source: Path, duration_ms: int) -> tuple[SkipZone, ...]:
+        """Titles and credits: audio this episode shares with its siblings (ADR-0074 §2).
+
+        The siblings are the other video files in the same folder — where a series' episodes live
+        together. None means no zones: there is nothing to compare with yet.
+        """
+        siblings = sorted(
+            path
+            for path in source.parent.iterdir()
+            if path.is_file() and path.suffix.casefold() in _VIDEO_SUFFIXES and path != source
+        )[:_MAX_SIBLINGS]
+        if not siblings:
+            return ()
+        ours = self._fingerprint(source)
+        theirs = [self._fingerprint(path) for path in siblings]
+        return tuple(
+            SkipZone(start_ms=start, end_ms=end)
+            for start, end in title_zones(ours, theirs, duration_ms=duration_ms)
+        )
+
+    def _fingerprint(self, path: Path) -> list[int]:
+        """Chromaprint's raw values; a file too short or silent to fingerprint gives none."""
+        try:
+            raw = self._run(
+                [self._fpcalc, "-raw", "-json", "-length", "0", str(path)],
+                what="fingerprint the audio",
+            )
+        except FootageIndexError as error:
+            if "Empty fingerprint" in str(error):
+                return []  # no evidence either way, not a broken index
+            raise
+        try:
+            values = json.loads(raw)["fingerprint"]
+        except (ValueError, KeyError, TypeError) as error:
+            raise FootageIndexError("fpcalc returned no usable fingerprint") from error
+        if not isinstance(values, list) or not all(isinstance(v, int) for v in values):
+            raise FootageIndexError("fpcalc returned a fingerprint of an unexpected shape")
+        return values
 
     # --- duration -----------------------------------------------------------------------
 

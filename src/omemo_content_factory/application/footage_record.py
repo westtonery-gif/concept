@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import json
 
-from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
+from omemo_content_factory.adapters.footage_index import (
+    IndexedFootage,
+    SceneBreak,
+    SkipZone,
+    SpeechSpan,
+)
 
 __all__ = [
     "FOOTAGE_SCHEMA_REF",
@@ -37,6 +42,7 @@ def footage_to_payload(footage: IndexedFootage, /) -> str:
                 {"start_ms": span.start_ms, "end_ms": span.end_ms, "text": span.text}
                 for span in footage.speech
             ],
+            "skips": [{"start_ms": zone.start_ms, "end_ms": zone.end_ms} for zone in footage.skips],
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -53,6 +59,11 @@ def footage_from_payload(payload: str, /) -> IndexedFootage:
             speech=tuple(
                 SpeechSpan(start_ms=span["start_ms"], end_ms=span["end_ms"], text=span["text"])
                 for span in raw["speech"]
+            ),
+            # An index recorded before ADR-0074 has no skips: it reads back with none (§3).
+            skips=tuple(
+                SkipZone(start_ms=zone["start_ms"], end_ms=zone["end_ms"])
+                for zone in raw.get("skips", ())
             ),
         )
     except (ValueError, KeyError, TypeError) as error:

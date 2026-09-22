@@ -289,6 +289,88 @@ def test_fix_10_a_repeated_phrase_is_a_loop_and_is_dropped(
     assert [span.text for span in footage.speech] == expected
 
 
+def _stub_fpcalc(tmp_path: Path, prints: dict[str, list[int]]) -> Path:
+    """An ``fpcalc`` that answers each file name with a scripted fingerprint."""
+    script = tmp_path / "fpcalc"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, sys\n"
+        f"prints = {json.dumps(prints)}\n"
+        "values = prints.get(os.path.basename(sys.argv[-1]))\n"
+        "if not values:\n"
+        "    print('ERROR: Empty fingerprint', file=sys.stderr); sys.exit(2)\n"
+        "print(json.dumps({'duration': 1.0, 'fingerprint': values}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+@needs_ffmpeg
+def test_fix_11_titles_shared_with_a_sibling_episode_become_skip_zones(
+    episode: Path, tmp_path: Path, stub_whisper: Path
+) -> None:
+    """ADR-0074 §2: the audio two episodes share near an end is titles, and is skipped."""
+    import random
+
+    rng = random.Random(7)
+    theme = [rng.getrandbits(32) for _ in range(160)]  # ~20 s
+    ours = theme + [rng.getrandbits(32) for _ in range(40)]
+    theirs = [rng.getrandbits(32) for _ in range(30)] + theme
+    folder = tmp_path / "series"
+    folder.mkdir()
+    ep1 = folder / "ep1.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:duration=120:size=64x36:rate=5",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=duration=120",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(ep1),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=120,
+    )
+    (folder / "ep2.mp4").write_bytes(b"sibling")
+    (folder / "notes.txt").write_text("not a video", encoding="utf-8")
+    fpcalc = _stub_fpcalc(tmp_path, {"ep1.mp4": ours, "ep2.mp4": theirs})
+    index = LocalFootageIndex(
+        _settings(tmp_path), whisper=str(stub_whisper), fpcalc=str(fpcalc), timeout=120.0
+    )
+    footage = index.index(LocatedEpisode(source_ref="ep1.mp4", path=str(ep1)))
+    assert len(footage.skips) == 1, "the shared theme, within the first quarter of 120 s"
+    assert footage.skips[0].start_ms == 0
+    assert abs(footage.skips[0].end_ms - 20_000) < 500
+
+
+@needs_ffmpeg
+def test_fix_11_an_episode_alone_in_its_folder_has_no_zones(
+    episode: Path, tmp_path: Path, stub_whisper: Path
+) -> None:
+    folder = tmp_path / "alone"
+    folder.mkdir()
+    only = folder / "only.mp4"
+    only.write_bytes(episode.read_bytes())
+    missing = LocalFootageIndex(
+        _settings(tmp_path), whisper=str(stub_whisper), fpcalc="fpcalc-not-installed"
+    )
+    footage = missing.index(LocatedEpisode(source_ref="only.mp4", path=str(only)))
+    assert footage.skips == (), "no sibling means fpcalc is not even needed"
+
+
 # --- 3. Refusals -------------------------------------------------------------------------
 
 

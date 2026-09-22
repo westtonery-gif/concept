@@ -70,11 +70,15 @@ def plan_clips(
     if not episode_ref.strip():
         raise ValueError("plan_clips needs a non-blank episode_ref")
 
-    bounds = (
-        _chunk_bounds(indexed, chunk_ms, pause_tolerance_ms)
-        if mode is ClipMode.CHUNK
-        else _scene_bounds(indexed, chunk_ms, max_ms, pause_tolerance_ms)
-    )
+    if mode is ClipMode.SCENE and not indexed.scenes:
+        return ClipPlan(episode_ref=episode_ref, mode=mode)  # CLP-06: nothing was detected
+    bounds: list[tuple[int, int]] = []
+    for start, end in _stretches(indexed):
+        bounds.extend(
+            _split(start, end, indexed, chunk_ms, pause_tolerance_ms)
+            if mode is ClipMode.CHUNK
+            else _scene_bounds(indexed, start, end, chunk_ms, max_ms, pause_tolerance_ms)
+        )
     clips = tuple(
         PlannedClip(
             index=number,
@@ -88,15 +92,32 @@ def plan_clips(
     return ClipPlan(episode_ref=episode_ref, mode=mode, clips=clips)
 
 
-def _chunk_bounds(
-    indexed: IndexedFootage, chunk_ms: int, tolerance_ms: int
-) -> list[tuple[int, int]]:
-    """Consecutive pieces covering the episode, each boundary nudged to a pause."""
-    return _split(0, indexed.duration_ms, indexed, chunk_ms, tolerance_ms)
+MIN_STRETCH_MS = 5_000
+"""A sliver between two skip zones shorter than this is not a clip (ADR-0074 §4)."""
+
+
+def _stretches(indexed: IndexedFootage) -> list[tuple[int, int]]:
+    """The parts of the episode between its skip zones — the whole episode when there are none."""
+    if not indexed.skips:
+        return [(0, indexed.duration_ms)]
+    edges = [0]
+    for zone in indexed.skips:
+        edges.extend((zone.start_ms, zone.end_ms))
+    edges.append(indexed.duration_ms)
+    return [
+        (start, end)
+        for start, end in zip(edges[::2], edges[1::2], strict=True)
+        if end - start >= MIN_STRETCH_MS
+    ]
 
 
 def _scene_bounds(
-    indexed: IndexedFootage, chunk_ms: int, max_ms: int, tolerance_ms: int
+    indexed: IndexedFootage,
+    stretch_start: int,
+    stretch_end: int,
+    chunk_ms: int,
+    max_ms: int,
+    tolerance_ms: int,
 ) -> list[tuple[int, int]]:
     """Scenes merged while they fit under ``max_ms``; one that does not is split like a chunk.
 
@@ -108,14 +129,13 @@ def _scene_bounds(
     detector reports shot changes, and a shot changes mid-sentence all the time. Cuts that survive
     are in pauses; if none does, the episode is one long scene and is split like a chunk.
     """
-    if not indexed.scenes:
-        return []
     breaks = [
         scene.at_ms
         for scene in indexed.scenes
-        if _inside_speech(scene.at_ms, indexed.speech) is None
+        if stretch_start < scene.at_ms < stretch_end
+        and _inside_speech(scene.at_ms, indexed.speech) is None
     ]
-    edges = [0, *breaks, indexed.duration_ms]
+    edges = [stretch_start, *breaks, stretch_end]
     scenes = [(start, end) for start, end in pairwise(edges) if end > start]
 
     bounds: list[tuple[int, int]] = []

@@ -13,7 +13,12 @@ import pytest
 
 from omemo_content_factory.adapters.clip_renderer import Caption
 from omemo_content_factory.adapters.episode_board import ClipMode
-from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
+from omemo_content_factory.adapters.footage_index import (
+    IndexedFootage,
+    SceneBreak,
+    SkipZone,
+    SpeechSpan,
+)
 from omemo_content_factory.application import clip_plan as clip_plan_module
 from omemo_content_factory.application.clip_plan import ClipPlan, plan_clips
 
@@ -250,3 +255,45 @@ def test_clp_10_every_caption_fits_inside_its_own_clip() -> None:
         length = clip.end_ms - clip.start_ms
         for caption in clip.captions:
             assert 0 <= caption.start_ms < caption.end_ms <= length
+
+
+# --- CLP-15: titles and credits are never in a clip (ADR-0074 §4) -----------------------
+
+
+@pytest.mark.parametrize("mode", [ClipMode.CHUNK, ClipMode.SCENE])
+def test_clp_15_no_clip_covers_a_skip_zone_and_its_edges_are_boundaries(mode: ClipMode) -> None:
+    skips = (SkipZone(127_000, 159_000), SkipZone(1_295_000, 1_314_000))
+    scenes = tuple(SceneBreak(at) for at in range(30_000, 1_320_000, 45_000))
+    indexed = IndexedFootage(duration_ms=1_321_000, scenes=scenes, skips=skips)
+    plan = _plan(indexed, mode=mode)
+    _contiguous(plan)
+    for clip in plan.clips:
+        for zone in skips:
+            assert clip.end_ms <= zone.start_ms or clip.start_ms >= zone.end_ms
+    edges = {edge for clip in plan.clips for edge in (clip.start_ms, clip.end_ms)}
+    assert {127_000, 159_000, 1_295_000, 1_314_000} <= edges
+    assert all(c.end_ms - c.start_ms <= 2 * MINUTE + 2_000 for c in plan.clips)
+
+
+def test_clp_15_a_sliver_between_zones_is_not_a_clip_but_a_post_credits_scene_is() -> None:
+    """Episode 2's shape: titles at 0, end theme, then 38 s after it (ADR-0074 Context)."""
+    skips = (SkipZone(0, 30_900), SkipZone(1_246_600, 1_280_200))
+    indexed = IndexedFootage(duration_ms=1_318_600, skips=skips)
+    plan = _plan(indexed)
+    assert plan.clips[0].start_ms == 30_900, "nothing before the titles is worth a clip"
+    assert (plan.clips[-1].start_ms, plan.clips[-1].end_ms) == (1_280_200, 1_318_600)
+
+    tight = IndexedFootage(
+        duration_ms=200_000, skips=(SkipZone(0, 50_000), SkipZone(53_000, 60_000))
+    )
+    assert all(c.start_ms >= 60_000 for c in _plan(tight).clips), "a 3 s sliver is dropped"
+
+
+def test_clp_15_without_zones_the_plan_is_unchanged() -> None:
+    indexed = IndexedFootage(duration_ms=6 * MINUTE, scenes=(SceneBreak(2 * MINUTE),))
+    plain = _plan(indexed, mode=ClipMode.SCENE)
+    assert [(c.start_ms, c.end_ms) for c in plain.clips] == [
+        (0, 2 * MINUTE),
+        (2 * MINUTE, 4 * MINUTE),
+        (4 * MINUTE, 6 * MINUTE),
+    ]

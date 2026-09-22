@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from omemo_content_factory.adapters.footage_index import IndexedFootage, SceneBreak, SpeechSpan
+from omemo_content_factory.adapters.footage_index import (
+    IndexedFootage,
+    SceneBreak,
+    SkipZone,
+    SpeechSpan,
+)
 from omemo_content_factory.application.footage_record import (
     FootageRecordError,
     episode_transcript,
@@ -47,3 +52,11 @@ def test_crn_12_the_transcript_is_one_timed_line_per_span_in_milliseconds() -> N
 def test_crn_12_an_unreadable_record_is_refused_not_guessed(payload: str) -> None:
     with pytest.raises(FootageRecordError):
         footage_from_payload(payload)
+
+
+def test_crn_12_skip_zones_are_recorded_and_an_older_record_reads_with_none() -> None:
+    """ADR-0074 §3: the index recorded before skips existed still reads back."""
+    with_skips = IndexedFootage(duration_ms=60_000, skips=(SkipZone(1_000, 20_000),))
+    assert footage_from_payload(footage_to_payload(with_skips)) == with_skips
+    older = '{"duration_ms": 60000, "scenes": [], "speech": []}'
+    assert footage_from_payload(older).skips == ()
