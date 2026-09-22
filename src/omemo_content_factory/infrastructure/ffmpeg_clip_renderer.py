@@ -5,11 +5,10 @@ are read back from the produced file rather than assumed from the request, which
 of ``RenderedClip`` carrying them: the deterministic format check (ADR-0056 §1) then compares real
 numbers, and a renderer that quietly produced something else is caught instead of trusted.
 
-**This renderer does not burn captions** (ADR-0063 §1). The ffmpeg available here was built without
-``libass`` and without ``libfreetype``, so it has no ``subtitles``, ``ass`` or ``drawtext`` filter
-and cannot draw text on a picture at all. ``ClipRenderRequest.captions`` is therefore **ignored
-here and only here** — it is still produced, still carried and still stored in the clip's Artifact,
-so burning it later is a change inside this module and nothing else.
+**Captions are burnt in** (ADR-0071, superseding ADR-0063 §1): they are written to a temporary ASS
+file this module owns and drawn with ffmpeg's ``subtitles`` filter, which needs an ffmpeg built with
+``libass`` (``homebrew-ffmpeg/ffmpeg``). The reviewer therefore approves the very file that ships.
+An ffmpeg without the filter fails the render loudly rather than producing a caption-less clip.
 
 Only ``infrastructure/`` may reach outside the process (``tests/test_adapter_contract.py``), which
 is why the subprocess calls live here and the rest of the department never learns that ffmpeg
@@ -21,9 +20,12 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from omemo_content_factory.adapters.clip_renderer import (
+    Caption,
     ClipRendererError,
     ClipRenderRequest,
     RenderedClip,
@@ -37,6 +39,15 @@ DEFAULT_FFPROBE = "ffprobe"
 _TIMEOUT_SECONDS = 600.0
 """Cutting a two-minute clip out of a 25-minute file is seconds; ten minutes is a hung process."""
 
+DEFAULT_CAPTION_FONT = "Arial"
+"""Present on macOS with Cyrillic; ``libass`` finds it through the system font lookup."""
+
+DEFAULT_CAPTION_SIZE = 72
+"""Pixels on a 1920×1080 canvas, scaled to the real frame: readable when a 16:9 clip is
+letterboxed into a 9:16 feed, where the picture is about a third of the screen (ADR-0071 §2)."""
+
+_NO_SUBTITLES_FILTER = "No such filter: 'subtitles'"
+
 
 class FfmpegClipRenderer:
     """Cuts one clip with ffmpeg and measures it with ffprobe."""
@@ -49,18 +60,23 @@ class FfmpegClipRenderer:
         timeout: float = _TIMEOUT_SECONDS,
         video_codec: str = "libx264",
         audio_codec: str = "aac",
+        caption_font: str = DEFAULT_CAPTION_FONT,
+        caption_size: int = DEFAULT_CAPTION_SIZE,
     ) -> None:
+        if not caption_font.strip() or "," in caption_font:
+            raise ValueError("a caption font needs a non-blank name without commas")
+        if caption_size <= 0:
+            raise ValueError("a caption size must be positive")
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
         self._timeout = timeout
         self._video_codec = video_codec
         self._audio_codec = audio_codec
+        self._caption_font = caption_font.strip()
+        self._caption_size = caption_size
 
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
-        """Write the clip and return what ffprobe says it actually is.
-
-        ``request.captions`` is ignored — see this module's docstring and ADR-0063.
-        """
+        """Write the clip with its captions burnt in; return what ffprobe says it actually is."""
         source = Path(request.located.path)
         if not source.is_file():
             raise ClipRendererError(f"the episode file is missing: {request.located.path}")
@@ -68,25 +84,35 @@ class FfmpegClipRenderer:
         if destination.parent != Path():
             destination.parent.mkdir(parents=True, exist_ok=True)
 
-        self._run(
-            [
-                self._ffmpeg,
-                "-nostdin",
-                "-y",
-                "-ss",
-                _seconds(request.start_ms),
-                "-i",
-                str(source),
-                "-t",
-                _seconds(request.end_ms - request.start_ms),
-                "-c:v",
-                self._video_codec,
-                "-c:a",
-                self._audio_codec,
-                str(destination),
-            ],
-            what="cut the clip",
-        )
+        with tempfile.TemporaryDirectory() as workspace:
+            burn: list[str] = []
+            if request.captions:
+                subtitles = Path(workspace) / "captions.ass"
+                subtitles.write_text(
+                    _ass(request.captions, font=self._caption_font, size=self._caption_size),
+                    encoding="utf-8",
+                )
+                burn = ["-vf", f"subtitles=filename={_filter_path(subtitles)}"]
+            self._run(
+                [
+                    self._ffmpeg,
+                    "-nostdin",
+                    "-y",
+                    "-ss",
+                    _seconds(request.start_ms),
+                    "-i",
+                    str(source),
+                    "-t",
+                    _seconds(request.end_ms - request.start_ms),
+                    *burn,
+                    "-c:v",
+                    self._video_codec,
+                    "-c:a",
+                    self._audio_codec,
+                    str(destination),
+                ],
+                what="cut the clip",
+            )
         if not destination.is_file():
             raise ClipRendererError(f"ffmpeg reported success but wrote no file: {destination}")
         return self._measure(destination)
@@ -141,12 +167,64 @@ class FfmpegClipRenderer:
             raise ClipRendererError(f"{command[0]} timed out trying to {what}") from error
         except OSError as error:
             raise ClipRendererError(f"{command[0]} could not be run: {error}") from error
+        if completed.returncode != 0 and _NO_SUBTITLES_FILTER in completed.stderr:
+            raise ClipRendererError(
+                f"{command[0]} cannot burn captions: it was built without libass "
+                "(install homebrew-ffmpeg/ffmpeg, ADR-0071)"
+            )
         if completed.returncode != 0:
             raise ClipRendererError(
                 f"{command[0]} could not {what} (exit {completed.returncode}): "
                 f"{_last_line(completed.stderr)}"
             )
         return completed.stdout
+
+
+def _ass(captions: Sequence[Caption], *, font: str, size: int) -> str:
+    """The captions as an ASS script: one style, one dialogue line per caption (ADR-0071 §2)."""
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        "PlayResX: 1920\n"
+        "PlayResY: 1080\n"
+        "WrapStyle: 0\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,"
+        "-1,0,0,0,100,100,0,0,1,4,1,2,80,80,60,1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    lines = [
+        f"Dialogue: 0,{_ass_time(caption.start_ms)},{_ass_time(caption.end_ms)},Default,,0,0,0,,"
+        f"{_ass_text(caption.text)}\n"
+        for caption in captions
+    ]
+    return header + "".join(lines)
+
+
+def _ass_time(milliseconds: int) -> str:
+    """``H:MM:SS.cc`` — ASS counts centiseconds; a caption's edge moves by under 10 ms."""
+    centiseconds = milliseconds // 10
+    hours, rest = divmod(centiseconds, 360_000)
+    minutes, rest = divmod(rest, 6_000)
+    seconds, hundredths = divmod(rest, 100)
+    return f"{hours}:{minutes:02d}:{seconds:02d}.{hundredths:02d}"
+
+
+def _ass_text(text: str) -> str:
+    """Caption text that cannot turn into ASS markup: no override blocks, escapes or breaks."""
+    return " ".join(text.split()).replace("\\", "/").replace("{", "(").replace("}", ")")
+
+
+def _filter_path(path: Path) -> str:
+    """A path quoted for an ffmpeg filter argument: ``\\``, ``:`` and ``'`` are escaped."""
+    return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
 def _seconds(milliseconds: int) -> str:

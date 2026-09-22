@@ -1660,7 +1660,7 @@ process at the time, not a pattern to keep copying.)
     ADR: try the fingerprint match on the two real files once the next episode lands in
     `~/episodes/`. Needs an ADR (it changes what `FootageIndex` or the board reports).
 
-29. **Burn subtitles into approved clips — decided 2026-09-22, waiting on the environment.** The
+29. ~~**Burn subtitles into approved clips**~~ — done (ADR-0071, 2026-09-22): burnt **at render time**, not after approval, so the reviewer approves the exact file that ships (and sees whisper's mistakes); the Run is `COMPLETED` after the last decision, so a post-approval render would need Tasks on a finished Run. `FfmpegClipRenderer` writes a temp ASS (white bold Arial 72 px on a 1920×1080 canvas, black outline, bottom-centre) and uses the `subtitles` filter; ASS markup in text is neutralised; no libass → `ClipRendererError` naming it. FCR-02 checks pixels on a black clip; verified on the real episode. **Clip 1 approved on 2026-09-22 was rendered before this and has no captions** — re-render + re-review if it should ship with them. Original brief: The
     maintainer chose burn-in and will install an ffmpeg with `libass` (`brew uninstall ffmpeg &&
     brew tap homebrew-ffmpeg/ffmpeg && brew install homebrew-ffmpeg/ffmpeg/ffmpeg`); check with
     `ffmpeg -h filter=subtitles`. Captions are already on every plan and clip Artifact (ADR-0062),

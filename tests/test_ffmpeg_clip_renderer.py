@@ -1,4 +1,4 @@
-"""Tests for the real ``ClipRenderer`` and the filesystem ``EpisodeSource`` (ADR-0063).
+"""Tests for the real ``ClipRenderer`` and the filesystem ``EpisodeSource`` (ADR-0063/0071).
 
 The renderer's tests cut a **real** video that ffmpeg itself generates, and read the result back
 with ffprobe. Nothing is mocked: if the adapter built a wrong command line, the file would not
@@ -112,14 +112,128 @@ def test_fcr_01_the_measurements_come_from_the_file_not_the_request(
     assert abs(clip.duration_ms - 2_000) <= 250
 
 
-@needs_ffmpeg
-def test_fcr_02_captions_are_accepted_and_ignored(episode: Path, tmp_path: Path) -> None:
-    """ADR-0063 §1: this ffmpeg cannot draw text, so captions ride along without being burnt."""
-    renderer = FfmpegClipRenderer()
-    captions = (Caption(start_ms=0, end_ms=2_000, text="a line nobody will see yet"),)
-    clip = renderer.render(_request(episode, tmp_path / "captioned.mp4", captions=captions))
-    assert Path(clip.path).is_file()
-    assert abs(clip.duration_ms - 3_000) <= 250
+needs_libass = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None
+    or "libass"
+    not in subprocess.run(
+        ["ffmpeg", "-hide_banner", "-h", "filter=subtitles"], capture_output=True, text=True
+    ).stdout,
+    reason="this ffmpeg has no libass subtitles filter (ADR-0071)",
+)
+
+
+def _black_episode(tmp_path: Path) -> Path:
+    """Three seconds of black: any light pixel in a frame of the render is a drawn caption."""
+    path = tmp_path / "black.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:duration=3:size=640x360:rate=25",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=duration=3",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(path),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=120,
+    )
+    return path
+
+
+def _light_pixels(video: Path, at_seconds: float) -> int:
+    """How many pixels of the frame at ``at_seconds`` are clearly not black."""
+    frame = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{at_seconds}",
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    assert frame, "a frame was extracted"
+    return sum(1 for value in frame if value > 128)
+
+
+@needs_libass
+def test_fcr_02_captions_are_burnt_in_while_they_are_said(tmp_path: Path) -> None:
+    """ADR-0071: the caption is drawn during its own interval and not outside it."""
+    black = _black_episode(tmp_path)
+    captions = (Caption(start_ms=0, end_ms=1_000, text="Морти, это видно?"),)
+    clip = FfmpegClipRenderer().render(
+        _request(black, tmp_path / "captioned.mp4", start_ms=0, end_ms=3_000, captions=captions)
+    )
+    assert _light_pixels(Path(clip.path), 0.5) > 200, "the caption is on screen while it is said"
+    assert _light_pixels(Path(clip.path), 2.0) == 0, "and gone once it is over"
+
+
+@needs_libass
+def test_fcr_02_a_clip_without_captions_is_left_clean(tmp_path: Path) -> None:
+    black = _black_episode(tmp_path)
+    clip = FfmpegClipRenderer().render(
+        _request(black, tmp_path / "clean.mp4", start_ms=0, end_ms=3_000)
+    )
+    assert _light_pixels(Path(clip.path), 0.5) == 0
+
+
+@needs_libass
+def test_fcr_02_caption_text_cannot_inject_ass_markup(tmp_path: Path) -> None:
+    """Override braces would hide the text; a backslash could start an escape (ADR-0071 §1)."""
+    black = _black_episode(tmp_path)
+    captions = (Caption(start_ms=0, end_ms=1_000, text="{\\alpha&HFF&}невидимка\\N"),)
+    clip = FfmpegClipRenderer().render(
+        _request(black, tmp_path / "injected.mp4", start_ms=0, end_ms=3_000, captions=captions)
+    )
+    assert _light_pixels(Path(clip.path), 0.5) > 200, "the markup was drawn as text, not obeyed"
+
+
+def test_fcr_08_an_ffmpeg_without_libass_is_refused_by_name(
+    episode_stub_dir: Path, tmp_path: Path
+) -> None:
+    fake = episode_stub_dir / "ffmpeg"
+    fake.write_text(
+        "#!/bin/sh\necho \"No such filter: 'subtitles'\" >&2\nexit 8\n", encoding="utf-8"
+    )
+    fake.chmod(0o755)
+    source = tmp_path / "episode.mp4"
+    source.write_bytes(b"0")
+    captions = (Caption(start_ms=0, end_ms=1_000, text="x"),)
+    with pytest.raises(ClipRendererError, match="libass"):
+        FfmpegClipRenderer(ffmpeg=str(fake)).render(
+            _request(source, tmp_path / "out.mp4", start_ms=0, end_ms=2_000, captions=captions)
+        )
+
+
+@pytest.fixture
+def episode_stub_dir(tmp_path: Path) -> Path:
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    return stubs
 
 
 @needs_ffmpeg

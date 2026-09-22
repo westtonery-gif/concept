@@ -1,6 +1,6 @@
 # ADR-0063: v1 renders clips without burning captions, and keeps them for when it can
 
-- **Status:** Accepted
+- **Status:** Accepted; §1 superseded by ADR-0071 (captions are burnt at render time)
 - **Date:** 2026-09-21
 - **Deciders:** Lead Architect / Domain Architect
 - **Amends:** `CLIPPING_SPEC.md` §7 ("вжечь субтитры")
