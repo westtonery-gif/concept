@@ -1738,6 +1738,15 @@ process at the time, not a pattern to keep copying.)
     (launchd, every 7200 s, not at load) — **the session was not allowed to install a persistent
     agent; the maintainer installs it** (`cp` to `~/Library/LaunchAgents/` + `launchctl bootstrap`).
     Free upload-post plan: 10 uploads/month, exactly these 10.
+    **Clip 1 replaced the same day** (ADR-0077): it opened on the dub voice-over credit. A trimmed
+    render (from 32.32 s) was uploaded by hand with the same post text under request id
+    `…-artifact-1-publish-trimmed` → **https://www.youtube.com/watch?v=Y_YQ8A9GgBQ**; the maintainer
+    deletes the first upload (`ywunac3EcRk`) in YouTube Studio. `clips/…-01.mp4` is now the trimmed
+    file (the original is `…-01-with-dub-credit.mp4`). **Outside the Run's trace:** the next
+    invocation records clip 1 as `PUBLISHED` with the *first* URL. That makes 11 uploads this
+    month against the free plan's 10 — the last approved clip will not fit until an upgrade or next
+    month. Seen live: right after a submit, upload-post's status says `not_found` for a moment —
+    exactly the window ADR-0073 §3's `Idempotency-Key` covers.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
