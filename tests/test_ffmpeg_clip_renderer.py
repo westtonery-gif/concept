@@ -286,7 +286,7 @@ def test_fcr_09_a_canvas_needs_two_positive_even_sides() -> None:
 
 @needs_libass
 def test_fcr_10_the_headline_and_footer_go_into_the_bars(tmp_path: Path) -> None:
-    """ADR-0078: text in the top and bottom bars, the picture band untouched by it."""
+    """ADR-0079: headline and footer in the bottom bar; the top bar stays empty for banners."""
     black = _black_episode(tmp_path)
     renderer = FfmpegClipRenderer(canvas=(360, 640))
     clip = renderer.render(_request(black, tmp_path / "clip.mp4", start_ms=0, end_ms=2_000))
@@ -324,8 +324,8 @@ def test_fcr_10_the_headline_and_footer_go_into_the_bars(tmp_path: Path) -> None
     rows = [frame[row * 360 : (row + 1) * 360] for row in range(640)]
     lit = [row for row in range(640) if any(value > 100 for value in rows[row])]
     bar = (640 - 360 * 9 // 16) // 2
-    assert any(row < bar for row in lit), "the headline is in the top bar"
-    assert any(row > 640 - bar for row in lit), "the footer is in the bottom bar"
+    assert not any(row < bar for row in lit), "the top bar is kept for banners"
+    assert any(row > 640 - bar for row in lit), "the headline and footer are in the bottom bar"
     assert not any(bar + 5 < row < 640 - bar - 5 for row in lit), "the picture band is left alone"
 
 

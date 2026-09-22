@@ -284,7 +284,9 @@ def _ass(captions: Sequence[Caption], *, font: str, size: int) -> str:
 
 
 def _frame_ass(headline: str, footer: str | None, *, width: int, height: int, font: str) -> str:
-    """One ASS script on the canvas: the headline centred in the top bar, the footer in the bottom.
+    """One ASS script on the canvas: headline and footer in the bottom bar (ADR-0079).
+
+    The top bar is left empty — it is kept for banner advertising.
 
     The bars are what the 16:9 picture leaves of the canvas; sizes are fractions of the canvas
     width so the layout holds at 1080 and at 2160 wide.
@@ -315,12 +317,12 @@ def _frame_ass(headline: str, footer: str | None, *, width: int, height: int, fo
     )
     whole = "0:00:00.00,9:59:59.99"
     lines = [
-        f"Dialogue: 0,{whole},Head,,0,0,0,,{{\\pos({width // 2},{bar // 2})}}"
+        f"Dialogue: 0,{whole},Head,,0,0,0,,{{\\pos({width // 2},{height - bar + bar * 2 // 5})}}"
         f"{_ass_text(_drawable(headline))}\n"
     ]
     if footer is not None:
         lines.append(
-            f"Dialogue: 0,{whole},Foot,,0,0,0,,{{\\pos({width // 2},{height - bar // 2})}}"
+            f"Dialogue: 0,{whole},Foot,,0,0,0,,{{\\pos({width // 2},{height - bar // 6})}}"
             f"{_ass_text(_drawable(footer))}\n"
         )
     return header + "".join(lines)

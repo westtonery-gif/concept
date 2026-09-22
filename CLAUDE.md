@@ -1755,7 +1755,8 @@ process at the time, not a pattern to keep copying.)
     port; `FfmpegClipRenderer` implements it) burns the **approved** post title into the top bar
     and `OMEMO_CLIP_FOOTER` into the bottom one, right before `submit`, writing `<clip>-post.mp4`,
     which is what is posted; emoji/pictographs are dropped from burnt text (Arial has none). FCR-10,
-    CRN-15. **Open:** the footer text (unset = none) — the maintainer's; and the legitimate
+    CRN-15. **ADR-0079 (same day):** the headline moved to the **bottom** bar (footer under it); the
+    **top bar is kept empty for banners**. **Open:** the footer text (unset = none) — the maintainer's; and the legitimate
     alternatives still on the table: Content ID whitelisting by the rights holder, commentary /
     reaction layers, themed compilations.
 
