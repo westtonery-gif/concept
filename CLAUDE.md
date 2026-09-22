@@ -1698,6 +1698,17 @@ process at the time, not a pattern to keep copying.)
     (`homebrew-ffmpeg/ffmpeg`, 9.0.2; `subtitles` and `drawtext` filters present) — task 29 is
     unblocked.
 
+32. **Episode 2 run (2026-09-22) — the whole chain up to the human gate, live.** Card
+    `3e364b74-a905-81e0-bd30-e5068c85d9e9` (created via the API: `scene`, `rick-morty-2.mp4`),
+    Run `run-episode-3e364b74-a905-81e0-bd30-e5068c85d9e9`, main store, clips in `clips/`. 6 min,
+    **$0.397**. Skip zones found (0–30.9 s, 1246.6–1280.2 s); 12 clips with burnt captions; QA v3:
+    **10 passed, 1 flagged (a spoiler: "это сон… прошёл год"), 1 failed (the 39 s after the end
+    theme: dub credits + a post-credits bit — no content)**; 10 post texts drafted; 10 reviews on the
+    Notion desk. Run `waiting_human`. **Next: the maintainer's decisions; then a re-invocation posts
+    the approved ones to YouTube (unlisted) and a later one collects them.** Seen: clip 1 opens on
+    the dub credit «Перевел Женя Спицын…» just after the theme (task 28's straddling-span leftover);
+    clip 11 is the finale and passed with a hint that it is the episode's resolution.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions
