@@ -1548,6 +1548,18 @@ process at the time, not a pattern to keep copying.)
       Schema, Root check that the bound client has the capability. Spec before code.
     - 23.3 (QA criteria) and 23.4 (board: now an **idea** property, not prompt fields) still need
       the maintainer's answers; 23.8's live run now needs only the Gemini key for both vendors.
+    **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
+    starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
+    idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,
+    9:16 by `OMEMO_GENERATION_ASPECT`) → `write-prompts` (ADR-0080's writer **looks at the generated
+    frame**) → `ending-frame` → video → QA → Approve. The card carries only an **idea**. ~$0.55–0.60
+    per 8 s video. **23.3 is decided (ADR-0083, maintainer approved):** `video-qa-agent` v1 blocks
+    only visible defects (deformed bodies, melted objects, garbage text) and platform-unsafe content
+    — clear → `failed`, unsure → `flagged`; everything else is a «Подсказка:» on `passed`
+    (ADR-0070's shape). It sees **1 frame/s** extracted by ffmpeg through an additive
+    `VisualArtifactEvaluator.evaluate_frames` on `ImageAwareLLMClient`; reuses `qa-verdict@v1`;
+    sound is not judged. New subtask **23.11**: `TextToImageGenerator` on `GeminiImageGenerator` +
+    the scene writer role. Suggested order: 23.2b → 23.11 → 23.10 → video QA → 23.4–23.7 → 23.8.
 
 24. **Findings from the first real clipping run (2026-09-21) — the pipeline works, nothing was
     approvable.** Episode: a 22-minute Rick and Morty episode (`~/episodes/rick morty.mp4`, 1080p,

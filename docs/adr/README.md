@@ -105,3 +105,5 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0079](0079-the-headline-moves-to-the-bottom-bar.md) | The headline moves to the bottom bar; the top bar is kept for banners | Accepted |
 | [0080](0080-a-prompt-writer-agent-in-the-generation-department.md) | A prompt-writing Agent in the generation department — the human keeps only the final Approve | Accepted |
 | [0081](0081-veo-3-1-lite-behind-the-video-generator-port.md) | Veo 3.1 Lite behind `VideoGenerator` — the cheap default, Kling kept for later | Accepted |
+| [0082](0082-the-starting-frame-is-generated-too.md) | The starting frame is generated too — an idea is the only input | Accepted |
+| [0083](0083-video-qa-blocks-defects-and-what-platforms-reject.md) | Generated-video QA blocks visible defects and what a platform would reject — the rest are hints | Accepted |
