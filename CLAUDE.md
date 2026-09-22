@@ -1560,6 +1560,13 @@ process at the time, not a pattern to keep copying.)
     `VisualArtifactEvaluator.evaluate_frames` on `ImageAwareLLMClient`; reuses `qa-verdict@v1`;
     sound is not judged. New subtask **23.11**: `TextToImageGenerator` on `GeminiImageGenerator` +
     the scene writer role. Suggested order: 23.2b → 23.11 → 23.10 → video QA → 23.4–23.7 → 23.8.
+    **Maintainer's requirement for both writer Prompts (2026-09-22): "чем детальнее расписан промпт
+    тем намного лучше".** `generation-scene-writer` and `generation-prompt-writer` must produce
+    long, concrete prompts — subject, materials, setting, lighting, time of day, camera (angle, lens,
+    height, fixed position), style, and for `video_prompt` the stages of the change in order and the
+    camera motion — never a one-line paraphrase of the idea. Pin it in the Prompts' text and check
+    it in the role tests (a minimum length / required elements, via `check_required_elements@v1` if
+    it fits).
 
 24. **Findings from the first real clipping run (2026-09-21) — the pipeline works, nothing was
     approvable.** Episode: a 22-minute Rick and Morty episode (`~/episodes/rick morty.mp4`, 1080p,
