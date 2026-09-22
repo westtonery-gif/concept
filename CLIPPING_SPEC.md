@@ -187,6 +187,17 @@ Arial 72 px на холсте 1920×1080 с чёрной обводкой, сн�
 одобрении изменённый текст записывается ещё одним Task'ом `post-text` от `human_reviewer`.
 Текст для публикации — последний валидный Output `post-text` артефакта (`latest_post`).
 
+**Автопостинг (`ADR-0073`).** Порт `ClipPublisher` (`adapters/clip_publisher.py`): `submit(PublishRequest)`
+идемпотентен по нашему `request_id`, `status(request_id) -> PublishStatus` (`PENDING`/`COMPLETED`/
+`FAILED`/`NOT_FOUND` + результат по площадкам). Реализация — `UploadPostPublisher` над upload-post
+(`urllib`, multipart вручную, `async_upload`, `Idempotency-Key` = `request_id`). С настроенным
+публикатором каждый `APPROVED` клип получает Task `publish-clip` с `request_id` = `<artifact_id>-publish`:
+без текста поста — `FAILED NO_POST_TEXT`, ничего не отправлено; иначе Task закоммичен `RUNNING`, затем
+**сначала `status`, `submit` только при `NOT_FOUND`**; `COMPLETED` без отказов → Output
+`clip-publication@v1` (URL площадок) и `APPROVED → PUBLISHED`; иначе `FAILED PUBLISH_FAILED: …`,
+без автоповтора. Run ждёт в `WAITING_HUMAN`, пока у каждого одобренного клипа нет терминальной
+публикации.
+
 **Оркестрация — прикладной модуль рядом с `ContentDirector`, а не его правка** (`ADR-0059` §4).
 Он обязан сам держать дисциплину коммитов `ADR-0026` §2 и возобновляться, не дублируя
 закоммиченный Task или записанный вердикт.

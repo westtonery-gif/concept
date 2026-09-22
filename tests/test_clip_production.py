@@ -34,6 +34,7 @@ from omemo_content_factory.application.clip_production import (
     ClipProduction,
     ClipSettings,
     ClipTally,
+    Posting,
     PostWriting,
     run_id_for_episode,
 )
@@ -55,6 +56,7 @@ from omemo_content_factory.infrastructure.in_memory_adapters import (
     InMemoryReviewDesk,
 )
 from omemo_content_factory.infrastructure.in_memory_clipping import (
+    InMemoryClipPublisher,
     InMemoryClipRenderer,
     InMemoryEpisodeSource,
     InMemoryFootageIndex,
@@ -616,6 +618,111 @@ def test_crn_13_a_crash_around_a_draft_never_drafts_a_clip_twice(
     drafted = [t for t in run.tasks if t.agent_ref == "clip_post_writer@v1"]
     assert len(drafted) == 3, "one draft Task per passed clip, never a second"
     assert all(latest_post(run, a.artifact_id) is not None for a in run.artifacts)
+
+
+# --- CRN-15: auto-posting an approved clip (ADR-0073) ------------------------------------
+
+
+def _posting_production(
+    factory: _Factory, publisher: InMemoryClipPublisher, *, dies: int | None = None
+) -> ClipProduction:
+    built = _with_posts(factory, _PostWriter())
+    built._posting = Posting(publisher=publisher, platforms=publisher.platforms)
+    if dies is not None:
+        built._store = _DyingStore(SqliteRunStore(factory.path), dies)
+    return built
+
+
+def test_crn_15_an_approved_clip_is_posted_and_the_run_completes_after(
+    factory: _Factory,
+) -> None:
+    publisher = InMemoryClipPublisher(settle=False)
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    first = _posting_production(factory, publisher).invoke(EPISODE)
+    assert first.status is RunStatus.WAITING_HUMAN, "not complete while the uploads are in flight"
+    assert len(publisher.published()) == 3
+    assert all(job.post.title.startswith("Заголовок") for job in publisher.published())
+
+    for job in publisher.published():
+        publisher.finish(job.request_id)
+    done = _posting_production(factory, publisher).invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert done.status is RunStatus.COMPLETED
+    assert all(a.status is ArtifactStatus.PUBLISHED for a in run.artifacts)
+    assert done.tally.posted == 3
+    assert len(publisher.submissions) == 3, "looking first means nothing was submitted twice"
+
+
+def test_crn_15_a_failed_post_is_not_retried_and_the_clip_stays_approved(
+    factory: _Factory,
+) -> None:
+    publisher = InMemoryClipPublisher(settle=False)
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    _posting_production(factory, publisher).invoke(EPISODE)
+    jobs = publisher.published()
+    publisher.finish(jobs[0].request_id, failed_platform="youtube")
+    for job in jobs[1:]:
+        publisher.finish(job.request_id)
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _posting_production(factory, publisher).invoke(EPISODE)
+
+    run = factory.stored()
+    assert run is not None
+    assert run.status is RunStatus.COMPLETED, "a failed post is settled, not pending"
+    failed = [t for t in run.tasks if t.workflow_step_ref == "publish-clip" and t.failure_reason]
+    assert len(failed) == 1 and (failed[0].failure_reason or "").startswith("PUBLISH_FAILED")
+    assert sorted(a.status.value for a in run.artifacts) == ["approved", "published", "published"]
+    assert len(publisher.submissions) == 3
+
+
+def test_crn_15_a_clip_without_a_post_text_is_never_posted(factory: _Factory) -> None:
+    publisher = InMemoryClipPublisher()
+    production = _with_posts(factory, _PostWriter(fails=True))
+    production._posting = Posting(publisher=publisher, platforms=publisher.platforms)
+    production.invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    production.invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert publisher.submissions == []
+    reasons = {t.failure_reason for t in run.tasks if t.workflow_step_ref == "publish-clip"}
+    assert reasons == {"NO_POST_TEXT"}
+    assert run.status is RunStatus.COMPLETED
+
+
+def test_crn_15_a_publisher_outage_changes_nothing_and_is_retried(factory: _Factory) -> None:
+    publisher = InMemoryClipPublisher()
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    publisher.down = True
+    outage = _posting_production(factory, publisher).invoke(EPISODE)
+    assert outage.posting_error is not None
+    assert outage.status is RunStatus.WAITING_HUMAN
+    publisher.down = False
+    after = _posting_production(factory, publisher).invoke(EPISODE)
+    assert after.status is RunStatus.COMPLETED
+    assert len(publisher.submissions) == 3
+
+
+@pytest.mark.parametrize("dies_after", range(1, 12))
+def test_crn_15_a_crash_around_posting_never_posts_a_clip_twice(
+    factory: _Factory, dies_after: int
+) -> None:
+    """Look before submit: whatever commit the process dies after, one job per clip."""
+    publisher = InMemoryClipPublisher()
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    with contextlib.suppress(_CrashError):
+        _posting_production(factory, publisher, dies=dies_after).invoke(EPISODE)
+    _posting_production(factory, publisher).invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert run.status is RunStatus.COMPLETED
+    assert len(publisher.submissions) == 3, "each clip submitted exactly once"
+    assert all(a.status is ArtifactStatus.PUBLISHED for a in run.artifacts)
 
 
 # --- the desk is optional and its outages never change the Run ---------------------------

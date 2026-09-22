@@ -48,6 +48,7 @@ from omemo_content_factory.application.clip_format import ClipFormatLimits
 from omemo_content_factory.application.clip_production import (
     ClipProduction,
     ClipSettings,
+    Posting,
     PostWriting,
 )
 from omemo_content_factory.application.content_director import ContentDirector
@@ -127,6 +128,10 @@ from omemo_content_factory.infrastructure.production_service import (
     service_settings_from_env,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
+from omemo_content_factory.infrastructure.upload_post_publisher import (
+    UploadPostPublisher,
+    upload_post_settings_from_env,
+)
 from omemo_content_factory.tools.contract import Tool
 from omemo_content_factory.tools.current_date import CurrentDate
 from omemo_content_factory.tools.text_metrics import TextMetrics
@@ -421,6 +426,7 @@ def build_clip_production(
     evaluator: ContextualArtifactEvaluator,
     desk: ReviewDesk | None = None,
     post_writer: PostWriting | None = None,
+    posting: Posting | None = None,
 ) -> ClipProduction:
     """Assemble the clipping department's production path (ADR-0059).
 
@@ -439,7 +445,14 @@ def build_clip_production(
         settings=build_clip_settings(environ),
         desk=desk,
         post_writer=post_writer,
+        posting=posting,
     )
+
+
+def build_posting(environ: Mapping[str, str]) -> Posting:
+    """Build auto-posting through upload-post (ADR-0073); missing settings fail closed, named."""
+    settings = upload_post_settings_from_env(environ)
+    return Posting(publisher=UploadPostPublisher(settings), platforms=settings.platforms)
 
 
 def build_post_writing(client: LLMClient, *, prompts: PromptCatalogueInput = None) -> PostWriting:

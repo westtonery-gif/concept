@@ -23,6 +23,7 @@ from collections.abc import Mapping, Sequence
 from demo import safe_print
 from demo_factory import _print_binding_instructions
 
+from omemo_content_factory.adapters.clip_publisher import ClipPublisherError
 from omemo_content_factory.adapters.episode_board import EpisodeBoardError
 from omemo_content_factory.adapters.episode_source import EpisodeSourceError
 from omemo_content_factory.adapters.footage_index import FootageIndexError
@@ -31,6 +32,7 @@ from omemo_content_factory.agents import clip_post_writer, clip_qa_agent
 from omemo_content_factory.application.clip_production import (
     ClipInvocation,
     ClipProduction,
+    Posting,
     PostWriting,
 )
 from omemo_content_factory.application.qa_evaluation import ContextualArtifactEvaluator
@@ -39,6 +41,7 @@ from omemo_content_factory.composition import (
     NOTION_REVIEW_DESK_VARS,
     build_clip_production,
     build_post_writing,
+    build_posting,
     build_qa_evaluator,
     build_review_desk,
 )
@@ -75,12 +78,20 @@ def _build_post_writer(environ: Mapping[str, str]) -> PostWriting | None:
     return build_post_writing(client_for_role(clip_post_writer.AGENT_REF, environ))
 
 
+def _build_posting(environ: Mapping[str, str]) -> Posting | None:
+    """Auto-posting (ADR-0073), when upload-post is configured; otherwise approved is the end."""
+    if not environ.get("OMEMO_UPLOAD_POST_API_KEY", "").strip():
+        return None
+    return build_posting(environ)
+
+
 def _build(environ: Mapping[str, str]) -> ClipProduction:
     return build_clip_production(
         environ,
         evaluator=_build_evaluator(),
         desk=_build_desk(environ),
         post_writer=_build_post_writer(environ),
+        posting=_build_posting(environ),
     )
 
 
@@ -97,26 +108,29 @@ def _report(invocation: ClipInvocation) -> None:
         + (f"; {tally.render_failed} clip(s) could not be rendered" if tally.render_failed else "")
     )
     safe_print(judged)
-    safe_print(f"  approved: {tally.approved} of {invocation.clips}")
+    safe_print(f"  approved: {tally.approved} of {invocation.clips}; posted: {tally.posted}")
     if invocation.status is RunStatus.COMPLETED and not tally.approved:
         # `completed` means every clip is settled, not that any is ready (ADR-0059 §3).
         safe_print("  nothing is ready to publish: no clip passed QA and was approved")
     if invocation.failure_reason:
         safe_print(f"  the episode could not be produced: {invocation.failure_reason}")
-    for task_id in invocation.failed_clips:
-        safe_print(f"  clip failed: {task_id}")
-    for location in invocation.published:
-        safe_print(f"  review published: {location}")
     for decision in invocation.decisions:
         applied = "recorded" if decision.applied else "not recorded (QA has not passed)"
         safe_print(f"  decision {decision.decision.value} on {decision.review_id} — {applied}")
-    for artifact_id in invocation.approved:
-        safe_print(f"  approved: {artifact_id}")
+    for label, items in (
+        ("clip failed", invocation.failed_clips),
+        ("review published", invocation.published),
+        ("approved", invocation.approved),
+        ("posted", invocation.posted),
+    ):
+        for item in items:
+            safe_print(f"  {label}: {item}")
     for label, error in (
         ("QA", invocation.qa_error),
         ("publication", invocation.publish_error),
         ("decision", invocation.decision_error),
         ("post text", invocation.post_error),
+        ("posting", invocation.posting_error),
     ):
         if error:
             safe_print(f"  {label} error (retried next invocation): {error}")
@@ -129,7 +143,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         production = _build(os.environ)
-    except (EpisodeBoardError, EpisodeSourceError, FootageIndexError, ReviewDeskError) as exc:
+    except (
+        EpisodeBoardError,
+        EpisodeSourceError,
+        FootageIndexError,
+        ReviewDeskError,
+        ClipPublisherError,
+    ) as exc:
         safe_print(f"The clipping department is not configured: {exc}")
         return 1
     except ProviderModelSelectionError as exc:

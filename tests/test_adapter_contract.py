@@ -356,6 +356,7 @@ def test_adb_06_every_contract_module_is_scanned_and_imports_on_its_own() -> Non
         == {
             "analytics_sink",
             "brief_board",
+            "clip_publisher",  # auto-posting (ADR-0073)
             "clip_renderer",
             "episode_board",
             "episode_source",

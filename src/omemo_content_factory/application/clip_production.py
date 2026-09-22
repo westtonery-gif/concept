@@ -25,6 +25,13 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from omemo_content_factory.adapters.clip_publisher import (
+    ClipPublisher,
+    ClipPublisherError,
+    PublishRequest,
+    PublishState,
+    PublishStatus,
+)
 from omemo_content_factory.adapters.clip_renderer import (
     ClipRenderer,
     ClipRendererError,
@@ -41,7 +48,7 @@ from omemo_content_factory.adapters.footage_index import (
     FootageIndexError,
     IndexedFootage,
 )
-from omemo_content_factory.adapters.review_desk import ReviewDesk
+from omemo_content_factory.adapters.review_desk import PostDraft, ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.application.clip_format import ClipFormatLimits, check_clip_format
 from omemo_content_factory.application.clip_plan import PlannedClip, plan_clips
@@ -87,6 +94,7 @@ __all__ = [
     "ClipSettings",
     "ClipTally",
     "PostWriting",
+    "Posting",
     "run_id_for_episode",
 ]
 
@@ -109,6 +117,12 @@ AGENT_REF = "clip_renderer@v1"
 POST_WRITER_REF = "clip_post_writer@v1"
 REVIEWER_REF = "human_reviewer"
 """The ``agent_ref`` of a post text the reviewer edited on the review page (ADR-0072 §4)."""
+
+PUBLISH_STEP_REF = "publish-clip"
+PUBLISHER_REF = "clip_publisher@v1"
+PUBLICATION_SCHEMA_REF = "clip-publication@v1"
+NO_POST_TEXT_REASON = "NO_POST_TEXT"
+PUBLISH_FAILED_REASON = "PUBLISH_FAILED"
 
 INDEX_STEP_REF = "index-footage"
 INDEX_AGENT_REF = "footage_index@v1"
@@ -150,6 +164,14 @@ class PostWriting:
 
 
 @dataclass(frozen=True, slots=True)
+class Posting:
+    """Where approved clips are posted: the publisher and the platforms it posts to (ADR-0073)."""
+
+    publisher: ClipPublisher
+    platforms: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class ClipTally:
     """Where an episode's clips stand, counted from the Run (task 24.4).
 
@@ -165,6 +187,7 @@ class ClipTally:
     failed: int = 0
     unjudged: int = 0
     approved: int = 0
+    posted: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +208,8 @@ class ClipInvocation:
     failure_reason: str | None = None
     tally: ClipTally = ClipTally()
     post_error: str | None = None
+    posted: tuple[str, ...] = ()
+    posting_error: str | None = None
 
 
 @dataclass
@@ -199,6 +224,8 @@ class _Outcome:
     publish_error: str | None = None
     decision_error: str | None = None
     post_error: str | None = None
+    posted: list[str] = field(default_factory=list)
+    posting_error: str | None = None
 
 
 class ClipProduction:
@@ -216,6 +243,7 @@ class ClipProduction:
         settings: ClipSettings,
         desk: ReviewDesk | None = None,
         post_writer: PostWriting | None = None,
+        posting: Posting | None = None,
     ) -> None:
         self._store = store
         self._board = board
@@ -226,6 +254,7 @@ class ClipProduction:
         self._settings = settings
         self._desk = desk
         self._post_writer = post_writer
+        self._posting = posting
 
     @property
     def has_desk(self) -> bool:
@@ -288,6 +317,8 @@ class ClipProduction:
             decision_error=outcome.decision_error,
             tally=_tally(run),
             post_error=outcome.post_error,
+            posted=tuple(outcome.posted),
+            posting_error=outcome.posting_error,
         )
 
     # --- production ---------------------------------------------------------------------
@@ -500,6 +531,7 @@ class ClipProduction:
                 self._store.save(run)
 
         self._approve(run, outcome)
+        self._publish(run, outcome)
         if open_clip_reviews(run):
             self._store.save(run)
         if self._desk is not None:
@@ -581,6 +613,139 @@ class ClipProduction:
                 by=Actor.CONTENT_DIRECTOR,
             )
 
+    def _publish(self, run: Run, outcome: _Outcome) -> None:
+        """Post every approved clip that has no settled publication (ADR-0073 §3).
+
+        Look before submitting: only a job the publisher has never seen is submitted, under a
+        ``request_id`` fixed when the Task was opened, so no crash can post a clip twice.
+        """
+        if self._posting is None:
+            return
+        for artifact in run.artifacts:
+            if artifact.status is not ArtifactStatus.APPROVED:
+                continue
+            task = _publish_task(run, artifact.artifact_id)
+            if task is not None and task.status is not TaskStatus.RUNNING:
+                continue
+            post = latest_post(run, artifact.artifact_id)
+            job = self._open_publication(run, artifact, post) if task is None else _job(task)
+            if job is None or post is None:
+                continue
+            task_id, request_id, platforms = job
+            try:
+                status = self._look_then_submit(artifact, request_id, post, platforms)
+            except ClipPublisherError as exc:
+                outcome.posting_error = f"{type(exc).__name__}: {exc}"
+                return
+            if status.state in (PublishState.PENDING, PublishState.NOT_FOUND):
+                continue
+            self._settle_publication(run, artifact, task_id, request_id, post, status, outcome)
+            self._store.save(run)
+
+    def _open_publication(
+        self, run: Run, artifact: ArtifactView, post: PostDraft | None
+    ) -> tuple[str, str, tuple[str, ...]] | None:
+        """Open the clip's ``publish-clip`` Task and commit it; ``None`` if it cannot be posted."""
+        assert self._posting is not None
+        request_id = f"{artifact.artifact_id}-publish"
+        platforms = self._posting.platforms
+        task_id = start_task(
+            run,
+            workflow_step_ref=PUBLISH_STEP_REF,
+            agent_ref=PUBLISHER_REF,
+            task_input=json.dumps(
+                {
+                    "artifact_ref": artifact.artifact_id,
+                    "request_id": request_id,
+                    "platforms": list(platforms),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        )
+        if post is None:
+            # Never posted without a text a human has seen (ADR-0072, ADR-0073 §3).
+            run.transition_task(
+                task_id, TaskStatus.FAILED, Actor.CONTENT_DIRECTOR, reason=NO_POST_TEXT_REASON
+            )
+            self._store.save(run)
+            return None
+        self._store.save(run)  # committed before any outside call (ADR-0026 §2)
+        return task_id, request_id, platforms
+
+    def _look_then_submit(
+        self,
+        artifact: ArtifactView,
+        request_id: str,
+        post: PostDraft,
+        platforms: tuple[str, ...],
+    ) -> PublishStatus:
+        """Ask first; submit only a job the publisher has never seen, then ask again."""
+        assert self._posting is not None
+        publisher = self._posting.publisher
+        status = publisher.status(request_id)
+        if status.state is not PublishState.NOT_FOUND:
+            return status
+        publisher.submit(
+            PublishRequest(
+                request_id=request_id,
+                video_path=str(json.loads(artifact.content)["path"]),
+                post=post,
+                platforms=platforms,
+            )
+        )
+        return publisher.status(request_id)
+
+    def _settle_publication(
+        self,
+        run: Run,
+        artifact: ArtifactView,
+        task_id: str,
+        request_id: str,
+        post: PostDraft,
+        status: PublishStatus,
+        outcome: _Outcome,
+    ) -> None:
+        """A finished job: ``PUBLISHED`` if every platform took it, a failed Task otherwise."""
+        failed = [result for result in status.results if not result.success]
+        if status.state is PublishState.COMPLETED and not failed:
+            run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)
+            run.record_output(
+                task_id,
+                payload=json.dumps(
+                    {
+                        "request_id": request_id,
+                        "title": post.title,
+                        "results": [
+                            {"platform": result.platform, "url": result.url}
+                            for result in status.results
+                        ],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                schema_ref=PUBLICATION_SCHEMA_REF,
+                by=Actor.CONTENT_DIRECTOR,
+            )
+            run.transition_artifact(
+                artifact.artifact_id, ArtifactStatus.PUBLISHED, Actor.CONTENT_DIRECTOR
+            )
+            outcome.posted.append(artifact.artifact_id)
+            return
+        first = failed[0] if failed else None
+        detail = (
+            f"{first.platform}: {first.message or 'no message'}"
+            if first is not None
+            else "the publisher reported a failure"
+        )
+        # No automatic retry: a partial post is already public somewhere (ADR-0073 §3).
+        run.transition_task(
+            task_id,
+            TaskStatus.FAILED,
+            Actor.CONTENT_DIRECTOR,
+            reason=f"{PUBLISH_FAILED_REASON}: {detail}",
+        )
+
     def _approve(self, run: Run, outcome: _Outcome) -> None:
         """Approve every candidate whose review said so and whose latest verdict passed."""
         for artifact in _candidates(run):
@@ -610,6 +775,15 @@ class ClipProduction:
         ]
         if undecided:
             return
+        if self._posting is not None and any(
+            artifact.status is ArtifactStatus.APPROVED
+            and (
+                (task := _publish_task(run, artifact.artifact_id)) is None
+                or task.status is TaskStatus.RUNNING
+            )
+            for artifact in run.artifacts
+        ):
+            return  # an approved clip is still on its way to the platforms (ADR-0073 §3)
         run.transition(RunStatus.COMPLETED, Actor.CONTENT_DIRECTOR)
         self._store.save(run)
 
@@ -627,6 +801,25 @@ def _tasks_by_clip(run: Run) -> dict[int, TaskView]:
         if isinstance(index, int):
             recorded[index] = task
     return recorded
+
+
+def _job(task: TaskView) -> tuple[str, str, tuple[str, ...]]:
+    """A ``RUNNING`` publish Task's id, request id and platforms, as it was opened."""
+    stored = json.loads(task.task_input)
+    return task.task_id, str(stored["request_id"]), tuple(str(n) for n in stored["platforms"])
+
+
+def _publish_task(run: Run, artifact_id: str) -> TaskView | None:
+    """The one ``publish-clip`` Task of a clip, if it was opened."""
+    for task in run.tasks:
+        if task.workflow_step_ref != PUBLISH_STEP_REF:
+            continue
+        try:
+            if json.loads(task.task_input).get("artifact_ref") == artifact_id:
+                return task
+        except (ValueError, AttributeError):  # pragma: no cover - our own input shape
+            continue
+    return None
 
 
 def _post_tasks(run: Run, artifact_id: str) -> list[TaskView]:
@@ -688,6 +881,7 @@ def _tally(run: Run) -> ClipTally:
             artifact.status in (ArtifactStatus.APPROVED, ArtifactStatus.PUBLISHED)
             for artifact in run.artifacts
         ),
+        posted=sum(artifact.status is ArtifactStatus.PUBLISHED for artifact in run.artifacts),
     )
 
 

@@ -14,6 +14,13 @@ footage, because empty footage is a legitimate answer that would hide a missing 
 
 from __future__ import annotations
 
+from omemo_content_factory.adapters.clip_publisher import (
+    ClipPublisherError,
+    PlatformResult,
+    PublishRequest,
+    PublishState,
+    PublishStatus,
+)
 from omemo_content_factory.adapters.clip_renderer import (
     ClipRendererError,
     ClipRenderRequest,
@@ -22,7 +29,12 @@ from omemo_content_factory.adapters.clip_renderer import (
 from omemo_content_factory.adapters.episode_source import LocatedEpisode
 from omemo_content_factory.adapters.footage_index import FootageIndexError, IndexedFootage
 
-__all__ = ["InMemoryClipRenderer", "InMemoryEpisodeSource", "InMemoryFootageIndex"]
+__all__ = [
+    "InMemoryClipPublisher",
+    "InMemoryClipRenderer",
+    "InMemoryEpisodeSource",
+    "InMemoryFootageIndex",
+]
 
 
 class InMemoryEpisodeSource:
@@ -103,3 +115,56 @@ class InMemoryClipRenderer:
     def rendered(self) -> tuple[str, ...]:
         """Destinations the renderer was asked to produce, oldest first."""
         return tuple(request.destination for request in self.requests)
+
+
+class InMemoryClipPublisher:
+    """A ``ClipPublisher`` that keeps submitted jobs; its control side plays the platforms.
+
+    ``submit`` is idempotent per ``request_id`` like the real one. A job stays ``PENDING`` until
+    the control side settles it with :meth:`finish`, unless ``settle`` says every job completes at
+    once. ``submissions`` counts every ``submit`` call, so a test can prove nothing posted twice.
+    """
+
+    def __init__(self, *, platforms: tuple[str, ...] = ("youtube",), settle: bool = True) -> None:
+        self.platforms = platforms
+        self._settle = settle
+        self._jobs: dict[str, PublishRequest] = {}
+        self._outcomes: dict[str, PublishStatus] = {}
+        self.submissions: list[str] = []
+        self.down = False
+
+    def submit(self, request: PublishRequest, /) -> None:
+        if self.down:
+            raise ClipPublisherError("the publisher is down")
+        self.submissions.append(request.request_id)
+        self._jobs.setdefault(request.request_id, request)
+        if self._settle and request.request_id not in self._outcomes:
+            self.finish(request.request_id)
+
+    def status(self, request_id: str, /) -> PublishStatus:
+        if self.down:
+            raise ClipPublisherError("the publisher is down")
+        if request_id not in self._jobs:
+            return PublishStatus(state=PublishState.NOT_FOUND)
+        return self._outcomes.get(request_id, PublishStatus(state=PublishState.PENDING))
+
+    def finish(self, request_id: str, *, failed_platform: str | None = None) -> None:
+        """Control side: the platforms took the job — all of them, or all but one."""
+        request = self._jobs[request_id]
+        results = tuple(
+            PlatformResult(
+                platform=name,
+                success=name != failed_platform,
+                url=None if name == failed_platform else f"https://{name}.example/{request_id}",
+                message="rejected" if name == failed_platform else "Published",
+            )
+            for name in request.platforms
+        )
+        self._outcomes[request_id] = PublishStatus(
+            state=PublishState.FAILED if failed_platform else PublishState.COMPLETED,
+            results=results,
+        )
+
+    def published(self) -> tuple[PublishRequest, ...]:
+        """Control side: every distinct job ever submitted, in order."""
+        return tuple(self._jobs.values())
