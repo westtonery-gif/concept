@@ -1722,6 +1722,10 @@ process at the time, not a pattern to keep copying.)
     **Same day, ADR-0076:** the maintainer saw the quality drop — 1080 wide shrinks the picture to
     1080×608. Default canvas is now **2160×3840** (picture 2160×1215, no downscale), `-crf 18
     -preset medium`, lanczos scaling; ~1 min encoding and ~75 MB per 2-min clip.
+    **Episode 2's 12 clip files were re-rendered in place** on this canvas (same cuts, captions from
+    the recorded index, same paths; 23–68 s each, 39–57 MB) by a one-off script, at the maintainer's
+    request and before any review was decided — **outside the Run's trace**: the Run still reflects
+    the first render, whose QA verdicts and post texts are unchanged and still apply.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
