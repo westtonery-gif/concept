@@ -1600,9 +1600,17 @@ process at the time, not a pattern to keep copying.)
     - 24.4 — done: `ClipInvocation.tally` + `demo_clips.py` prints QA breakdown and "approved N of
       M", and says outright when nothing is ready. **Found while doing it:** the board never shows
       a status at all — see task 26.
-    - **Still owed — the maintainer's action:** re-run the episode under a fresh board card and see
-      whether any clip passes now (~$0.09 of QA per pass; the QA input is now ~12k tokens/clip
-      bigger, so expect more).
+    - **Re-run 2026-09-22** (same card, fresh store `.omemo/rerun-24.sqlite3`, clips in
+      `clips/rerun-24/`; the first run's store is untouched): 15 clips, **1 passed, 11 flagged,
+      3 failed**, Run `waiting_human`, one review published to the Notion desk (clip 1, 0–120 s) —
+      **the first clip ever to pass**, awaiting the maintainer's decision. QA now cites the episode
+      transcript by timestamp, so 24.1 works live. No flag is a mid-word cut. What remains is almost
+      entirely **scene/storyline boundaries**: clips open on a reply to something before them, end
+      right before the payoff, or mix two threads (Jerry/Beth vs. Rick/Morty) — i.e. task 25's
+      problem, now with evidence. Two clips are the intro/outro song + translator credits (clip 3's
+      start, clip 15 whole) — candidates for a "no speech-content" filter. **Cost: $0.531, 232k
+      input tokens** (vs $0.091 before) — the per-clip episode transcript; ADR-0056 §3's deferred
+      prefix caching is now worth doing. 7.5 min wall time.
 
 25. **A scene/storyline planner for `SCENE` mode — ADR-0069 §3 queued it, not started.** Pixels and
     speech timing cannot say where a scene or a thread begins (ADR-0069's measurements); a planner
@@ -1612,6 +1620,8 @@ process at the time, not a pattern to keep copying.)
     Prompt, output contract (boundaries must still be validated deterministically — inside the
     episode, at a detected cut or a line edge, under the maximum), and cost per episode. Decide
     only after a re-run with 24.1–24.3 in place shows how much QA still flags storyline jumps.
+    **That re-run happened (2026-09-22, see 24):** 14 of 15 clips were flagged/failed, and nearly
+    every flag is a scene or thread boundary — so this is now the next thing blocking useful clips.
 
 26. **The episode board's `Run status` / `Run id` are never written — found 2026-09-21 in 24.4.**
     `EpisodeBoard.report_status` exists and `NotionEpisodeBoard` implements it (ADR-0055), and the
