@@ -392,14 +392,14 @@ def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
 
 
 CLIP_CANVAS_VAR = "OMEMO_CLIP_CANVAS"
-_DEFAULT_CLIP_CANVAS = "1080x1920"
+_DEFAULT_CLIP_CANVAS = "2160x3840"
 
 
 def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
     """Build the ffmpeg `ClipRenderer` (ADR-0063/0071/0075).
 
-    `OMEMO_CLIP_CANVAS` is `WIDTHxHEIGHT` (default `1080x1920`: the picture uncropped between black
-    bars kept for banners) or `source` to keep the source frame.
+    `OMEMO_CLIP_CANVAS` is `WIDTHxHEIGHT` (default `2160x3840`, ADR-0076: the picture uncropped,
+    no downscale, between black bars kept for banners) or `source` to keep the source frame.
     """
     raw = environ.get(CLIP_CANVAS_VAR, "").strip().casefold() or _DEFAULT_CLIP_CANVAS
     if raw == "source":

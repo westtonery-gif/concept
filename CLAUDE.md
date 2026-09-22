@@ -1719,6 +1719,9 @@ process at the time, not a pattern to keep copying.)
     third-party ads, and whether the audience is in Russia (ad marking: «Реклама», advertiser,
     `erid` via an ОРД; platforms' paid-promotion / branded-content disclosure). Episode 2's 12
     clips were rendered **before** this, in 16:9.
+    **Same day, ADR-0076:** the maintainer saw the quality drop — 1080 wide shrinks the picture to
+    1080×608. Default canvas is now **2160×3840** (picture 2160×1215, no downscale), `-crf 18
+    -preset medium`, lanczos scaling; ~1 min encoding and ~75 MB per 2-min clip.
 
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 

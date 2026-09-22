@@ -63,6 +63,8 @@ class FfmpegClipRenderer:
         caption_font: str = DEFAULT_CAPTION_FONT,
         caption_size: int = DEFAULT_CAPTION_SIZE,
         canvas: tuple[int, int] | None = None,
+        crf: int = 18,
+        preset: str = "medium",
     ) -> None:
         if not caption_font.strip() or "," in caption_font:
             raise ValueError("a caption font needs a non-blank name without commas")
@@ -80,6 +82,8 @@ class FfmpegClipRenderer:
         self._caption_font = caption_font.strip()
         self._caption_size = caption_size
         self._canvas = canvas
+        self._crf = crf
+        self._preset = preset
 
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
         """Write the clip with its captions burnt in; return what ffprobe says it actually is."""
@@ -103,7 +107,7 @@ class FfmpegClipRenderer:
                 # The same picture, uncropped, centred on our own bars (ADR-0075 §1).
                 width, height = self._canvas
                 filters.append(
-                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
                 )
             burn = ["-vf", ",".join(filters)] if filters else []
@@ -121,6 +125,10 @@ class FfmpegClipRenderer:
                     *burn,
                     "-c:v",
                     self._video_codec,
+                    "-crf",
+                    str(self._crf),
+                    "-preset",
+                    self._preset,
                     "-c:a",
                     self._audio_codec,
                     str(destination),

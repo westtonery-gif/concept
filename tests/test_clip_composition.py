@@ -193,7 +193,7 @@ def test_cmp_07_the_built_parts_are_the_real_implementations(tmp_path: Path) -> 
 def test_cmp_08_the_canvas_is_vertical_by_default_and_configurable(tmp_path: Path) -> None:
     """ADR-0075: a product choice with a safe default, like the clip lengths."""
     environ = _episode_env(tmp_path)
-    assert build_clip_renderer(environ)._canvas == (1080, 1920)  # type: ignore[attr-defined]
+    assert build_clip_renderer(environ)._canvas == (2160, 3840)  # type: ignore[attr-defined]
     source = build_clip_renderer({**environ, "OMEMO_CLIP_CANVAS": "source"})
     assert source._canvas is None  # type: ignore[attr-defined]
     square = build_clip_renderer({**environ, "OMEMO_CLIP_CANVAS": "1080x1080"})
