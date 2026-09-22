@@ -98,3 +98,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0072](0072-a-post-text-drafted-by-a-model-and-approved-with-the-clip.md) | A post text drafted by a model, shown on the review page, approved with the clip | Accepted |
 | [0073](0073-auto-posting-through-a-clip-publisher.md) | Auto-posting an approved clip through a `ClipPublisher` — upload-post behind it | Accepted |
 | [0074](0074-titles-and-credits-found-by-audio-fingerprint.md) | Opening titles and end credits are found by audio fingerprint, and no clip covers them | Accepted |
+| [0075](0075-a-vertical-canvas-with-bars-reserved-for-banners.md) | Clips are rendered on a vertical canvas, with the bars above and below kept for banners | Accepted |

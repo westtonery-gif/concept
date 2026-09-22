@@ -1709,6 +1709,17 @@ process at the time, not a pattern to keep copying.)
     the dub credit «Перевел Женя Спицын…» just after the theme (task 28's straddling-span leftover);
     clip 11 is the finale and passed with a hint that it is the episode's resolution.
 
+33. **A vertical canvas with bars for banners — done (ADR-0075, 2026-09-22); the banners are
+    not.** The maintainer: "формат тот же, но чёрные блоки сверху и снизу для баннерной рекламы".
+    `FfmpegClipRenderer(canvas=)` scales the captioned picture into the canvas uncropped and pads
+    it black, centred; `OMEMO_CLIP_CANVAS` default `1080x1920` (`source` = old behaviour) — on a
+    1920×1080 source: 1080×608 picture, 656 px bars above and below; captions stay on the picture.
+    FCR-09 (pixels), CMP-08. **Open, the maintainer's to answer before banners are built:** what is
+    advertised (sponsors / own channel), whether the series licence allows monetisation and
+    third-party ads, and whether the audience is in Russia (ad marking: «Реклама», advertiser,
+    `erid` via an ОРД; platforms' paid-promotion / branded-content disclosure). Episode 2's 12
+    clips were rendered **before** this, in 16:9.
+
 See `DOMAIN_MODEL.md` (entities) and §9 (aggregate roots) for the domain shape of tasks 3–5.
 
 ## Conventions

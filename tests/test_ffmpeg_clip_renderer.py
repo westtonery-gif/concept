@@ -212,6 +212,74 @@ def test_fcr_02_caption_text_cannot_inject_ass_markup(tmp_path: Path) -> None:
     assert _light_pixels(Path(clip.path), 0.5) > 200, "the markup was drawn as text, not obeyed"
 
 
+@needs_ffmpeg
+def test_fcr_09_a_canvas_keeps_the_picture_whole_between_black_bars(tmp_path: Path) -> None:
+    """ADR-0075: 16:9 on 9:16, uncropped and centred; the bars are ours, black, for banners."""
+    source = tmp_path / "white.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=white:duration=2:size=320x180:rate=10",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=duration=2",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(source),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=120,
+    )
+    clip = FfmpegClipRenderer(canvas=(180, 320)).render(
+        _request(source, tmp_path / "vertical.mp4", start_ms=0, end_ms=2_000)
+    )
+    assert (clip.width, clip.height) == (180, 320)
+    frame = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0.5",
+            "-i",
+            clip.path,
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    rows = [frame[row * 180 : (row + 1) * 180] for row in range(320)]
+    lit = [row for row in range(320) if sum(rows[row]) / 180 > 128]
+    picture = max(lit) - min(lit) + 1
+    assert abs(picture - 101) <= 4, "180 wide at 16:9 is about 101 rows of picture"
+    assert abs(min(lit) - (320 - picture) / 2) <= 3, "centred"
+    assert all(value < 32 for value in rows[5] + rows[314]), "black above and below"
+
+
+def test_fcr_09_a_canvas_needs_two_positive_even_sides() -> None:
+    for bad in ((0, 1920), (1081, 1920), (1080,)):
+        with pytest.raises(ValueError, match="canvas"):
+            FfmpegClipRenderer(canvas=bad)  # type: ignore[arg-type]
+
+
 def test_fcr_08_an_ffmpeg_without_libass_is_refused_by_name(
     episode_stub_dir: Path, tmp_path: Path
 ) -> None:

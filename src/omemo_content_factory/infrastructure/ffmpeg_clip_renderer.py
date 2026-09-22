@@ -62,11 +62,16 @@ class FfmpegClipRenderer:
         audio_codec: str = "aac",
         caption_font: str = DEFAULT_CAPTION_FONT,
         caption_size: int = DEFAULT_CAPTION_SIZE,
+        canvas: tuple[int, int] | None = None,
     ) -> None:
         if not caption_font.strip() or "," in caption_font:
             raise ValueError("a caption font needs a non-blank name without commas")
         if caption_size <= 0:
             raise ValueError("a caption size must be positive")
+        if canvas is not None and (
+            len(canvas) != 2 or any(side <= 0 or side % 2 for side in canvas)
+        ):
+            raise ValueError("a canvas is two positive, even sides")
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
         self._timeout = timeout
@@ -74,6 +79,7 @@ class FfmpegClipRenderer:
         self._audio_codec = audio_codec
         self._caption_font = caption_font.strip()
         self._caption_size = caption_size
+        self._canvas = canvas
 
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
         """Write the clip with its captions burnt in; return what ffprobe says it actually is."""
@@ -85,14 +91,22 @@ class FfmpegClipRenderer:
             destination.parent.mkdir(parents=True, exist_ok=True)
 
         with tempfile.TemporaryDirectory() as workspace:
-            burn: list[str] = []
+            filters: list[str] = []
             if request.captions:
                 subtitles = Path(workspace) / "captions.ass"
                 subtitles.write_text(
                     _ass(request.captions, font=self._caption_font, size=self._caption_size),
                     encoding="utf-8",
                 )
-                burn = ["-vf", f"subtitles=filename={_filter_path(subtitles)}"]
+                filters.append(f"subtitles=filename={_filter_path(subtitles)}")
+            if self._canvas is not None:
+                # The same picture, uncropped, centred on our own bars (ADR-0075 §1).
+                width, height = self._canvas
+                filters.append(
+                    f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
+                )
+            burn = ["-vf", ",".join(filters)] if filters else []
             self._run(
                 [
                     self._ffmpeg,

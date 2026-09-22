@@ -391,13 +391,27 @@ def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
     return LocalFootageIndex(whisper_settings_from_env(environ))
 
 
-def build_clip_renderer(_environ: Mapping[str, str]) -> ClipRenderer:
-    """Build the ffmpeg `ClipRenderer` (ADR-0063). It takes no configuration yet.
+CLIP_CANVAS_VAR = "OMEMO_CLIP_CANVAS"
+_DEFAULT_CLIP_CANVAS = "1080x1920"
 
-    The environment is accepted anyway so the signature matches its siblings and codec or binary
-    settings can arrive later without every caller changing.
+
+def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
+    """Build the ffmpeg `ClipRenderer` (ADR-0063/0071/0075).
+
+    `OMEMO_CLIP_CANVAS` is `WIDTHxHEIGHT` (default `1080x1920`: the picture uncropped between black
+    bars kept for banners) or `source` to keep the source frame.
     """
-    return FfmpegClipRenderer()
+    raw = environ.get(CLIP_CANVAS_VAR, "").strip().casefold() or _DEFAULT_CLIP_CANVAS
+    if raw == "source":
+        return FfmpegClipRenderer()
+    width, sep, height = raw.partition("x")
+    try:
+        canvas = (int(width), int(height))
+    except ValueError:
+        raise CompositionError(f"{CLIP_CANVAS_VAR} must be WIDTHxHEIGHT or 'source'") from None
+    if not sep or any(side <= 0 or side % 2 for side in canvas):
+        raise CompositionError(f"{CLIP_CANVAS_VAR} needs two positive, even sides")
+    return FfmpegClipRenderer(canvas=canvas)
 
 
 def build_clip_settings(environ: Mapping[str, str]) -> ClipSettings:
