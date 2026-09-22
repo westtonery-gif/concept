@@ -707,6 +707,29 @@ def test_crn_15_a_publisher_outage_changes_nothing_and_is_retried(factory: _Fact
     assert len(publisher.submissions) == 3
 
 
+def test_crn_15_pacing_posts_one_clip_per_invocation_in_clip_order(factory: _Factory) -> None:
+    """With a limit of 1 and a schedule, one approved clip goes out per run (task 34)."""
+    publisher = InMemoryClipPublisher()
+    _posting_production(factory, publisher).invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+
+    def paced() -> ClipProduction:
+        built = _posting_production(factory, publisher)
+        built._posting = Posting(
+            publisher=publisher, platforms=("youtube",), max_new_per_invocation=1
+        )
+        return built
+
+    first = paced().invoke(EPISODE)
+    assert first.posted == (f"{run_id_for_episode(EPISODE)}-artifact-1",)
+    assert first.status is RunStatus.WAITING_HUMAN, "two clips still wait their turn"
+    second = paced().invoke(EPISODE)
+    assert second.posted == (f"{run_id_for_episode(EPISODE)}-artifact-2",)
+    third = paced().invoke(EPISODE)
+    assert third.status is RunStatus.COMPLETED
+    assert len(publisher.submissions) == 3
+
+
 @pytest.mark.parametrize("dies_after", range(1, 12))
 def test_crn_15_a_crash_around_posting_never_posts_a_clip_twice(
     factory: _Factory, dies_after: int

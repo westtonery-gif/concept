@@ -463,10 +463,25 @@ def build_clip_production(
     )
 
 
+POSTS_PER_RUN_VAR = "OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN"
+"""How many approved clips start posting per invocation (unset = all) — pacing a schedule."""
+
+
 def build_posting(environ: Mapping[str, str]) -> Posting:
     """Build auto-posting through upload-post (ADR-0073); missing settings fail closed, named."""
     settings = upload_post_settings_from_env(environ)
-    return Posting(publisher=UploadPostPublisher(settings), platforms=settings.platforms)
+    raw = environ.get(POSTS_PER_RUN_VAR, "").strip()
+    try:
+        limit = int(raw) if raw else None
+    except ValueError:
+        raise CompositionError(f"{POSTS_PER_RUN_VAR} must be a whole number") from None
+    if limit is not None and limit < 1:
+        raise CompositionError(f"{POSTS_PER_RUN_VAR} must be at least 1")
+    return Posting(
+        publisher=UploadPostPublisher(settings),
+        platforms=settings.platforms,
+        max_new_per_invocation=limit,
+    )
 
 
 def build_post_writing(client: LLMClient, *, prompts: PromptCatalogueInput = None) -> PostWriting:

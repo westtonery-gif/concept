@@ -169,6 +169,12 @@ class Posting:
 
     publisher: ClipPublisher
     platforms: tuple[str, ...]
+    max_new_per_invocation: int | None = None
+    """At most this many clips start posting per invocation, in clip order; ``None`` = all.
+
+    Pacing (ADR-0073 amendment): with a schedule running the department every N hours and a limit
+    of 1, one approved clip goes out every N hours. Uploads already in flight are always collected.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -621,6 +627,7 @@ class ClipProduction:
         """
         if self._posting is None:
             return
+        budget = self._posting.max_new_per_invocation
         for artifact in run.artifacts:
             if artifact.status is not ArtifactStatus.APPROVED:
                 continue
@@ -628,6 +635,10 @@ class ClipProduction:
             if task is not None and task.status is not TaskStatus.RUNNING:
                 continue
             post = latest_post(run, artifact.artifact_id)
+            if task is None and budget is not None:
+                if budget <= 0:
+                    continue  # paced: this clip waits for a later invocation
+                budget -= 1
             job = self._open_publication(run, artifact, post) if task is None else _job(task)
             if job is None or post is None:
                 continue
