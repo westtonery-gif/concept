@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Runs one clipping invocation for the episode card every 2 hours (task 34). With
+     OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN=1 that posts the next approved clip and collects the last.
+     Install: cp to ~/Library/LaunchAgents/ and `launchctl bootstrap gui/$(id -u) <that path>`. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.concept.clip-posting</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/delnonsly/concept/scripts/run_clips.sh</string>
+    <string>3e364b74-a905-81e0-bd30-e5068c85d9e9</string>
+  </array>
+  <key>StartInterval</key><integer>7200</integer>
+  <key>RunAtLoad</key><false/>
+  <key>StandardErrorPath</key><string>/Users/delnonsly/concept/.omemo/clip-posting.launchd.err</string>
+</dict>
+</plist>
