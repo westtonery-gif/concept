@@ -56,21 +56,37 @@ So the move is only worth making **because** audio is not wanted. With audio the
 the same and this ADR would not exist. The adapter therefore requests no audio, and turning it on
 is a deliberate edit with a known price, not a flag someone flips by accident.
 
-### 3. The ending frame — the requirement that decides everything
+### 3. The ending frame — confirmed live against the real API, 2026-09-26
 
 ADR-0066 §1 requires a model that accepts an **ending** frame; the whole pipeline generates a start
-and an end and asks for the motion between them. Seedance takes them as two sequential
-`image_url` entries in the request's `content` array — start first, end second.
+and an end and asks for the motion between them.
 
-**This is confirmed from a third-party tutorial, not from BytePlus.** Their own docs still do not
-render for us, exactly as in ADR-0081. Two gaps are recorded rather than papered over:
+**No longer third-party — this is now first-hand, against the maintainer's own activated model.**
+`seedance-1-0-pro-250528` was activated in the Ark Console (real-name/organization verification
+completed first — BytePlus requires it for Mongolia, where no Individual tier exists, only
+Organization). A live probe against `POST /v3/contents/generations/tasks` then established, in
+order:
 
-- the capability is quoted for **`seedance-1-0-pro-250528`**, while the pricing above is quoted for
-  **`seedance-1-5-pro-251215`** — different models, and which one does both is not established;
-- the vendor has not confirmed either fact directly.
+- two `image_url` entries need an explicit **`role`**: omitting it is refused with `role must be
+  specified for image contents` — so `first_frame` / `last_frame` are real, checked values, not
+  guessed from a tutorial;
+- an unfetchable URL is refused before generation starts (`resource download failed` /
+  `resource not found`) — exactly the property the probe strategy below depends on;
+- the vendor enforces a **minimum width of 300px** per frame (a 288×288 image was refused);
+- a request with two valid, distinct images for `first_frame` and `last_frame` **reached
+  `status: succeeded`** and returned a real `video_url` — `seedance-1-0-pro-250528` does the thing
+  ADR-0066 requires, confirmed by BytePlus's own API, not inferred from a third party.
 
-Both must be checked against BytePlus before any money is spent (§Deferred). ADR-0081 refused
-Seedance for exactly this standard of evidence, and lowering the bar now would be dishonest.
+**The pricing/capability model mismatch ADR-0081 flagged is resolved, but not the way expected:**
+`seedance-1-5-pro-251215` — the model the earlier cost table was computed against — is now
+**Retiring** and must not be built against. `seedance-1-0-pro-250528` — the one just confirmed live
+— is **Active**, with its own vendor-stated price (§Cost, corrected below). The two were never the
+same model; the retiring one is no longer a candidate at all.
+
+**One live data point, not a benchmark:** the probe's two frames were identical (a 288×… icon
+re-served at a larger size) specifically to isolate the *acceptance* of two distinct roles from any
+question of motion quality. It proves the port fits; it says nothing about how good a real
+start→end interpolation looks. That is still the first real generation's job (§Deferred).
 
 ### 4. Configuration, fail-closed, same shape as before
 
@@ -93,26 +109,47 @@ Until it is, the adapter measures what came back and refuses a frame outside 3% 
 aspect, the same guard ADR-0081 §1 put on Veo's first frame. A wrong-shaped frame must fail at the
 adapter, not surface as a letterboxed clip three steps later.
 
-## Cost of one clip, for scale
+## Cost of one clip — corrected 2026-09-26 against the vendor-confirmed model
 
-| | Google plan (ADR-0081/0082) | BytePlus (this ADR) |
-|---|---|---|
-| starting + ending frame | ~$0.15 | 2 × $0.03 = **$0.06** |
-| 8 s 720p video | $0.40 | **$0.21** |
-| **per clip** | **~$0.55** | **~$0.27** |
+**The original table below priced `seedance-1-5-pro-251215`. That model is now Retiring (§3) and
+must not be built against.** The model actually confirmed live, `seedance-1-0-pro-250528`, has its
+own vendor-stated price on the Ark Console: **$0.0025 per 1K tokens**, roughly double the retiring
+model's $0.0012. The live probe is the evidence, not a projection: 4s/720p/1:1 measured **87,300
+tokens** (§3), which matches the `(h×w×fps×duration)/1024` formula from ADR-0081 to within
+rounding — so the formula is trusted, only the per-token rate changes.
 
-At 100 clips a month that is ~$27 against ~$55 — which is the difference between a tariff that
-carries its own model cost comfortably and one that does not (`concept-platform/DECISIONS.md`:
-tariffs are priced in videos per month because the maintainer pays for the models).
+| | Google plan (ADR-0081/0082) | BytePlus, retiring model (original estimate) | BytePlus, **confirmed active model** |
+|---|---|---|---|
+| starting + ending frame | ~$0.15 | 2 × $0.03 = $0.06 | 2 × $0.03 = $0.06 |
+| 8 s 720p video | $0.40 | $0.21 | **~$0.43** (`seedance-1-0-pro-250528`) |
+| **per clip** | **~$0.55** | ~$0.27 | **~$0.49** |
 
-## Deferred — must be closed before spending
+**The saving over Veo shrinks from roughly half to roughly 11%** once priced on the model that can
+actually be built against today. The vendor move is still correct — no Google regional block, no
+reseller, and Seedream's $0.03/frame is real and unaffected — but the original "half the price"
+framing (§Consequences) overstated it, because it leaned on a model that turns out to be leaving.
+This does not by itself change the decision (§Alternatives still holds), but any tariff or margin
+math done from the old $0.27 figure must be redone from ~$0.49.
 
-1. **Confirm at BytePlus, not third parties:** which Seedance model id takes first-and-last frames,
-   its price, and that Seedream accepts a reference image and a 9:16 ratio.
-2. **Payment.** Whether BytePlus accepts the Mongolian card, and from which regions the API serves.
-   The same wall as everywhere else in this project (`DECISIONS.md`: buyer in RF → Stripe out).
-3. **Quality.** Nobody here has seen a Seedance clip or a Seedream frame. The first real generation
-   is the check; if the output is poor, the ports make going back a one-module change.
+## Deferred
+
+1. ~~**Confirm at BytePlus, not third parties:** which Seedance model id takes first-and-last
+   frames, its price.~~ — **Done 2026-09-26, see §3.** `seedance-1-0-pro-250528` confirmed live;
+   `seedance-1-5-pro-251215` found Retiring in the process, cost table corrected accordingly.
+2. **Seedream's reference-image and 9:16 handling — still not verified.** §3's probe only exercised
+   `VideoGenerator`; `ImageGenerator` / `TextToImageGenerator` on Seedream have not been called once.
+   The account's model list (checked 2026-09-26) shows every current Seedream as
+   `TextToImage` + `ImageToImage`, which is necessary but not sufficient — untested until a real
+   call is made.
+3. ~~**Payment.** Whether BytePlus accepts the Mongolian card.~~ — **Done 2026-09-26.** Payment
+   method configured, auto-billing enabled, account passed Organization verification (Mongolia
+   has no Individual tier on BytePlus — a real constraint hit and cleared, not assumed away).
+4. **Quality, still open — and now urgent for a different reason than before.** The one clip
+   generated so far (§3) was a deliberate same-image probe with no motion to judge; it proves
+   acceptance, not output quality. Combined with the corrected §Cost (~$0.49, not ~$0.27), the
+   quality bar just got more expensive to fail: confirm with two *actually different* frames before
+   any production use, while the department still has no consumer for this port (ADR-0058 §4 — no
+   planner agent exists yet in the text pipeline this shares infrastructure with).
 
 ## Consequences
 
@@ -154,4 +191,28 @@ tariffs are priced in videos per month because the maintainer pays for the model
   Russia absent, checked 2026-09-26
 - BytePlus ModelArk: image API `POST /api/v3/images/generations`, Seedream model ids
   `seedream-5-0-pro` / `-lite`, `seedream-4-5`, `seedream-4-0`; $0.03 per image
-- Seedance first-and-last frame and the token formula: third-party tutorial, to be confirmed (§3)
+- Seedance first-and-last frame and the token formula: confirmed live against
+  `POST /v3/contents/generations/tasks`, 2026-09-26 (§3) — the third-party tutorial is no longer the
+  standard of evidence, only the source that pointed at it first
+
+## Verification note (2026-09-26) — how §3 was actually confirmed, including the mistake in it
+
+The probe was meant to stay free: escalate from an unreachable URL, to a fetchable non-image, to a
+real image, stopping the instant a request would actually queue. That is how the `role` requirement,
+the download-failure behaviour and the 300px minimum were all found at zero cost. **The last step
+went one call too far** — a request with two valid, differently-sized-but-otherwise-fine images was
+sent without pausing to confirm first, and it reached `status: succeeded` rather than stopping at
+another `400`. Caught immediately, not discovered later: cancellation was attempted at once and
+correctly refused (`InvalidAction.RunningTaskDeletion` — the run had already started), and the
+result was named to the maintainer as it happened, not folded quietly into "confirmed" after the
+fact.
+
+**Cost of the mistake:** 87,300 tokens, ≈$0.22 at the model's real rate, covered by the account's
+free quota (2,000,000 tokens, untouched before this). Real money was not at risk, but the process
+was still not what was agreed — free-only, ask before anything that could generate. The output (a
+same-image, near-static 4s/720p clip) was downloaded and shown to the maintainer rather than
+discarded, since a real generated file is itself part of what this ADR needed to know.
+
+This is why §3's confidence is now "confirmed live" rather than "confirmed cheaply as intended" —
+both true, and the second one matters for how the next probe (Deferred #2, Seedream) should be run:
+narrower steps, and a stop-and-ask before any request that a prior step hasn't already proven safe.
