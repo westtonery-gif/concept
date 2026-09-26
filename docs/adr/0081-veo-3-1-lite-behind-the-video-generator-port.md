@@ -1,6 +1,8 @@
 # ADR-0081: Veo 3.1 Lite behind `VideoGenerator` — the cheap default, Kling kept for later
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0084](0084-the-generation-department-moves-to-byteplus.md)
+  — audio turned out not to be needed, which halves Seedance's price against Veo's, and its
+  ending-frame support (recorded here as unconfirmed) was since established.
 - **Date:** 2026-09-22
 - **Deciders:** Maintainer ("добавляем дешевый адаптер — переходить расти будем по мере того как
   будет расти канал", 2026-09-22); Lead Architect
