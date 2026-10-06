@@ -16,12 +16,7 @@ inside the file are guaranteed; the exact millisecond is not.
 from __future__ import annotations
 
 import importlib
-import os
 import re
-import sys
-import tempfile
-import wave
-from array import array
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +28,7 @@ from omemo_content_factory.adapters.speech_synthesizer import (
     SpokenWord,
     SynthesizedSpeech,
 )
+from omemo_content_factory.infrastructure.speech_wav import pcm_samples, publish_wav, sound_span
 
 __all__ = [
     "MODEL_VAR",
@@ -53,10 +49,6 @@ _LANGUAGES = {"af": "en-us", "am": "en-us", "bf": "en-gb", "bm": "en-gb"}
 """Voice prefix → language. Only English has been listened to (ADR-0085 §2); any other prefix is a
 refusal rather than a silently wrong accent."""
 
-_SILENCE_FLOOR = 0.02
-"""A sample counts as sound from this fraction of the file's peak."""
-_MIN_PEAK = 50
-"""A file whose loudest sample is quieter than this (of 32767) is silence, not speech."""
 _PAD_MS = 20
 """Sound has soft edges: the speech span is widened by this much on each side."""
 
@@ -205,76 +197,18 @@ class KokoroSpeechSynthesizer:
             raise
         except Exception as error:  # the engine is outside our code; its failures are one error
             raise SpeechSynthesizerError(f"the speech engine failed: {error}") from error
-        samples = _samples(pcm, rate)
-        first, last = _sound_span(samples)
-        destination = Path(request.destination)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp"
-        )
-        os.close(descriptor)
-        temporary = Path(temporary_name)
-        try:
-            _write_wav(temporary, pcm, rate)
-            duration_ms, measured_rate = _measure(temporary)
-            words = estimate_word_times(
+        samples = pcm_samples(pcm, rate)
+        first, last = sound_span(samples)
+
+        def words_for(duration_ms: int) -> tuple[SpokenWord, ...]:
+            return estimate_word_times(
                 request.text,
                 max(0, round(first * 1000 / rate) - _PAD_MS),
                 min(duration_ms, round((last + 1) * 1000 / rate) + _PAD_MS),
                 limit_ms=duration_ms,
             )
-            os.replace(temporary, destination)
-        except BaseException:
-            temporary.unlink(missing_ok=True)
-            raise
-        return SynthesizedSpeech(
-            path=str(destination), duration_ms=duration_ms, sample_rate=measured_rate, words=words
-        )
 
-
-def _samples(pcm: bytes, rate: int) -> array[int]:
-    if isinstance(rate, bool) or not isinstance(rate, int) or rate <= 0:
-        raise SpeechSynthesizerError("the speech engine reported no sample rate")
-    if not pcm or len(pcm) % 2:
-        raise SpeechSynthesizerError("the speech engine returned no usable audio")
-    samples: array[int] = array("h")
-    samples.frombytes(pcm)
-    if sys.byteorder == "big":
-        samples.byteswap()
-    return samples
-
-
-def _sound_span(samples: array[int]) -> tuple[int, int]:
-    """First and last sample that carry speech; silence is an error, not an empty file."""
-    peak = max(max(samples), -min(samples))
-    if peak < _MIN_PEAK:
-        raise SpeechSynthesizerError("the speech engine returned silence")
-    floor = max(round(peak * _SILENCE_FLOOR), 1)
-    first = next(index for index, value in enumerate(samples) if abs(value) >= floor)
-    last = next(index for index in range(len(samples) - 1, -1, -1) if abs(samples[index]) >= floor)
-    return first, last
-
-
-def _write_wav(path: Path, pcm: bytes, rate: int) -> None:
-    with wave.open(str(path), "wb") as target:
-        target.setnchannels(1)
-        target.setsampwidth(2)
-        target.setframerate(rate)
-        target.writeframes(pcm)
-
-
-def _measure(path: Path) -> tuple[int, int]:
-    """Duration in milliseconds and sample rate, read back from the written file."""
-    try:
-        with wave.open(str(path), "rb") as source:
-            rate = source.getframerate()
-            frames = source.getnframes()
-    except (wave.Error, EOFError) as error:
-        raise SpeechSynthesizerError("the audio that was written cannot be read back") from error
-    duration_ms = round(frames * 1000 / rate)
-    if duration_ms <= 0:
-        raise SpeechSynthesizerError("the audio that was written is empty")
-    return duration_ms, rate
+        return publish_wav(Path(request.destination), pcm, rate, words_for)
 
 
 class _KokoroOnnxEngine:

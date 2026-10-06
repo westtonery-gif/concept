@@ -23,6 +23,9 @@ from omemo_content_factory.adapters.speech_synthesizer import (
     SpeechSynthesizerError,
 )
 from omemo_content_factory.composition import CompositionError, build_speech_synthesizer
+from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
+    ElevenLabsSpeechSynthesizer,
+)
 from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
     MODEL_VAR,
     VOICES_VAR,
@@ -207,6 +210,19 @@ def test_kok_09_the_root_builds_it_without_loading_a_model(tmp_path: Path) -> No
     voices.write_bytes(b"not voices")
     built = build_speech_synthesizer({MODEL_VAR: str(model), VOICES_VAR: str(voices)})
     assert isinstance(built, KokoroSpeechSynthesizer)
+
+
+def test_elv_10_the_root_picks_a_vendor_by_presence_and_refuses_two(tmp_path: Path) -> None:
+    key = {"OMEMO_ELEVENLABS_API_KEY": "k", "OMEMO_ELEVENLABS_MODEL": "eleven_v3"}
+    assert isinstance(build_speech_synthesizer(key), ElevenLabsSpeechSynthesizer)
+    with pytest.raises(CompositionError, match="OMEMO_ELEVENLABS_MODEL"):
+        build_speech_synthesizer({"OMEMO_ELEVENLABS_API_KEY": "k"})
+    kokoro = {MODEL_VAR: str(tmp_path / "m"), VOICES_VAR: str(tmp_path / "v")}
+    with pytest.raises(CompositionError, match="twice"):
+        build_speech_synthesizer({**key, **kokoro})
+    with pytest.raises(CompositionError) as neither:
+        build_speech_synthesizer({})
+    assert "OMEMO_ELEVENLABS_API_KEY" in str(neither.value) and MODEL_VAR in str(neither.value)
 
 
 @pytest.mark.skipif(

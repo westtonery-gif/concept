@@ -1558,6 +1558,17 @@ process at the time, not a pattern to keep copying.)
       `OMEMO_KOKORO_VOICES`, files in `~/tts-test/`. Spec `GENERATION_SPEC.md` §9, acceptance §7
       (`SPP`, `KOK`). **Next for the voice story format:** the dialogue assembly step (several
       lines + gaps + music under, ffmpeg) and captions that highlight the word being said.
+    - **ElevenLabs speech adapter — done as code 2026-10-06 (ADR-0086), not yet run against the real
+      service.** The maintainer heard Kokoro, judged it too monotone and chose ElevenLabs (which
+      refuses Russia — their call; no region option in the adapter). `ElevenLabsSpeechSynthesizer`
+      behind the same `SpeechSynthesizer` port: `POST /v1/text-to-speech/{voice}/with-timestamps`,
+      raw PCM + **the vendor's own per-character times** grouped into words, `[laughs]`-style audio
+      tags left out of the words. Contract read from the official SDK (their docs redirect from
+      this region). `build_speech_synthesizer` chooses by presence (`OMEMO_ELEVENLABS_*` vs
+      `OMEMO_KOKORO_*`, both = error). Shared WAV writer `infrastructure/speech_wav.py`. **Needs:**
+      `OMEMO_ELEVENLABS_API_KEY` + `_MODEL` (`eleven_v3`), then `LIV-04` with
+      `OMEMO_ELEVENLABS_LIVE_VOICE=<voice id>` to confirm the contract live (and whether
+      `with-timestamps` takes `eleven_v3`). Suite: 1632 passed.
     - **Dialogue assembly — done 2026-10-06, deliberately light (no ADR, no acceptance table; the
       maintainer asked for it not to be formal).** `infrastructure/dialogue_mixer.py`: lines laid
       end to end with breaths between them, music ducked under the voice (`sidechaincompress`),

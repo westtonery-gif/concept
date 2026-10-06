@@ -70,6 +70,16 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
+from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
+    API_KEY_VAR as ELEVENLABS_API_KEY_VAR,
+)
+from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
+    MODEL_VAR as ELEVENLABS_MODEL_VAR,
+)
+from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
+    ElevenLabsSpeechSynthesizer,
+    elevenlabs_settings_from_env,
+)
 from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import FfmpegClipRenderer
 from omemo_content_factory.infrastructure.file_system_episode_source import (
     FileSystemEpisodeSource,
@@ -84,6 +94,12 @@ from omemo_content_factory.infrastructure.google_docs_review_desk import (
 from omemo_content_factory.infrastructure.google_docs_review_desk import (
     GoogleDocsReviewDesk,
     google_docs_settings_from_env,
+)
+from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
+    MODEL_VAR as KOKORO_MODEL_VAR,
+)
+from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
+    VOICES_VAR as KOKORO_VOICES_VAR,
 )
 from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
     KokoroSpeechSynthesizer,
@@ -400,12 +416,32 @@ def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
 
 
 def build_speech_synthesizer(environ: Mapping[str, str]) -> SpeechSynthesizer:
-    """Build the local Kokoro `SpeechSynthesizer` (ADR-0085); no vendor, no account.
+    """Build the `SpeechSynthesizer`: presence of a vendor's variables selects it (ADR-0086 §2).
 
-    Needs `OMEMO_KOKORO_MODEL` and `OMEMO_KOKORO_VOICES`; a missing one stops the build, named.
-    The model itself is loaded on the first line spoken, not here.
+    Any `OMEMO_ELEVENLABS_*` selects ElevenLabs, any `OMEMO_KOKORO_*` the local Kokoro model; both
+    at once is an error, and a partly configured vendor fails closed naming its own missing
+    variables instead of being quietly replaced by the other one. With neither, the error names
+    both sets.
     """
+    wants_elevenlabs = any(
+        name.startswith("OMEMO_ELEVENLABS_") and value.strip() for name, value in environ.items()
+    )
+    wants_kokoro = any(
+        name.startswith("OMEMO_KOKORO_") and value.strip() for name, value in environ.items()
+    )
+    if wants_elevenlabs and wants_kokoro:
+        raise CompositionError(
+            "speech is configured twice: OMEMO_ELEVENLABS_* and OMEMO_KOKORO_* are both set; "
+            "keep one"
+        )
+    if not wants_elevenlabs and not wants_kokoro:
+        raise CompositionError(
+            f"speech is not configured; set {ELEVENLABS_API_KEY_VAR} and {ELEVENLABS_MODEL_VAR}, "
+            f"or, for the local model, {KOKORO_MODEL_VAR} and {KOKORO_VOICES_VAR}"
+        )
     try:
+        if wants_elevenlabs:
+            return ElevenLabsSpeechSynthesizer(elevenlabs_settings_from_env(environ))
         return KokoroSpeechSynthesizer(kokoro_settings_from_env(environ))
     except SpeechSynthesizerError as error:
         raise CompositionError(str(error)) from error
