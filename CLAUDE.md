@@ -1558,6 +1558,13 @@ process at the time, not a pattern to keep copying.)
       `OMEMO_KOKORO_VOICES`, files in `~/tts-test/`. Spec `GENERATION_SPEC.md` §9, acceptance §7
       (`SPP`, `KOK`). **Next for the voice story format:** the dialogue assembly step (several
       lines + gaps + music under, ffmpeg) and captions that highlight the word being said.
+    - **Dialogue assembly — done 2026-10-06, deliberately light (no ADR, no acceptance table; the
+      maintainer asked for it not to be formal).** `infrastructure/dialogue_mixer.py`: lines laid
+      end to end with breaths between them, music ducked under the voice (`sidechaincompress`),
+      loudness evened to −14 LUFS, and a word timeline on the whole track's clock
+      (`DialogueTrack.words`, with the speaker). Tests `tests/test_dialogue_mixer.py` (real
+      ffmpeg). `demo_dialogue.py - out/dialogue.wav music.mp3` speaks a plain `speaker | voice |
+      text` script. **Next: captions that highlight the word being said, from that timeline.**
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,
