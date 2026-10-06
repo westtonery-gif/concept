@@ -42,6 +42,10 @@ from omemo_content_factory.adapters.episode_source import EpisodeSource
 from omemo_content_factory.adapters.footage_index import FootageIndex
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
+from omemo_content_factory.adapters.speech_synthesizer import (
+    SpeechSynthesizer,
+    SpeechSynthesizerError,
+)
 from omemo_content_factory.agents import clip_post_writer
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
@@ -80,6 +84,10 @@ from omemo_content_factory.infrastructure.google_docs_review_desk import (
 from omemo_content_factory.infrastructure.google_docs_review_desk import (
     GoogleDocsReviewDesk,
     google_docs_settings_from_env,
+)
+from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
+    KokoroSpeechSynthesizer,
+    kokoro_settings_from_env,
 )
 from omemo_content_factory.infrastructure.llm import (
     LLMArtifactEvaluator,
@@ -389,6 +397,18 @@ def build_episode_source(environ: Mapping[str, str]) -> EpisodeSource:
 def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
     """Build the local ffmpeg + whisper.cpp `FootageIndex` (ADR-0064); no vendor, no account."""
     return LocalFootageIndex(whisper_settings_from_env(environ))
+
+
+def build_speech_synthesizer(environ: Mapping[str, str]) -> SpeechSynthesizer:
+    """Build the local Kokoro `SpeechSynthesizer` (ADR-0085); no vendor, no account.
+
+    Needs `OMEMO_KOKORO_MODEL` and `OMEMO_KOKORO_VOICES`; a missing one stops the build, named.
+    The model itself is loaded on the first line spoken, not here.
+    """
+    try:
+        return KokoroSpeechSynthesizer(kokoro_settings_from_env(environ))
+    except SpeechSynthesizerError as error:
+        raise CompositionError(str(error)) from error
 
 
 CLIP_CANVAS_VAR = "OMEMO_CLIP_CANVAS"

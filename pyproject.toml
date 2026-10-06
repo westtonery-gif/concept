@@ -27,6 +27,8 @@ classifiers = [
 dependencies = ["anthropic>=0.40", "cryptography>=42"]
 
 [project.optional-dependencies]
+# Local speech (ADR-0085): not in `dependencies`, a machine that never speaks does not need them.
+tts = ["kokoro-onnx>=0.4"]
 dev = [
     "ruff>=0.6",
     "mypy>=1.11",
@@ -47,6 +49,8 @@ packages = ["src/omemo_content_factory"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Probe scripts recovered from a lost session, and the maintainer's reference media: not project code.
+extend-exclude = ["generation-recovered", "generation-refs", "generation-tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "C90", "RUF"]

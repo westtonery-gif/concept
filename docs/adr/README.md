@@ -108,3 +108,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0082](0082-the-starting-frame-is-generated-too.md) | The starting frame is generated too — an idea is the only input | Accepted |
 | [0083](0083-video-qa-blocks-defects-and-what-platforms-reject.md) | Generated-video QA blocks visible defects and what a platform would reject — the rest are hints | Accepted |
 | [0084](0084-the-generation-department-moves-to-byteplus.md) | One vendor for both frames and video — BytePlus (Seedream + Seedance) | Accepted |
+| [0085](0085-speech-synthesizer-port-and-a-local-kokoro-adapter.md) | A `SpeechSynthesizer` port, and a local Kokoro adapter behind it | Accepted |

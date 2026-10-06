@@ -1548,6 +1548,16 @@ process at the time, not a pattern to keep copying.)
       Schema, Root check that the bound client has the capability. Spec before code.
     - 23.3 (QA criteria) and 23.4 (board: now an **idea** property, not prompt fields) still need
       the maintainer's answers; 23.8's live run now needs only the Gemini key for both vendors.
+    - **23.12 speech — done 2026-10-06 (ADR-0085).** `SpeechSynthesizer` port
+      (`adapters/speech_synthesizer.py`: one line in, a WAV + the adapter's own measurements + word
+      times out) and `KokoroSpeechSynthesizer` (`infrastructure/kokoro_speech_synthesizer.py`,
+      Kokoro-82M on the Mac, no account/region/price; engine injectable, `kokoro-onnx` imported
+      lazily, extra `tts`). Voice = `name` or a blend `a:0.6+b:0.4`; English voices only in v1;
+      word times are an **estimate** (checked once against whisper.cpp: ~250 ms). Chosen over
+      ElevenLabs because it refuses Russia (ADR-0085 Context). Setup: `OMEMO_KOKORO_MODEL` /
+      `OMEMO_KOKORO_VOICES`, files in `~/tts-test/`. Spec `GENERATION_SPEC.md` §9, acceptance §7
+      (`SPP`, `KOK`). **Next for the voice story format:** the dialogue assembly step (several
+      lines + gaps + music under, ffmpeg) and captions that highlight the word being said.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,
