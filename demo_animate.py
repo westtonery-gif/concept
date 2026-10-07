@@ -157,7 +157,7 @@ def join(folder: Path, spans: list[tuple[int, int]]) -> int:
                 "-t",
                 f"{(end - start) / 1000:.3f}",
                 "-vf",
-                "fps=24,format=yuv420p",
+                "scale=720:1280:flags=lanczos,fps=24,format=yuv420p",
                 "-an",
                 "-c:v",
                 "libx264",

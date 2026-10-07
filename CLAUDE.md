@@ -1615,8 +1615,11 @@ process at the time, not a pattern to keep copying.)
       100 s story (whole-second rounding costs ~16 %). Pilot: shot 6, 4 s, ≈$0.22, 704×1248 — moves,
       with artifacts (a phone ends on the floor, a telescope through a head). The 30 pictures (≈$1.35
       all in) were redrawn where weak (Milo, framing). `.env`: `OMEMO_SEEDANCE_VIDEO_MODEL`,
-      `OMEMO_SEEDANCE_RESOLUTION=720p`. **Next:** the other 29 clips (≈$6), `join`, voice track,
-      word-by-word captions.
+      `OMEMO_SEEDANCE_RESOLUTION=720p`. **2026-10-07 later: all 30 clips done, no failures; joined (trim to window,
+      720×1280, 24 fps) and muxed with the voice+music track into `generation-tests/lighthouse-story-v1.mp4`
+      — 100.0 s, 50 MB. First whole video. Spend for it ≈ $8–9 (sheets 0.12, pictures ≈ 1.1, redraw 0.15,
+      text roles ≈ 0.3, voice ≈ 0.3 incl. one repeated run, Seedance ≈ 6.3). **Next:** word-by-word
+      captions from the dialogue timeline, then judge the whole against the references.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,
