@@ -3,7 +3,7 @@
 
     set -a && source .env && set +a
     python demo_frames.py sheets generation-tests/stories/<story>.txt
-    python demo_frames.py shots  generation-tests/stories/<story>.txt [1,6,13]
+    python demo_frames.py shots  generation-tests/stories/<story>.txt [1,6,13] [--note "text"]
 
 `sheets` makes one full-body picture per character from the `look` written in the script's header
 (`# key: look (voice)`), 9:16, one call each (about $0.03). Pictures already on disk are not paid
@@ -42,7 +42,7 @@ def characters(script: Path) -> dict[str, str]:
     return found
 
 
-def shots(script: Path, only: str) -> int:
+def shots(script: Path, only: str, note: str = "") -> int:
     """Draw the shots of the saved storyboard, each with the sheets of whoever is in it."""
     folder = Path("generation-tests/frames") / script.stem
     board = json.loads((folder / "storyboard.json").read_text())
@@ -59,7 +59,7 @@ def shots(script: Path, only: str) -> int:
         references = tuple(str(folder / f"sheet-{key}.jpeg") for key in shot["cast"])
         image = generator.generate(
             FrameRequest(
-                prompt=shot["prompt"],
+                prompt=f"{shot['prompt']} {note}".strip(),
                 destination=str(destination),
                 width=WIDTH,
                 height=HEIGHT,
@@ -80,7 +80,9 @@ def main(argv: list[str]) -> int:
         )
         return 2
     if argv[1] == "shots":
-        return shots(Path(argv[2]), argv[3] if len(argv) > 3 else "")
+        note = argv[argv.index("--note") + 1] if "--note" in argv else ""
+        numbers = argv[3] if len(argv) > 3 and not argv[3].startswith("--") else ""
+        return shots(Path(argv[2]), numbers, note)
     script = Path(argv[2])
     cast = characters(script)
     if not cast:
