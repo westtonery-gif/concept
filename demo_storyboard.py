@@ -26,12 +26,15 @@ from omemo_content_factory.application.storyboard import (
     Storyboard,
     StoryboardError,
     decode_storyboard,
+    min_shots_for,
     shot_prompt,
     storyboard_input,
 )
 from omemo_content_factory.composition import build_storyboard_writing
 from omemo_content_factory.infrastructure.provider_model import client_for_role
 
+_SHOTS_PER_LINE = 1.5
+"""The references cut every one to two seconds: about one and a half shots per spoken line."""
 _CAST = re.compile(r"^# ([a-z][a-z0-9_]*): (.+?)\s+\(([^()]+)\)\s*$")
 
 
@@ -109,10 +112,13 @@ def main(argv: list[str]) -> int:
     folder = Path("generation-tests/frames") / path.stem
     if "--reuse" in argv:  # decode the writer's last saved answer again; no model call, no cost
         saved = sorted(folder.glob("storyboard.raw-*.json"))[-1]
-        board = decode_storyboard(json.loads(saved.read_text()), script)
+        board = decode_storyboard(
+            json.loads(saved.read_text()), script, shots_per_line=_SHOTS_PER_LINE
+        )
         return _show(board, script, folder, cost=0.0)
     writing = build_storyboard_writing(client_for_role(storyboard_writer.AGENT_REF, os.environ))
-    base = storyboard_input(script)
+    need = min_shots_for(script, _SHOTS_PER_LINE)
+    base = storyboard_input(script, min_shots=need)
     task_input, cost = base, 0.0
     for attempt in (1, 2):
         result = writing.executor.execute(task_input)
@@ -124,7 +130,7 @@ def main(argv: list[str]) -> int:
         raw.parent.mkdir(parents=True, exist_ok=True)
         raw.write_text(json.dumps(dict(result.payload_fields), ensure_ascii=False, indent=1))
         try:
-            board = decode_storyboard(result.payload_fields, script)
+            board = decode_storyboard(result.payload_fields, script, shots_per_line=_SHOTS_PER_LINE)
             break
         except StoryboardError as error:
             safe_print(f"Attempt {attempt}: the storyboard does not pass the decoder: {error}")

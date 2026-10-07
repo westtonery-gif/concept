@@ -1620,6 +1620,19 @@ process at the time, not a pattern to keep copying.)
       — 100.0 s, 50 MB. First whole video. Spend for it ≈ $8–9 (sheets 0.12, pictures ≈ 1.1, redraw 0.15,
       text roles ≈ 0.3, voice ≈ 0.3 incl. one repeated run, Seedance ≈ 6.3). **Next:** word-by-word
       captions from the dialogue timeline, then judge the whole against the references.
+    - **23.17 pacing and faces — ADR-0091, 2026-10-07.** The maintainer called the first video
+      boring and asked for a comparison with the references; measured: ours 17 cuts a minute (3.3 s
+      shots, motion 3.6) against 47–84 (0.7–1.3 s, motion 7–12) for the three references with view
+      figures, and their frames are half faces filling the screen with a victim to pity. Changes:
+      shots may share a line (reactions), a pacing floor of 1.5 shots a line stated as a number in
+      the task, the storyboard's `world` is a look and each picture names its place, close-up faces
+      ≥ half, story writer Prompt v3 (expressive faces, victim + profiteer, escalating absurdity,
+      3–4 places, 2–6 characters), windows under 2 s are ffmpeg punch-ins, not Seedance. Second
+      story ("His Forehead Flashed $9,999,999…": a robot whose balance glows on his forehead,
+      the ref-12 structure with money instead of time) written ($0.021) and voiced; storyboard
+      written once with 26 shots (one per line, below the new floor). **BLOCKED 2026-10-07: the
+      Anthropic API answered "credit balance is too low"** — the text roles need the account topped up
+      before the storyboard can be rewritten at the new pace.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,

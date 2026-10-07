@@ -74,7 +74,7 @@ def test_scr_03_a_long_title_is_refused() -> None:
     "characters",
     [
         "ray | look | voice",  # one character
-        "\n".join(f"c{i} | look | voice" for i in range(6)),  # six
+        "\n".join(f"c{i} | look | voice" for i in range(7)),  # seven
         "ray | look | voice\nray | other | voice",  # twice
         "Ray | look | voice\nmimi | look | voice",  # key not lowercase
         "ray | look\nmimi | look | voice",  # two parts
@@ -87,8 +87,11 @@ def test_scr_04_the_cast_must_follow_the_grammar(characters: str) -> None:
 
 
 def test_scr_05_dialogue_speakers_must_be_declared_and_all_must_speak() -> None:
-    with pytest.raises(StoryScriptError, match="unknown 'zed'"):
-        decode_story_script(_fields(dialogue="zed | hi there friend\n" + _dialogue(15)))
+    with pytest.raises(StoryScriptError, match="'yan', 'zed'") as raised:
+        decode_story_script(
+            _fields(dialogue="zed | hi there friend\nyan | and me too\n" + _dialogue(14))
+        )
+    assert "lines 1, 2" in str(raised.value)
     only_ray = "\n".join(f"ray | {' '.join(['word'] * 9)}" for _ in range(16))
     with pytest.raises(StoryScriptError, match="never speak: mimi"):
         decode_story_script(_fields(dialogue=only_ray))

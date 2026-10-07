@@ -37,7 +37,7 @@ __all__ = [
 STORY_FIELDS = ("title", "premise", "characters", "dialogue", "next_part")
 
 MAX_TITLE_CHARS = 90
-MIN_CHARACTERS, MAX_CHARACTERS = 2, 5
+MIN_CHARACTERS, MAX_CHARACTERS = 2, 6
 MIN_LINES, MAX_LINES = 14, 40
 MAX_FIRST_LINE_WORDS = 14
 """The opening line is a conflict or a shock, so it is short (the reference stories all open so)."""
@@ -166,10 +166,18 @@ def _characters(block: str) -> tuple[StoryCharacter, ...]:
 
 
 def _lines(block: str, known: set[str]) -> tuple[StoryLine, ...]:
+    rows = _rows(block, 2, "a dialogue")
+    strangers = sorted({speaker for speaker, _ in rows if speaker not in known})
+    if strangers:
+        numbers = [str(n) for n, (speaker, _) in enumerate(rows, 1) if speaker in strangers]
+        raise StoryScriptError(
+            f"dialogue lines {', '.join(numbers)} are spoken by "
+            + ", ".join(repr(name) for name in strangers)
+            + ", who are not in the characters; add them to characters or give the lines to "
+            "someone who is"
+        )
     lines: list[StoryLine] = []
-    for number, (speaker, text) in enumerate(_rows(block, 2, "a dialogue"), start=1):
-        if speaker not in known:
-            raise StoryScriptError(f"dialogue line {number} is spoken by unknown {speaker!r}")
+    for number, (speaker, text) in enumerate(rows, start=1):
         _check_tags(text, number)
         spoken = strip_audio_tags(text)
         words = len(spoken.split())

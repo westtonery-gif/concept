@@ -15,6 +15,7 @@ drift from shot to shot. Pure: standard library only, no I/O.
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -44,13 +45,17 @@ STYLE = (
 )
 """The look every picture shares; it lives here, in code, so it cannot drift between shots."""
 
-_FRAMING = "The framing is exactly as described, and the characters are large in the frame."
+_FRAMING = (
+    "The framing is exactly as described. The characters are large in the frame, their faces "
+    "big, clear and strongly expressive."
+)
 
 MIN_SHOTS = 10
 """Fewer shots than this is a slideshow. There is no upper bound but the lines: a shot covers at
 least one line, and the reference stories cut every few seconds (13–41 cuts in 66–108 s)."""
 MAX_LINES_PER_SHOT = 3
 MAX_CAST = 3
+MAX_SHOTS_PER_LINE = 3
 _MAX_FAULTS = 10
 WORLD_WORDS = (30, 130)
 PICTURE_WORDS = (20, 90)
@@ -93,16 +98,58 @@ class StoryboardWriting:
     schema_binding: SchemaBinding
 
 
-def storyboard_input(script: StoryScript) -> str:
-    """What the storyboard writer is told: the cast, and the dialogue with its line numbers."""
+def min_shots_for(script: StoryScript, per_line: float) -> int:
+    """How many shots a script needs to cut as fast as the references do (about 1.5 a line)."""
+    return max(MIN_SHOTS, math.ceil(per_line * len(script.lines)))
+
+
+def storyboard_input(script: StoryScript, *, min_shots: int | None = None) -> str:
+    """What the storyboard writer is told: the cast, and the dialogue with its line numbers.
+
+    ``min_shots`` is stated outright: asked for in a Prompt the pace was ignored, told as a number
+    in the task it is followed.
+    """
     cast = "\n".join(f"{c.key} | {c.look}" for c in script.characters)
     lines = "\n".join(
         f"{number} | {line.speaker} | {line.spoken}" for number, line in enumerate(script.lines, 1)
     )
+    need = (
+        f"\n\nThis story needs AT LEAST {min_shots} shots: give many lines two or three shots by "
+        "repeating the line number (the speaker, then the listener's reaction face)."
+        if min_shots
+        else ""
+    )
     return (
         f"Title: {script.title}\nPremise: {script.premise}\n\n"
         f"Characters (key | look):\n{cast}\n\nDialogue (line number | speaker | words):\n{lines}"
+        f"{need}"
     )
+
+
+def shot_windows(
+    storyboard: Storyboard, line_starts_ms: list[int], line_ms: list[int], total_ms: int
+) -> list[tuple[int, int]]:
+    """Where each shot sits on the voice track: (start_ms, end_ms), tiling ``[0, total_ms]``.
+
+    A shot that begins on a new line starts where that line starts; shots that share a line split
+    that line's time equally, in order. Pure arithmetic over the real spoken lengths.
+    """
+    shots = storyboard.shots
+    touching: dict[int, list[int]] = {}
+    for index, shot in enumerate(shots):
+        for line in range(shot.first_line, shot.last_line + 1):
+            touching.setdefault(line, []).append(index)
+    starts = [0]
+    for index in range(1, len(shots)):
+        line = shots[index].first_line
+        sharers = touching[line]
+        if shots[index - 1].last_line == line:
+            slot = sharers.index(index)
+            starts.append(line_starts_ms[line - 1] + line_ms[line - 1] * slot // len(sharers))
+        else:
+            starts.append(line_starts_ms[line - 1])
+    starts.append(total_ms)
+    return [(starts[i], starts[i + 1]) for i in range(len(shots))]
 
 
 def shot_prompt(storyboard: Storyboard, shot: Shot, script: StoryScript) -> str:
@@ -118,33 +165,62 @@ def shot_prompt(storyboard: Storyboard, shot: Shot, script: StoryScript) -> str:
     if shot.cast:
         who = " ".join(f"{key} — {looks[key]}." for key in shot.cast)
         parts.append(f"The characters look exactly as in the reference pictures. {who}")
-    parts += [f"Setting: {storyboard.world}", STYLE]
+    parts += [f"Look and mood: {storyboard.world}", STYLE]
     return " ".join(parts)
 
 
-def decode_storyboard(fields: Mapping[str, str], script: StoryScript) -> Storyboard:
-    """Turn the writer's fields into a checked storyboard for ``script``, or raise."""
+def decode_storyboard(
+    fields: Mapping[str, str], script: StoryScript, *, shots_per_line: float = 0.0
+) -> Storyboard:
+    """Turn the writer's fields into a checked storyboard for ``script``, or raise.
+
+    ``shots_per_line`` is the pacing floor: the references cut every one to two seconds, about 1.5
+    shots per spoken line; 0 asks only for the general minimum.
+    """
     missing = [name for name in STORYBOARD_FIELDS if not str(fields.get(name, "")).strip()]
     if missing:
         raise StoryboardError("the storyboard is missing: " + ", ".join(missing))
     world = fields["world"].strip()
     _words(world, WORLD_WORDS, "the world")
     shots = _shots(fields["shots"], script)
-    if len(shots) < MIN_SHOTS:
-        raise StoryboardError(f"a storyboard needs at least {MIN_SHOTS} shots, not {len(shots)}")
-    expected = 1
-    for number, shot in enumerate(shots, start=1):
-        if shot.first_line != expected:
-            raise StoryboardError(
-                f"shot {number} starts at line {shot.first_line}; the next uncovered line is "
-                f"{expected} — every line is covered once, in order"
-            )
-        expected = shot.last_line + 1
-    if expected != len(script.lines) + 1:
+    needed = min_shots_for(script, shots_per_line)
+    if len(shots) < needed:
         raise StoryboardError(
-            f"the shots stop at line {expected - 1} of {len(script.lines)}; every line needs a shot"
+            f"a storyboard needs at least {needed} shots, not {len(shots)}: cut faster by "
+            "giving lines a second and third shot (repeat the line number) for reactions"
         )
+    _coverage(shots, len(script.lines))
     return Storyboard(world=world, shots=tuple(shots))
+
+
+def _coverage(shots: list[Shot], total: int) -> None:
+    """Every line is covered, in order; a shot may begin on the line the last one ended on.
+
+    Two or three shots on one line are how a *reaction* gets its own picture — the speaker, then the
+    face of whoever hears it (ADR-0091). Never more than ``MAX_SHOTS_PER_LINE`` on one line.
+    """
+    previous_last = 0
+    on_line = 0
+    for number, shot in enumerate(shots, start=1):
+        if shot.first_line == previous_last and previous_last:
+            on_line += 1
+            if on_line > MAX_SHOTS_PER_LINE:
+                raise StoryboardError(
+                    f"shot {number}: line {previous_last} already has {MAX_SHOTS_PER_LINE} shots"
+                )
+        elif shot.first_line == previous_last + 1:
+            on_line = 1
+        else:
+            raise StoryboardError(
+                f"shot {number} starts at line {shot.first_line}; it must start at line "
+                f"{previous_last + 1} (the next uncovered line) or share line {previous_last} "
+                "with the shot before — every line is covered, in order"
+            )
+        previous_last = shot.last_line
+    if previous_last != total:
+        raise StoryboardError(
+            f"the shots stop at line {previous_last} of {total}; every line needs a shot"
+        )
 
 
 def _shots(block: str, script: StoryScript) -> list[Shot]:

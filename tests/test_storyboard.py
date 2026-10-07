@@ -5,6 +5,8 @@ ADR-0089.
 
 from __future__ import annotations
 
+import itertools
+
 import pytest
 
 from omemo_content_factory.application.story_script import StoryScript, decode_story_script
@@ -13,6 +15,7 @@ from omemo_content_factory.application.storyboard import (
     StoryboardError,
     decode_storyboard,
     shot_prompt,
+    shot_windows,
     storyboard_input,
 )
 
@@ -76,18 +79,45 @@ def test_sbd_03_both_fields_are_required(name: str) -> None:
         decode_storyboard(_fields(**{name: " "}), _script())
 
 
-def test_sbd_04_every_line_is_covered_once_and_in_order() -> None:
+def test_sbd_04_every_line_is_covered_and_in_order() -> None:
     gap = [(str(i), "ray" if i % 2 else "mimi") for i in range(1, 17) if i != 5]
-    with pytest.raises(StoryboardError, match="next uncovered line is 5"):
+    with pytest.raises(StoryboardError, match="must start at line 5"):
         decode_storyboard(_fields(shots=_shots(gap)), _script())
-    overlap = [("1-2", "ray, mimi"), ("2", "mimi")] + [
+    backwards = [("1-2", "ray, mimi"), ("1", "ray")] + [
         (str(i), "ray" if i % 2 else "mimi") for i in range(3, 17)
     ]
-    with pytest.raises(StoryboardError, match="next uncovered line"):
-        decode_storyboard(_fields(shots=_shots(overlap)), _script())
+    with pytest.raises(StoryboardError, match="must start at line 3"):
+        decode_storyboard(_fields(shots=_shots(backwards)), _script())
     short = [(str(i), "ray" if i % 2 else "mimi") for i in range(1, 16)]
     with pytest.raises(StoryboardError, match="every line needs a shot"):
         decode_storyboard(_fields(shots=_shots(short)), _script())
+
+
+def test_sbd_04_shots_may_share_a_line_up_to_three_times() -> None:
+    def spans(extra: int) -> list[tuple[str, str]]:
+        shared = [("1", "ray")] * extra  # `extra` shots on line 1
+        return shared + [(str(i), "ray" if i % 2 else "mimi") for i in range(2, 17)]
+
+    board = decode_storyboard(_fields(shots=_shots(spans(3))), _script())
+    assert [s.first_line for s in board.shots[:4]] == [1, 1, 1, 2]
+    with pytest.raises(StoryboardError, match="already has 3 shots"):
+        decode_storyboard(_fields(shots=_shots(spans(4))), _script())
+
+
+def test_sbd_11_shared_lines_split_their_time_and_the_windows_tile_the_track() -> None:
+    script = _script()
+    spans = [("1", "ray"), ("1", "ray"), ("2-3", "mimi, ray"), ("3", "ray"), ("4", "mimi")] + [
+        (str(i), "ray" if i % 2 else "mimi") for i in range(5, 17)
+    ]
+    board = decode_storyboard(_fields(shots=_shots(spans)), script)
+    starts = [250 + 1000 * i for i in range(16)]  # sixteen lines, 1000 ms each
+    windows = shot_windows(board, starts, [1000] * 16, 16_600)
+    assert windows[0] == (0, 750)  # first half of line 1, from the very start
+    assert windows[1] == (750, 1250)  # second half of line 1
+    assert windows[2] == (1250, 2750)  # line 2 whole, then half of line 3 (it is shared)
+    assert windows[3] == (2750, 3250)
+    assert windows[-1][1] == 16_600
+    assert all(a[1] == b[0] for a, b in itertools.pairwise(windows))
 
 
 @pytest.mark.parametrize("lines", ["x", "0", "3-2", "17", "1-4", "1 - 2 - 3"])
@@ -170,3 +200,12 @@ def test_sbd_10_all_the_faults_are_reported_together() -> None:
     message = str(raised.value)
     assert "shot line 6" in message and "picture" in message
     assert "shot line 8" in message and "'zed'" in message
+
+
+def test_sbd_12_a_pacing_floor_asks_for_reaction_shots() -> None:
+    script = _script()
+    assert decode_storyboard(_fields(), script)  # one shot per line is fine without a floor
+    with pytest.raises(StoryboardError, match="at least 24 shots, not 16"):
+        decode_storyboard(_fields(), script, shots_per_line=1.5)
+    assert "AT LEAST 24 shots" in storyboard_input(script, min_shots=24)
+    assert "AT LEAST" not in storyboard_input(script)
