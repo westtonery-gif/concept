@@ -44,10 +44,12 @@ from omemo_content_factory.adapters.frame_generator import FrameGenerator
 from omemo_content_factory.adapters.image_generator import ImageGeneratorError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
+from omemo_content_factory.adapters.shot_animator import ShotAnimator
 from omemo_content_factory.adapters.speech_synthesizer import (
     SpeechSynthesizer,
     SpeechSynthesizerError,
 )
+from omemo_content_factory.adapters.video_generator import VideoGeneratorError
 from omemo_content_factory.agents import clip_post_writer, story_writer, storyboard_writer
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
@@ -154,6 +156,10 @@ from omemo_content_factory.infrastructure.notion_review_desk import (
 from omemo_content_factory.infrastructure.production_service import (
     ProductionService,
     service_settings_from_env,
+)
+from omemo_content_factory.infrastructure.seedance_shot_animator import (
+    SeedanceShotAnimator,
+    seedance_settings_from_env,
 )
 from omemo_content_factory.infrastructure.seedream_frame_generator import (
     SeedreamFrameGenerator,
@@ -428,6 +434,14 @@ def build_frame_generator(environ: Mapping[str, str]) -> FrameGenerator:
     try:
         return SeedreamFrameGenerator(seedream_settings_from_env(environ))
     except ImageGeneratorError as error:
+        raise CompositionError(str(error)) from error
+
+
+def build_shot_animator(environ: Mapping[str, str]) -> ShotAnimator:
+    """Build the Seedance `ShotAnimator` (ADR-0090); a missing variable stops the build, named."""
+    try:
+        return SeedanceShotAnimator(seedance_settings_from_env(environ))
+    except VideoGeneratorError as error:
         raise CompositionError(str(error)) from error
 
 

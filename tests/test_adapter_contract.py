@@ -365,6 +365,7 @@ def test_adb_06_every_contract_module_is_scanned_and_imports_on_its_own() -> Non
             "image_generator",
             "review_desk",
             "run_store",
+            "shot_animator",  # one picture brought to life (ADR-0090)
             "speech_synthesizer",  # a spoken line (ADR-0085)
             "video_generator",
         }

@@ -1608,6 +1608,15 @@ process at the time, not a pattern to keep copying.)
       answered; framing comes out medium-wide, characters smallish (ADR-0089 Negative).
       `demo_storyboard.py` / `demo_frames.py shots`; `.env` has the `STORYBOARD_WRITER_V1` binding.
       **Next:** look at the full thirty (~$0.90), then Seedance clips + assembly + captions.
+    - **23.16 animation — started 2026-10-07 (ADR-0090).** `ShotAnimator` port (frame + prompt + whole
+      seconds → a Seedance task; reuses `VideoGenerator`'s job types; `submit` is never repeated by
+      code) and `SeedanceShotAnimator` — ADR-0084's Seedance side, built at last. `demo_animate.py
+      plan` shows the windows from the real spoken lines: **30 clips, 116 s asked for, ≈$6.26** for a
+      100 s story (whole-second rounding costs ~16 %). Pilot: shot 6, 4 s, ≈$0.22, 704×1248 — moves,
+      with artifacts (a phone ends on the floor, a telescope through a head). The 30 pictures (≈$1.35
+      all in) were redrawn where weak (Milo, framing). `.env`: `OMEMO_SEEDANCE_VIDEO_MODEL`,
+      `OMEMO_SEEDANCE_RESOLUTION=720p`. **Next:** the other 29 clips (≈$6), `join`, voice track,
+      word-by-word captions.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,

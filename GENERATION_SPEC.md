@@ -231,3 +231,31 @@ PNG / JPEG / WebP — ширина и высота из заголовка; MP4 
   ремонтная попытка, `--reuse` — повторный разбор сохранённого ответа без вызова модели) и
   сохраняет `storyboard.json`. `demo_frames.py shots <сценарий.txt> [номера]` рисует кадры, подавая
   листы героев из cast как референсы.
+
+## 13. Оживление кадра — порт `ShotAnimator` и `SeedanceShotAnimator` (`ADR-0090`)
+
+- **Порт** `adapters/shot_animator.py`: `submit(AnimationRequest) -> VideoJob`, `collect(VideoJob,
+  destination) -> VideoJobResult`. `AnimationRequest(frame, prompt, duration_s, ratio="9:16")` —
+  непустые `frame` и `prompt`, положительная целая `duration_s` (не `bool`), `ratio` вида `9:16`;
+  иначе `ValueError`. Типы `VideoJob`, `VideoJobState`, `VideoJobResult`, `GeneratedVideo`,
+  `VideoGeneratorError` — **те же**, что у `VideoGenerator`, который не меняется. `submit` не
+  повторяем (у вендора нет ключа идемпотентности), `collect` повторяем.
+- **Адаптер** `infrastructure/seedance_shot_animator.py`, stdlib `urllib`: `submit` — один
+  `POST /api/v3/contents/generations/tasks` с телом `{model, content: [{type: text, text: промпт +
+  флаги}, {type: image_url, image_url: {url: data URI}, role: first_frame}]}`; флаги
+  `--resolution R --duration N --ratio X --watermark false --camerafixed false`. Длительность вне
+  2–12 с, нет файла кадра или это не картинка — ошибка **до** запроса. **Сетевой сбой на `submit`
+  не повторяется** («NOT submitted again»); отказ вендора — слова вендора, ключа нет.
+- `collect`: один `GET` статуса; `queued`/`running` → `PENDING` (ничего не качается);
+  `succeeded` → скачать, измерить MP4 (размер и длина — из файла), записать атомарно →
+  `COMPLETED`; `failed`/`cancelled`/`expired` → `FAILED`, а код ошибки со словом «sensitive» →
+  `REJECTED`; неизвестный статус, нет `video_url` — ошибка. Сетевой сбой чтения повторяется до двух
+  раз; идентификатор задачи кодируется в пути.
+- **Настройки.** `OMEMO_BYTEPLUS_API_KEY`, `OMEMO_SEEDANCE_VIDEO_MODEL` (начинается с `seedance-`),
+  `OMEMO_SEEDANCE_RESOLUTION` (`480p`/`720p`/`1080p`) — все обязательны, без значений по умолчанию;
+  ключ не в `repr`. `composition.build_shot_animator(environ)`.
+- `demo_animate.py plan|run|join <сценарий.txt>`: окно кадра берётся из реальных длин реплик (кадр
+  начинается там, где начинается его первая реплика, и кончается там, где начинается первая реплика
+  следующего), клип запрашивается на ближайшую целую секунду и обрезается до окна; `plan` — бесплатно,
+  показывает секунды и цену; `run` — платно, номер задачи пишется на диск **до** ожидания
+  (`clips.json`), повторный запуск ничего не отправляет заново; `join` — обрезка и склейка.

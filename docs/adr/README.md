@@ -113,3 +113,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0087](0087-a-story-writer-agent-for-voiced-story-videos.md) | A story-writer Agent for voiced story videos — flat fields, a line grammar, a decoder | Accepted |
 | [0088](0088-a-frame-generator-port-and-seedream-behind-it.md) | A `FrameGenerator` port — pictures from words and references — and Seedream behind it | Accepted |
 | [0089](0089-a-storyboard-writer-agent-and-shot-prompts-built-in-code.md) | A storyboard-writer Agent — and the picture prompt of a shot is built in code | Accepted |
+| [0090](0090-a-shot-animator-port-and-seedance-behind-it.md) | A `ShotAnimator` port — one picture brought to life — and Seedance behind it | Accepted |
