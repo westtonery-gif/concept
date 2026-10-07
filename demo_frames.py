@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Draw the pictures of a story with Seedream (ADR-0088): first the characters.
+"""Draw the pictures of a story with Seedream (ADR-0088): the characters, then the shots.
 
     set -a && source .env && set +a
     python demo_frames.py sheets generation-tests/stories/<story>.txt
+    python demo_frames.py shots  generation-tests/stories/<story>.txt [1,6,13]
 
 `sheets` makes one full-body picture per character from the `look` written in the script's header
 (`# key: look (voice)`), 9:16, one call each (about $0.03). Pictures already on disk are not paid
@@ -11,6 +12,7 @@ for again. Later shots take these sheets as references so a character stays the 
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -40,10 +42,45 @@ def characters(script: Path) -> dict[str, str]:
     return found
 
 
+def shots(script: Path, only: str) -> int:
+    """Draw the shots of the saved storyboard, each with the sheets of whoever is in it."""
+    folder = Path("generation-tests/frames") / script.stem
+    board = json.loads((folder / "storyboard.json").read_text())
+    wanted = {int(n) for n in only.split(",") if n.strip()} if only else None
+    generator = build_frame_generator(os.environ)
+    spent = 0
+    for shot in board["shots"]:
+        if wanted is not None and shot["number"] not in wanted:
+            continue
+        destination = folder / f"shot-{shot['number']:02d}.jpeg"
+        if destination.exists():
+            safe_print(f"[on disk] {destination.name}")
+            continue
+        references = tuple(str(folder / f"sheet-{key}.jpeg") for key in shot["cast"])
+        image = generator.generate(
+            FrameRequest(
+                prompt=shot["prompt"],
+                destination=str(destination),
+                width=WIDTH,
+                height=HEIGHT,
+                references=references,
+            )
+        )
+        spent += 1
+        refs = ", ".join(shot["cast"]) or "-"
+        safe_print(f"{destination.name}  {image.width}x{image.height}  refs: {refs}")
+    safe_print(f"\n{spent} new picture(s), about ${spent * 0.03:.2f}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) < 3 or argv[1] != "sheets":
-        safe_print("usage: python demo_frames.py sheets <story.txt>")
+    if len(argv) < 3 or argv[1] not in ("sheets", "shots"):
+        safe_print(
+            "usage: python demo_frames.py sheets|shots <story.txt> [shot numbers, e.g. 1,6,13]"
+        )
         return 2
+    if argv[1] == "shots":
+        return shots(Path(argv[2]), argv[3] if len(argv) > 3 else "")
     script = Path(argv[2])
     cast = characters(script)
     if not cast:

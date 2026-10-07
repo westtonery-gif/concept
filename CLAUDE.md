@@ -1596,6 +1596,18 @@ process at the time, not a pattern to keep copying.)
       sheets are passed as references. **Next:** the storyboard role (script → shots with prompts,
       its own ADR), then shot frames with references, then Seedance clips and assembly.
       `.env`: `OMEMO_SEEDREAM_IMAGE_MODEL=seedream-4-0-250828`.
+    - **23.15 storyboard — done 2026-10-07 (ADR-0089).** `storyboard_writer@v1` (Prompt
+      `storyboard-writer` v1, Schema `storyboard@v1`: `world`, `shots` as `lines | cast | picture |
+      motion`) + the pure decoder `application/storyboard.py` (every line covered once and in order,
+      all faults reported together, speakers and characters named in a picture added to the shot's
+      cast so their sheets become references) + `shot_prompt` building the picture prompt in code
+      (shot first, then looks, setting, style). Live on the lighthouse story: 30 shots, **$0.0456**
+      for the call that passed (about $0.2 spent finding the rules above). Three test shots drawn
+      with the sheets as references ($0.09 + $0.09 + $0.09 over three rounds): **Hal, Dale and Reeda
+      stay recognisably themselves across shots** — the consistency risk ADR-0088 left open looks
+      answered; framing comes out medium-wide, characters smallish (ADR-0089 Negative).
+      `demo_storyboard.py` / `demo_frames.py shots`; `.env` has the `STORYBOARD_WRITER_V1` binding.
+      **Next:** look at the full thirty (~$0.90), then Seedance clips + assembly + captions.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,

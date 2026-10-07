@@ -48,7 +48,7 @@ from omemo_content_factory.adapters.speech_synthesizer import (
     SpeechSynthesizer,
     SpeechSynthesizerError,
 )
-from omemo_content_factory.agents import clip_post_writer, story_writer
+from omemo_content_factory.agents import clip_post_writer, story_writer, storyboard_writer
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
 from omemo_content_factory.application.clip_production import (
@@ -68,6 +68,7 @@ from omemo_content_factory.application.skill_execution import (
     TaskInputSkillInvocation,
 )
 from omemo_content_factory.application.story_script import StoryWriting
+from omemo_content_factory.application.storyboard import StoryboardWriting
 from omemo_content_factory.application.task_execution import TaskExecutor
 from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
@@ -595,6 +596,20 @@ def build_story_writing(client: LLMClient, *, prompts: PromptCatalogueInput = No
     return StoryWriting(
         executor=executors[story_writer.AGENT_REF],
         schema_binding=bindings[story_writer.AGENT_REF],
+    )
+
+
+def build_storyboard_writing(
+    client: LLMClient, *, prompts: PromptCatalogueInput = None
+) -> StoryboardWriting:
+    """Compile ``storyboard_writer@v1`` into its executor and Schema binding (ADR-0089 §1)."""
+    resolved = _resolve_prompts(prompts)
+    agents = storyboard_writer.AGENTS
+    executors = build_executor_map(agents, resolved, client, storyboard_writer.SCHEMAS)
+    bindings = build_schema_map(agents, resolved, storyboard_writer.SCHEMAS)
+    return StoryboardWriting(
+        executor=executors[storyboard_writer.AGENT_REF],
+        schema_binding=bindings[storyboard_writer.AGENT_REF],
     )
 
 
