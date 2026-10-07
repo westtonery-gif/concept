@@ -361,6 +361,7 @@ def test_adb_06_every_contract_module_is_scanned_and_imports_on_its_own() -> Non
             "episode_board",
             "episode_source",
             "footage_index",
+            "frame_generator",  # a picture from words and references (ADR-0088)
             "image_generator",
             "review_desk",
             "run_store",

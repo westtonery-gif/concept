@@ -111,3 +111,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0085](0085-speech-synthesizer-port-and-a-local-kokoro-adapter.md) | A `SpeechSynthesizer` port, and a local Kokoro adapter behind it | Accepted |
 | [0086](0086-elevenlabs-behind-the-speech-synthesizer-port.md) | ElevenLabs behind the `SpeechSynthesizer` port — expressive voices, true word times | Accepted |
 | [0087](0087-a-story-writer-agent-for-voiced-story-videos.md) | A story-writer Agent for voiced story videos — flat fields, a line grammar, a decoder | Accepted |
+| [0088](0088-a-frame-generator-port-and-seedream-behind-it.md) | A `FrameGenerator` port — pictures from words and references — and Seedream behind it | Accepted |

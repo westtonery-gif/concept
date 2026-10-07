@@ -1587,6 +1587,15 @@ process at the time, not a pattern to keep copying.)
       `.env` has the `STORY_WRITER_V1` binding (a copy of the post writer's). **Maintainer dropped
       Kokoro the same day** — ElevenLabs only; the Kokoro adapter stays unused in the tree.
       **Next:** a voice per character, the story QA role, shots/prompts per line (ADR-0080/0082).
+    - **23.14 frames — started 2026-10-07 (ADR-0088).** `FrameGenerator` port (words + 0..N
+      reference pictures + an explicit size → one image) and `SeedreamFrameGenerator` (stdlib
+      `urllib`, inline base64 references, atomic write, retry on network failure only, 3 % ratio
+      guard) — ADR-0084's Seedream image side, built at last. `demo_frames.py sheets <story.txt>`
+      drew the four characters of the lighthouse story ($0.12): clean, distinct, original, one
+      film style. **Not yet proven:** that a character stays the same across ~30 shots when the
+      sheets are passed as references. **Next:** the storyboard role (script → shots with prompts,
+      its own ADR), then shot frames with references, then Seedance clips and assembly.
+      `.env`: `OMEMO_SEEDREAM_IMAGE_MODEL=seedream-4-0-250828`.
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,

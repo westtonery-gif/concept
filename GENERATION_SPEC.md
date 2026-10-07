@@ -187,3 +187,25 @@ PNG / JPEG / WebP — ширина и высота из заголовка; MP4 
 - Сборка — `composition.build_story_writing(client)` (`StoryWriting`: исполнитель и привязка Schema);
   клиент — из `client_for_role("story_writer@v1", …)`. `demo_story.py "<идея>"` пишет сценарий и
   сохраняет его в `generation-tests/stories/`.
+
+## 11. Кадры — порт `FrameGenerator` и `SeedreamFrameGenerator` (`ADR-0088`)
+
+- **Порт** `adapters/frame_generator.py`: `generate(FrameRequest) -> GeneratedImage`, синхронно,
+  повторяемо (повтор тратит деньги и перезаписывает тот же файл). `FrameRequest(prompt, destination,
+  width, height, references=())` — непустые `prompt` и `destination`, положительные целые `width`
+  и `height` (не `bool`), референсы — непустые пути без повторов; иначе `ValueError`.
+  `GeneratedImage` и `ImageGeneratorError` те же, что у `ImageGenerator`, который **не меняется**.
+- **Адаптер** `infrastructure/seedream_frame_generator.py`, только stdlib `urllib`: один
+  `POST /api/v3/images/generations`, `Authorization: Bearer`, тело `{model, prompt, size:
+  "WxH", response_format: "url", watermark: false, image?: [data URI...]}`, затем одна загрузка
+  ссылки из ответа; файл пишется атомарно, ссылка наружу не отдаётся. Референсы — inline base64 с
+  собственным типом по сигнатуре; не больше десяти, нет файла или не картинка — ошибка **до**
+  запроса. Ответ измеряется по байтам; соотношение сторон более чем на 3 % от запрошенного —
+  ошибка и файл не записан. Сбой сети (в том числе обрыв тела) повторяется до двух раз; отказ
+  вендора — нет, в ошибке его слова и код, ключа нет.
+- **Настройки.** `OMEMO_BYTEPLUS_API_KEY` и `OMEMO_SEEDREAM_IMAGE_MODEL` (идентификатор начинается
+  с `seedream-`), обе обязательны, без значений по умолчанию; ключ не в `repr`.
+  `composition.build_frame_generator(environ)`.
+- `demo_frames.py sheets <сценарий.txt>` рисует по персонажу на героя из строк
+  `# key: look (voice)` заголовка сценария (9:16, 1080×1920, $0.03 за картинку, уже готовые не
+  оплачиваются повторно).

@@ -40,6 +40,8 @@ from omemo_content_factory.adapters.clip_renderer import ClipRenderer
 from omemo_content_factory.adapters.episode_board import EpisodeBoard
 from omemo_content_factory.adapters.episode_source import EpisodeSource
 from omemo_content_factory.adapters.footage_index import FootageIndex
+from omemo_content_factory.adapters.frame_generator import FrameGenerator
+from omemo_content_factory.adapters.image_generator import ImageGeneratorError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
 from omemo_content_factory.adapters.run_store import RunIndex, RunStore
 from omemo_content_factory.adapters.speech_synthesizer import (
@@ -151,6 +153,10 @@ from omemo_content_factory.infrastructure.notion_review_desk import (
 from omemo_content_factory.infrastructure.production_service import (
     ProductionService,
     service_settings_from_env,
+)
+from omemo_content_factory.infrastructure.seedream_frame_generator import (
+    SeedreamFrameGenerator,
+    seedream_settings_from_env,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 from omemo_content_factory.infrastructure.upload_post_publisher import (
@@ -414,6 +420,14 @@ def build_episode_source(environ: Mapping[str, str]) -> EpisodeSource:
 def build_footage_index(environ: Mapping[str, str]) -> FootageIndex:
     """Build the local ffmpeg + whisper.cpp `FootageIndex` (ADR-0064); no vendor, no account."""
     return LocalFootageIndex(whisper_settings_from_env(environ))
+
+
+def build_frame_generator(environ: Mapping[str, str]) -> FrameGenerator:
+    """Build the Seedream `FrameGenerator` (ADR-0088); a missing variable stops the build, named."""
+    try:
+        return SeedreamFrameGenerator(seedream_settings_from_env(environ))
+    except ImageGeneratorError as error:
+        raise CompositionError(str(error)) from error
 
 
 def build_speech_synthesizer(environ: Mapping[str, str]) -> SpeechSynthesizer:
