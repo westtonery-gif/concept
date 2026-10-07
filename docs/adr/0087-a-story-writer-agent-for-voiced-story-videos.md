@@ -47,9 +47,9 @@ meaning must not depend on it) and what is forbidden.
 `application/story_script.py` `decode_story_script(fields) -> StoryScript`, in the shape of
 `decode_verdict` (ADR-0034): every violation raises `StoryScriptError`, nothing is guessed. It
 checks the grammar; unique, well-formed keys; a cast of 2–5; speakers declared and every character
-speaking; 14–40 lines; the opening line ≤ 14 words; a line ≤ 35 words; **120–330 spoken words in
+speaking; 14–40 lines; the opening line ≤ 14 words; a line ≤ 35 words; **110–240 spoken words in
 total** (audio tags not counted); tags balanced, ≤ 3 words and never the whole line; title ≤ 90.
-It reports `word_count` and `estimated_seconds` (2.6 words a second). Whether a story is *good* is
+It reports `word_count` and `estimated_seconds` (2.1 words a second of finished track — measured: 259 words came out as 125 s). Whether a story is *good* is
 not its question.
 
 On a refusal the caller may send the decoder's own message back for **one** repair round. The demo

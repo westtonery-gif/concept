@@ -42,9 +42,13 @@ MIN_LINES, MAX_LINES = 14, 40
 MAX_FIRST_LINE_WORDS = 14
 """The opening line is a conflict or a shock, so it is short (the reference stories all open so)."""
 MAX_LINE_WORDS = 35
-MIN_TOTAL_WORDS, MAX_TOTAL_WORDS = 120, 330
-WORDS_PER_SECOND = 2.6
-"""A conversational pace; the estimated length of a script is its spoken words over this."""
+MIN_TOTAL_WORDS, MAX_TOTAL_WORDS = 110, 240
+WORDS_PER_SECOND = 2.1
+"""Spoken words per second of finished track, pauses between lines included.
+
+Measured on the first voiced story (2026-10-07): 259 words came out as 125 seconds, so the pace of
+the speech alone (about 2.6) is not the pace of the video.
+"""
 
 _KEY = re.compile(r"[a-z][a-z0-9_]{0,23}")
 _TAG = re.compile(r"\[([^\[\]]{1,30})\]")

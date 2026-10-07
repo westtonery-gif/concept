@@ -1579,7 +1579,7 @@ process at the time, not a pattern to keep copying.)
     - **23.13 story writer — done 2026-10-07 (ADR-0087).** `story_writer@v1` (Prompt `story-writer`
       v1, Schema `story-script@v1`: `title`, `premise`, `characters`, `dialogue`, `next_part`; English
       output, Russian Prompt) + the pure decoder `application/story_script.py` that alone judges the
-      `key | …` line grammar and the arithmetic limits (14–40 lines, 120–330 spoken words, first
+      `key | …` line grammar and the arithmetic limits (14–40 lines, 110–240 spoken words, first
       line ≤ 14 words). The skeleton comes from three reference videos with view figures
       (`generation-refs/NOTES.md`); the Prompt keeps it but moves the gift off children and forbids
       exploitation/violence/franchises (ADR-0087 §3). `demo_story.py "<idea>"`: live run $0.018 — the

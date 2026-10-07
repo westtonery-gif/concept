@@ -48,7 +48,7 @@ def test_scr_01_a_good_script_decodes_with_its_measures() -> None:
     assert [c.key for c in script.characters] == ["ray", "mimi"]
     assert script.characters[0].voice == "male, fifties, booming"
     assert len(script.lines) == 16 and script.word_count == 16 * 9
-    assert script.estimated_seconds == pytest.approx(16 * 9 / 2.6)
+    assert script.estimated_seconds == pytest.approx(16 * 9 / 2.1)
 
 
 def test_scr_02_audio_tags_stay_in_text_and_leave_spoken() -> None:
@@ -109,7 +109,7 @@ def test_scr_07_line_counts_word_counts_and_the_opening_are_limited() -> None:
     with pytest.raises(StoryScriptError, match="spoken words"):
         decode_story_script(_fields(dialogue=_dialogue(lines=16, words=3)))
     with pytest.raises(StoryScriptError, match="spoken words"):
-        decode_story_script(_fields(dialogue=_dialogue(lines=40, words=9)))
+        decode_story_script(_fields(dialogue=_dialogue(lines=40, words=7)))
     with pytest.raises(StoryScriptError, match="limit is"):
         decode_story_script(
             _fields(dialogue=f"ray | {' '.join(['w'] * (MAX_LINE_WORDS + 1))}\n" + _dialogue(15))
