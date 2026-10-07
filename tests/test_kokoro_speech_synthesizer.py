@@ -201,6 +201,15 @@ def test_kok_08_the_synthesizer_satisfies_the_port() -> None:
     assert synthesizer is not None
 
 
+def test_kok_10_audio_tags_are_not_read_aloud(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    _, speech = say(tmp_path, engine, "[laughs] Ha, no way. [whispers softly] Really.")
+    assert engine.calls[0][0] == "Ha, no way. Really."
+    assert [w.text for w in speech.words] == ["Ha,", "no", "way.", "Really."]  # type: ignore[attr-defined]
+    with pytest.raises(SpeechSynthesizerError, match="audio tags"):
+        say(tmp_path, FakeEngine(), "[laughs] [sighs]")
+
+
 def test_kok_09_the_root_builds_it_without_loading_a_model(tmp_path: Path) -> None:
     with pytest.raises(CompositionError) as missing:
         build_speech_synthesizer({})

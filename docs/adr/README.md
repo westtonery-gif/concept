@@ -110,3 +110,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0084](0084-the-generation-department-moves-to-byteplus.md) | One vendor for both frames and video — BytePlus (Seedream + Seedance) | Accepted |
 | [0085](0085-speech-synthesizer-port-and-a-local-kokoro-adapter.md) | A `SpeechSynthesizer` port, and a local Kokoro adapter behind it | Accepted |
 | [0086](0086-elevenlabs-behind-the-speech-synthesizer-port.md) | ElevenLabs behind the `SpeechSynthesizer` port — expressive voices, true word times | Accepted |
+| [0087](0087-a-story-writer-agent-for-voiced-story-videos.md) | A story-writer Agent for voiced story videos — flat fields, a line grammar, a decoder | Accepted |

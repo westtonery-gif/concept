@@ -59,6 +59,7 @@ _LONG_PAUSE_WEIGHT = 4
 """A pause after a comma is worth two letters of speaking time; after a full stop, four."""
 
 _ALNUM = re.compile(r"[^\W_]", re.UNICODE)
+_AUDIO_TAG = re.compile(r"\[[^\[\]]{1,30}\]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,8 +192,12 @@ class KokoroSpeechSynthesizer:
     def synthesize(self, request: SpeechRequest, /) -> SynthesizedSpeech:
         """Write the line to ``request.destination`` and report what was written."""
         voice = parse_voice(request.voice)
+        # Kokoro cannot act on ElevenLabs-style audio tags and would read "[laughs]" aloud.
+        text = " ".join(_AUDIO_TAG.sub(" ", request.text).split())
+        if not text:
+            raise SpeechSynthesizerError("the line has no spoken words once audio tags are removed")
         try:
-            pcm, rate = self._engine.render(request.text, voice, request.speed)
+            pcm, rate = self._engine.render(text, voice, request.speed)
         except SpeechSynthesizerError:
             raise
         except Exception as error:  # the engine is outside our code; its failures are one error
@@ -202,7 +207,7 @@ class KokoroSpeechSynthesizer:
 
         def words_for(duration_ms: int) -> tuple[SpokenWord, ...]:
             return estimate_word_times(
-                request.text,
+                text,
                 max(0, round(first * 1000 / rate) - _PAD_MS),
                 min(duration_ms, round((last + 1) * 1000 / rate) + _PAD_MS),
                 limit_ms=duration_ms,

@@ -1576,6 +1576,17 @@ process at the time, not a pattern to keep copying.)
       (`DialogueTrack.words`, with the speaker). Tests `tests/test_dialogue_mixer.py` (real
       ffmpeg). `demo_dialogue.py - out/dialogue.wav music.mp3` speaks a plain `speaker | voice |
       text` script. **Next: captions that highlight the word being said, from that timeline.**
+    - **23.13 story writer — done 2026-10-07 (ADR-0087).** `story_writer@v1` (Prompt `story-writer`
+      v1, Schema `story-script@v1`: `title`, `premise`, `characters`, `dialogue`, `next_part`; English
+      output, Russian Prompt) + the pure decoder `application/story_script.py` that alone judges the
+      `key | …` line grammar and the arithmetic limits (14–40 lines, 120–330 spoken words, first
+      line ≤ 14 words). The skeleton comes from three reference videos with view figures
+      (`generation-refs/NOTES.md`); the Prompt keeps it but moves the gift off children and forbids
+      exploitation/violence/franchises (ADR-0087 §3). `demo_story.py "<idea>"`: live run $0.018 — the
+      first answer broke the word limit (399), the decoder refused, the repair round gave 259 words.
+      `.env` has the `STORY_WRITER_V1` binding (a copy of the post writer's). **Maintainer dropped
+      Kokoro the same day** — ElevenLabs only; the Kokoro adapter stays unused in the tree.
+      **Next:** a voice per character, the story QA role, shots/prompts per line (ADR-0080/0082).
     **Same day, second correction — ADR-0082 + ADR-0083.** There is **no reference photo**: the
     starting frame is generated too. Pipeline: `write-scene` (`generation_scene_writer@v1`, text:
     idea → `start_prompt`) → `start-frame` (additive `TextToImageGenerator.generate_from_text`,
