@@ -1558,8 +1558,8 @@ process at the time, not a pattern to keep copying.)
       `OMEMO_KOKORO_VOICES`, files in `~/tts-test/`. Spec `GENERATION_SPEC.md` §9, acceptance §7
       (`SPP`, `KOK`). **Next for the voice story format:** the dialogue assembly step (several
       lines + gaps + music under, ffmpeg) and captions that highlight the word being said.
-    - **ElevenLabs speech adapter — done as code 2026-10-06 (ADR-0086), not yet run against the real
-      service.** The maintainer heard Kokoro, judged it too monotone and chose ElevenLabs (which
+    - **ElevenLabs speech adapter — done as code 2026-10-06 (ADR-0086), run live once 2026-10-07 (one line, `eleven_v3`, tag left out of the words — see ADR-0086's
+      verification note).** The maintainer heard Kokoro, judged it too monotone and chose ElevenLabs (which
       refuses Russia — their call; no region option in the adapter). `ElevenLabsSpeechSynthesizer`
       behind the same `SpeechSynthesizer` port: `POST /v1/text-to-speech/{voice}/with-timestamps`,
       raw PCM + **the vendor's own per-character times** grouped into words, `[laughs]`-style audio

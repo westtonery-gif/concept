@@ -105,3 +105,22 @@ roughly 1200 characters — **on the order of $0.12–0.15 per video** — again
   `AudioWithTimestampsResponse`, `CharacterAlignmentResponseModel`, `VoiceSettings`, the allowed
   output formats — read 2026-10-06
 - ElevenLabs' country-restriction help article, and third-party pricing pages, 2026-10-06
+
+## Verification note (2026-10-07) — the first live call
+
+One real line went through the adapter: `eleven_v3`, the stock voice Adam, the text
+`[laughs] Every morning? For a few sad sprouts?`. It answered, the file was written, and the words
+came back with the vendor's own times (`Every` 860–960 ms, … `sprouts?` 2700–3280 ms of a 3280 ms
+file): **the tag was left out of the words and the laugh sits in the first 860 ms**, as §2 says.
+That settles Deferred 3 — `with-timestamps` takes `eleven_v3` — and confirms the contract read from
+the SDK (path, `xi-api-key`, `pcm_24000`, `audio_base64`, `alignment`).
+
+Two findings from getting there, both in the adapter's favour to know about:
+
+- **The API sits behind Cloudflare, which challenged a bare Python request** (`403 Just a moment…`
+  to `urllib`'s default `User-Agent`, from this machine, 2026-10-07). The adapter now sends an
+  explicit `User-Agent` naming itself; that is what every API client does and it is not a
+  disguise. Whether a given network is let through at all is the vendor's decision (the region
+  question above) and the adapter has no option to change it.
+- **A key restricted to *Text to Speech* cannot list voices** (`401`, `voices_read` missing). The
+  adapter needs only the former; choosing voices by name needs the latter, or the ids copied by hand.

@@ -52,6 +52,7 @@ STABILITY_VAR = "OMEMO_ELEVENLABS_STABILITY"
 
 DEFAULT_API_URL = "https://api.elevenlabs.io"
 _OUTPUT_FORMAT = "pcm_24000"
+_USER_AGENT = "concept-content-factory/1.0 (+api-client)"
 _SAMPLE_RATE = 24_000
 _ALNUM = re.compile(r"[^\W_]", re.UNICODE)
 
@@ -138,6 +139,8 @@ class ElevenLabsSpeechSynthesizer:
                 "xi-api-key": self._settings.api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
+                # Cloudflare in front of the API challenges the bare Python default.
+                "User-Agent": _USER_AGENT,
             },
         )
         try:
