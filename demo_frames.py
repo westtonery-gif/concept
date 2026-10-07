@@ -2,7 +2,7 @@
 """Draw the pictures of a story with Seedream (ADR-0088): the characters, then the shots.
 
     set -a && source .env && set +a
-    python demo_frames.py sheets generation-tests/stories/<story>.txt
+    python demo_frames.py sheets generation-tests/stories/<story>.txt [keys] [--note "text"]
     python demo_frames.py shots  generation-tests/stories/<story>.txt [1,6,13] [--note "text"]
 
 `sheets` makes one full-body picture per character from the `look` written in the script's header
@@ -84,7 +84,9 @@ def main(argv: list[str]) -> int:
         numbers = argv[3] if len(argv) > 3 and not argv[3].startswith("--") else ""
         return shots(Path(argv[2]), numbers, note)
     script = Path(argv[2])
-    cast = characters(script)
+    note = argv[argv.index("--note") + 1] if "--note" in argv else ""
+    only = argv[3].split(",") if len(argv) > 3 and not argv[3].startswith("--") else []
+    cast = {k: v for k, v in characters(script).items() if not only or k in only}
     if not cast:
         safe_print("no `# key: look (voice)` header lines found in the script")
         return 1
@@ -98,8 +100,8 @@ def main(argv: list[str]) -> int:
             continue
         prompt = (
             "Character design, full body, a single character standing in a relaxed neutral pose "
-            f"facing the camera on a plain soft grey studio backdrop. {look}. {STYLE}"
-        )
+            f"facing the camera on a plain soft grey studio backdrop. {look}. {STYLE} {note}"
+        ).strip()
         image = generator.generate(
             FrameRequest(prompt=prompt, destination=str(destination), width=WIDTH, height=HEIGHT)
         )
