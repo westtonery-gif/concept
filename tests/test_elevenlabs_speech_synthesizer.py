@@ -75,6 +75,7 @@ def answer(text: str, milliseconds: int = 1500, **extra: Any) -> dict[str, Any]:
 class FakeElevenLabs:
     answer: tuple[int, Any] = (200, None)
     requests: list[tuple[str, dict[str, str], Any]] = field(default_factory=list)
+    truncate_next: int = 0  # how many answers to cut short before answering properly
 
 
 @pytest.fixture
@@ -92,6 +93,12 @@ def elevenlabs() -> Iterator[tuple[FakeElevenLabs, str]]:
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
+            if fake.truncate_next > 0:
+                fake.truncate_next -= 1
+                self.wfile.write(raw[: len(raw) // 2])  # the body ends before its length says
+                self.wfile.flush()
+                self.close_connection = True
+                return
             self.wfile.write(raw)
 
         def log_message(self, *args: object) -> None:
@@ -120,7 +127,7 @@ def _request(tmp_path: Path, text: str = "Hello there, friend.", **overrides: An
 
 
 def _synth(url: str, settings: ElevenLabsSettings = SETTINGS) -> ElevenLabsSpeechSynthesizer:
-    return ElevenLabsSpeechSynthesizer(settings, api_url=url, timeout=5.0)
+    return ElevenLabsSpeechSynthesizer(settings, api_url=url, timeout=5.0, retry_delay=0.0)
 
 
 def test_elv_01_one_post_per_line_and_the_file_is_measured(
@@ -256,6 +263,29 @@ def test_elv_07_a_refusal_carries_the_code_and_the_vendors_message_but_never_the
     fake.answer = (422, {"detail": [{"msg": "bad"}]})
     with pytest.raises(SpeechSynthesizerError, match="HTTP 422"):
         _synth(url).synthesize(_request(tmp_path))
+
+
+def test_elv_11_a_body_cut_short_is_asked_for_again(
+    tmp_path: Path, elevenlabs: tuple[FakeElevenLabs, str]
+) -> None:
+    fake, url = elevenlabs
+    fake.answer = (200, answer("Hello there, friend."))
+    fake.truncate_next = 2
+    speech = _synth(url).synthesize(_request(tmp_path))
+    assert len(fake.requests) == 3 and speech.duration_ms == 1500
+    fake.truncate_next = 3  # more than the retries allow
+    with pytest.raises(SpeechSynthesizerError, match="could not be reached"):
+        _synth(url).synthesize(_request(tmp_path))
+
+
+def test_elv_11_a_refusal_is_final_and_never_asked_again(
+    tmp_path: Path, elevenlabs: tuple[FakeElevenLabs, str]
+) -> None:
+    fake, url = elevenlabs
+    fake.answer = (401, {"detail": {"message": "Invalid API key"}})
+    with pytest.raises(SpeechSynthesizerError, match="HTTP 401"):
+        _synth(url).synthesize(_request(tmp_path))
+    assert len(fake.requests) == 1
 
 
 def test_elv_08_an_unreachable_service_is_named(tmp_path: Path) -> None:

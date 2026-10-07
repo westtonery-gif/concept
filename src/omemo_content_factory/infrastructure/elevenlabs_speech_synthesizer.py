@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import base64
 import binascii
+import http.client
 import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -97,10 +99,14 @@ class ElevenLabsSpeechSynthesizer:
         *,
         api_url: str = DEFAULT_API_URL,
         timeout: float = 120.0,
+        retries: int = 2,
+        retry_delay: float = 1.0,
     ) -> None:
         self._settings = settings
         self._api_url = api_url.rstrip("/")
         self._timeout = timeout
+        self._retries = retries
+        self._retry_delay = retry_delay
 
     def synthesize(self, request: SpeechRequest, /) -> SynthesizedSpeech:
         """Write the line to ``request.destination`` and report what was written."""
@@ -143,17 +149,7 @@ class ElevenLabsSpeechSynthesizer:
                 "User-Agent": _USER_AGENT,
             },
         )
-        try:
-            with urllib.request.urlopen(http_request, timeout=self._timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            raise SpeechSynthesizerError(
-                f"ElevenLabs refused the request: HTTP {exc.code}{_detail(exc)}"
-            ) from None
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise SpeechSynthesizerError(
-                f"ElevenLabs could not be reached: {_reason(exc)}"
-            ) from None
+        raw = self._send(http_request)
         try:
             answer = json.loads(raw)
         except ValueError:
@@ -163,6 +159,30 @@ class ElevenLabsSpeechSynthesizer:
         if not isinstance(answer, dict):
             raise SpeechSynthesizerError("ElevenLabs answered with an unexpected shape")
         return answer
+
+    def _send(self, http_request: urllib.request.Request) -> bytes:
+        """One request, retried only when the network failed — never when the vendor answered.
+
+        A refusal (``HTTPError``) is the vendor's answer and is final. A dropped connection or a
+        body cut short is not: the request changed nothing on the vendor's side that matters, and
+        asking again costs one more line of credit at worst.
+        """
+        last: BaseException | None = None
+        for attempt in range(self._retries + 1):
+            try:
+                with urllib.request.urlopen(http_request, timeout=self._timeout) as response:
+                    return bytes(response.read())
+            except urllib.error.HTTPError as exc:
+                raise SpeechSynthesizerError(
+                    f"ElevenLabs refused the request: HTTP {exc.code}{_detail(exc)}"
+                ) from None
+            except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as exc:
+                last = exc
+                if attempt < self._retries:
+                    time.sleep(self._retry_delay)
+        raise SpeechSynthesizerError(
+            f"ElevenLabs could not be reached: {_reason(last) if last else 'unknown'}"
+        )
 
 
 def words_from_alignment(

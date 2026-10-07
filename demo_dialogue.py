@@ -15,12 +15,17 @@ The voice column is the speech vendor's voice id (ElevenLabs: Copy voice ID). Ne
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 from pathlib import Path
 
-from omemo_content_factory.adapters.speech_synthesizer import SpeechRequest
+from omemo_content_factory.adapters.speech_synthesizer import (
+    SpeechRequest,
+    SpokenWord,
+    SynthesizedSpeech,
+)
 from omemo_content_factory.composition import build_speech_synthesizer
 from omemo_content_factory.infrastructure.dialogue_mixer import DialogueLine, DialogueMixer
 
@@ -44,6 +49,36 @@ def parse(script: str) -> list[tuple[str, str, str]]:
     return rows
 
 
+def _spoken(synthesizer: object, line_path: Path, text: str, voice: str) -> SynthesizedSpeech:
+    """Speak one line, or reuse the file already paid for: same text and voice, same answer."""
+    sidecar = line_path.with_suffix(".json")
+    key = hashlib.sha256(f"{voice}\n{text}".encode()).hexdigest()
+    if sidecar.is_file() and line_path.is_file():
+        saved = json.loads(sidecar.read_text())
+        if saved["key"] == key:
+            words = tuple(SpokenWord(**word) for word in saved["words"])
+            return SynthesizedSpeech(
+                str(line_path), saved["duration_ms"], saved["sample_rate"], words
+            )
+    speech = synthesizer.synthesize(  # type: ignore[attr-defined]
+        SpeechRequest(text=text, voice=voice, destination=str(line_path))
+    )
+    sidecar.write_text(
+        json.dumps(
+            {
+                "key": key,
+                "duration_ms": speech.duration_ms,
+                "sample_rate": speech.sample_rate,
+                "words": [
+                    {"text": w.text, "start_ms": w.start_ms, "end_ms": w.end_ms}
+                    for w in speech.words
+                ],
+            }
+        )
+    )
+    return speech
+
+
 def main(argv: list[str]) -> int:
     script = Path(argv[1]).read_text() if len(argv) > 1 and argv[1] not in ("", "-") else SAMPLE
     destination = Path(argv[2] if len(argv) > 2 else "generation-tests/dialogue/demo.wav")
@@ -53,9 +88,7 @@ def main(argv: list[str]) -> int:
     lines = []
     for index, (speaker, voice, text) in enumerate(parse(script), start=1):
         line_path = destination.parent / "lines" / f"{index:02d}-{speaker}.wav"
-        speech = synthesizer.synthesize(
-            SpeechRequest(text=text, voice=voice, destination=str(line_path))
-        )
+        speech = _spoken(synthesizer, line_path, text, voice)
         print(f"{index:>2}. {speaker:<7} {speech.duration_ms / 1000:5.1f}s  {text}")
         lines.append(DialogueLine(speaker, speech))
     track = mixer.mix(lines, str(destination), music=music, music_db=-20.0)
