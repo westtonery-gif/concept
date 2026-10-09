@@ -18,6 +18,7 @@ import sys
 from demo import safe_print
 
 from omemo_content_factory.adapters.clip_publisher import ClipPublisherError
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.file_post_queue import FilePostQueue
 from omemo_content_factory.infrastructure.upload_post_publisher import (
     UploadPostPublisher,
@@ -50,4 +51,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     raise SystemExit(main(sys.argv[1:]))

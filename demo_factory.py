@@ -69,6 +69,7 @@ from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
@@ -341,4 +342,5 @@ def _show_model_calls(run: Run) -> None:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     main()

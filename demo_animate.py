@@ -37,6 +37,7 @@ from omemo_content_factory.adapters.speech_synthesizer import SpokenWord, Synthe
 from omemo_content_factory.application.storyboard import Shot, Storyboard, shot_windows
 from omemo_content_factory.composition import build_shot_animator
 from omemo_content_factory.infrastructure.dialogue_mixer import DialogueLine, lay_out
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 
 _PRICE_PER_SECOND = 0.054  # 720p, Seedance 1.0 pro: $0.0025 per 1K tokens, measured 2026-09-27
 _MIN_ANIMATED_MS = 2000
@@ -213,4 +214,5 @@ def join(folder: Path, windows: list[tuple[int, int]], asked: list[int | None]) 
 _SCALE = "scale=720:1280:flags=lanczos,fps=24,format=yuv420p"
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     sys.exit(main(sys.argv))

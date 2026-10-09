@@ -22,6 +22,7 @@ from demo import safe_print
 from omemo_content_factory.agents import story_writer
 from omemo_content_factory.application.story_script import StoryScriptError, decode_story_script
 from omemo_content_factory.composition import build_story_writing
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import client_for_role
 
 
@@ -77,4 +78,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     sys.exit(main(sys.argv))

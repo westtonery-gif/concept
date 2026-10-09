@@ -26,6 +26,25 @@ reconciled against the repo as of commit `063cfde`. Read it for context and the 
 anything ahead of the queue below — see task 10.
 
 ## Current state (2026-09-21)
+- **A machine can be set up without an assistant (2026-10-09, ADR-0093).** `scripts/setup.sh` (venv +
+  package + `.env` + report), `python doctor.py [department]` (what a machine still lacks, per
+  department, with install hints, never a value) and `docs/SETUP.md`; every entrypoint now reads
+  `.env` itself via `infrastructure/dotenv_file.py` (a shell export wins; the core still reads
+  `environ` only). `AGENTS.md` is the tool-neutral pointer; this file is session notes, not required
+  reading. **Not done:** a second LLM provider (only Anthropic has a real adapter).
+- **Any model provider works (2026-10-09, ADR-0094).** `infrastructure/openai_compatible_llm.py`
+  `OpenAICompatibleLLMClient` speaks the OpenAI dialect (`chat` and `responses`; structured output by
+  forced function, `tool-required` or `json`) with the Tool loop, exact priced metrics and a bounded
+  retry, over stdlib `urllib`. `provider_model.py` selects it by **preset** (`xai`, `openai`,
+  `openrouter`, `groq`, `mistral`, `deepseek`, `together`, `ollama`, `lmstudio`) or `openai-compatible`;
+  the key is read **by name** and never printed; **every `OMEMO_<NAME>__<ROLE>` may fall back to an
+  operator-written `__DEFAULT`**, so one model for all roles is eight lines. `configure_llm.py`
+  writes that block, `check_llm.py` makes one tiny real call, `doctor.py core` asks only for the key of
+  a provider the configuration selects, `.cursor/rules/` + `AGENTS.md` serve Cursor. Tests
+  `tests/test_openai_compatible_llm.py` (`OAI`, `PRV`) run real HTTP against a local server in both
+  dialects. **NOT verified live — no provider's real answer has been seen**; the maintainer's first
+  Grok run (`check_llm.py`) is the check. Not built: image input for this family (the image-aware
+  port of ADR-0080/0083 has no code yet), streaming, prompt caching.
 - **`CLIPPING_RUNBOOK.md` exists, and writing it found two gaps that would have broken the first
   real run.** (1) **Nothing reads `.env`** — every entrypoint takes `os.environ`, so the file is a
   record, not a loader, and the operator must `set -a && source .env && set +a`. (2) **The clip QA

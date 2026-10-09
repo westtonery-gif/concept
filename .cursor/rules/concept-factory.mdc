@@ -1,0 +1,32 @@
+---
+description: How to work in the Concept Content Factory repository (setup, model choice, checks, conventions)
+alwaysApply: true
+---
+
+# Concept Content Factory — working rules
+
+You are in a Python 3.11+ repository. **Read `AGENTS.md` and `docs/SETUP.md` first.** Do not
+assume any particular AI vendor: the factory's text roles run on whatever model provider the
+operator configured (`.env`, see below).
+
+## Set up / run
+- `scripts/setup.sh` creates `.venv`, installs the package and creates `.env` from `.env.example`.
+- Choose the model for every text role (any provider; prices per 1M tokens are the user's to give):
+  `python configure_llm.py xai --model <name> --input-price <n> --output-price <n>`
+  (`--list` shows presets; `ollama` + `--free` for a local model).
+- The API key goes in `.env` (or the shell) under the variable the command prints — never in code,
+  never in a commit, never echoed back.
+- `python check_llm.py` makes one tiny real call; `python doctor.py [clipping|posting|generation]`
+  reports what the machine still lacks. Entrypoints read `.env` themselves.
+
+## Change code
+- Quality gate, all green before a change is done:
+  `ruff check . && ruff format --check . && mypy && pytest -q`
+- Spec/ADR before code (`docs/adr/`); documents win over code (`PROJECT.md` §17).
+- Extend additively. Do not change `Run`'s existing behaviour; do not hardcode a model, a price or
+  a token budget; no new dependency without need (vendor adapters use stdlib `urllib`).
+- Only `infrastructure/` may do I/O or import third-party packages (`tests/test_adapter_contract.py`).
+
+## Never
+- Publish, post or upload anything without the user explicitly asking in this conversation.
+- Print, log or commit a secret.

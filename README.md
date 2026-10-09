@@ -3,13 +3,11 @@
 Industrial multi-agent content production system for **Concept** — a
 managed, reproducible, human-in-the-loop pipeline for producing content.
 
-> **Status:** ROADMAP **Stage 2 — domain models & contracts**.
-> The domain core is implemented: the **Run** aggregate and its child entities
-> **Task, Output, Artifact**, **Human Review** (ADR-0003…0007), the fail-closed QA
-> **Evaluation** (ADR-0018), **Artifact versioning** for rework (ADR-0019) and the append-only
-> per-call **Analytics Record** (ADR-0020), with a minimal
-> `ContentDirector` and an LLM-backed task executor. Full agents, skills, tools,
-> adapters and workflows arrive in later stages.
+> **Status:** the content factory (brief → research → script → QA → human review) and two
+> additive departments — **clipping** (episode → vertical clips with captions, QA, review, posting)
+> and **generation** (voiced story videos from words) — run end to end. See
+> [ROADMAP.md](ROADMAP.md) for the plan and [docs/adr/](docs/adr/README.md) for every decision.
+> New machine? Start at [docs/SETUP.md](docs/SETUP.md).
 
 ## Documentation (source of truth)
 
@@ -30,36 +28,33 @@ wins (PROJECT.md, section 17).
 - Python **3.11+**
 - git
 
-## Quickstart
-
-Create a virtual environment and install the project with its dev tooling:
+## Quickstart (no AI assistant needed)
 
 ```bash
-# bash
+git clone <this repo> concept && cd concept
+scripts/setup.sh          # venv + package + .env from the example + a readiness report
+.venv/bin/python configure_llm.py xai --model <name> --input-price <n> --output-price <n>
+                          # any provider: xai, openai, openrouter, groq, mistral, deepseek, ollama, …
+$EDITOR .env              # add that provider's key and what the departments you use need
+.venv/bin/python check_llm.py                   # one tiny real call: key, model, price
+.venv/bin/python doctor.py clipping posting     # until it says "ready"
+```
+
+Every entrypoint (`demo_*.py`, `factory_service.py`, `doctor.py`) reads `.env` itself — you do not
+need to `source` it, and a variable you export in the shell wins over the file. External tools
+(ffmpeg with libass, whisper.cpp, chromaprint) and each department's variables are listed in
+[docs/SETUP.md](docs/SETUP.md). Windows: use WSL.
+
+Manual install, if you prefer (bash; on Windows PowerShell activate with
+`.venv\Scripts\Activate.ps1`):
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -e ".[dev]"
+cp .env.example .env
 ```
-
-```powershell
-# PowerShell (Windows)
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-pip install -e ".[dev]"
-```
-
-Configure the environment (optional — sensible defaults are used otherwise):
-
-```bash
-cp .env.example .env        # bash
-Copy-Item .env.example .env # PowerShell
-```
-
-> At Stage 1 variables are read directly from the **process environment**
-> (`OMEMO_APP_ENV`, `OMEMO_LOG_LEVEL`). A `.env` auto-loader is intentionally not
-> part of Stage 1. Export the variables in your shell, or set them inline.
 
 ## Running the checks
 

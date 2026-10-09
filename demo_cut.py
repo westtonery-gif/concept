@@ -35,6 +35,7 @@ from omemo_content_factory.composition import (
     build_episode_source,
     build_footage_index,
 )
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 
 
 def main(argv: list[str]) -> int:
@@ -110,4 +111,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     raise SystemExit(main(sys.argv[1:]))

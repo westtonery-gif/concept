@@ -34,6 +34,7 @@ from omemo_content_factory.adapters.brief_board import BriefBoardError
 from omemo_content_factory.adapters.review_desk import ReviewDeskError
 from omemo_content_factory.application.brief_production import BriefInvocation, BriefProduction
 from omemo_content_factory.composition import build_production_service
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.production_service import ServiceConfigurationError
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
 from omemo_content_factory.log import configure_logging
@@ -112,4 +113,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     raise SystemExit(main())

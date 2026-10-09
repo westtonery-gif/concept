@@ -31,6 +31,7 @@ from omemo_content_factory.application.storyboard import (
     storyboard_input,
 )
 from omemo_content_factory.composition import build_storyboard_writing
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import client_for_role
 
 _SHOTS_PER_LINE = 1.5
@@ -145,4 +146,5 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     sys.exit(main(sys.argv))

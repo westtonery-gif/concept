@@ -46,6 +46,7 @@ from omemo_content_factory.composition import (
     build_review_desk,
 )
 from omemo_content_factory.domain.run import RunStatus
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
@@ -165,4 +166,5 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     raise SystemExit(main())

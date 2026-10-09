@@ -84,6 +84,7 @@ from omemo_content_factory.composition import (
     validate_workflow_executors,
 )
 from omemo_content_factory.domain.run import Run, RunStatus
+from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import ProviderModelSelectionError
 
 _DESK_VARS = NOTION_REVIEW_DESK_VARS + GOOGLE_REVIEW_DESK_VARS
@@ -260,4 +261,5 @@ def _show_board_reports(store: BriefStatusReporter, run: Run) -> None:
 
 
 if __name__ == "__main__":
+    load_project_env(__file__)
     main()
