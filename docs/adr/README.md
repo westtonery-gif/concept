@@ -115,3 +115,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0089](0089-a-storyboard-writer-agent-and-shot-prompts-built-in-code.md) | A storyboard-writer Agent — and the picture prompt of a shot is built in code | Accepted |
 | [0090](0090-a-shot-animator-port-and-seedance-behind-it.md) | A `ShotAnimator` port — one picture brought to life — and Seedance behind it | Accepted |
 | [0091](0091-pacing-faces-and-stills-what-the-references-showed.md) | Cut as fast as the references, put faces in the frame, and let short shots be stills | Accepted |
+| [0092](0092-an-unattended-post-queue-for-clips-made-outside-a-run.md) | An unattended post queue for clips made outside a Run | Accepted |

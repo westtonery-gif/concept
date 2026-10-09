@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- One pass of the post queue (ADR-0092) every 2 hours: collects the clip in flight and posts the
+     next one. Install: cp to ~/Library/LaunchAgents/ and
+     `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.concept.post-queue.plist`. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.concept.post-queue</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/delnonsly/concept/scripts/run_post_queue.sh</string>
+    <string>post-queue</string>
+  </array>
+  <key>StartInterval</key><integer>7200</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>/Users/delnonsly/concept/.omemo/post-queue.launchd.err</string>
+</dict>
+</plist>
