@@ -33,7 +33,7 @@ from omemo_content_factory.adapters.clip_renderer import (
     RenderedClip,
 )
 
-__all__ = ["DEFAULT_FFMPEG", "DEFAULT_FFPROBE", "FfmpegClipRenderer"]
+__all__ = ["DEFAULT_FFMPEG", "DEFAULT_FFPROBE", "FfmpegClipRenderer", "caption_colour"]
 
 DEFAULT_FFMPEG = "ffmpeg"
 DEFAULT_FFPROBE = "ffprobe"
@@ -50,6 +50,19 @@ letterboxed into a 9:16 feed, where the picture is about a third of the screen (
 
 _NO_SUBTITLES_FILTER = "No such filter: 'subtitles'"
 
+_NAMED_COLOURS = {"white": "ffffff", "yellow": "ffff00"}
+"""The caption colours that have a name; anything else is spelt ``#RRGGBB``."""
+
+
+def caption_colour(value: str) -> str:
+    """A caption colour as ASS spells it (``&H00BBGGRR``) from ``white``/``yellow``/``#RRGGBB``."""
+    text = value.strip().casefold()
+    rgb = _NAMED_COLOURS.get(text, text.removeprefix("#"))
+    if len(rgb) != 6 or any(char not in "0123456789abcdef" for char in rgb):
+        raise ValueError("a caption colour is white, yellow or #RRGGBB")
+    red, green, blue = rgb[0:2], rgb[2:4], rgb[4:6]
+    return f"&H00{blue}{green}{red}".upper()
+
 
 class FfmpegClipRenderer:
     """Cuts one clip with ffmpeg and measures it with ffprobe."""
@@ -64,6 +77,7 @@ class FfmpegClipRenderer:
         audio_codec: str = "aac",
         caption_font: str = DEFAULT_CAPTION_FONT,
         caption_size: int = DEFAULT_CAPTION_SIZE,
+        caption_color: str = "white",
         canvas: tuple[int, int] | None = None,
         crf: int = 18,
         preset: str = "medium",
@@ -83,6 +97,7 @@ class FfmpegClipRenderer:
         self._audio_codec = audio_codec
         self._caption_font = caption_font.strip()
         self._caption_size = caption_size
+        self._caption_colour = caption_colour(caption_color)
         self._canvas = canvas
         self._crf = crf
         self._preset = preset
@@ -106,7 +121,12 @@ class FfmpegClipRenderer:
             if request.captions:
                 subtitles = Path(workspace) / "captions.ass"
                 subtitles.write_text(
-                    _ass(request.captions, font=self._caption_font, size=self._caption_size),
+                    _ass(
+                        request.captions,
+                        font=self._caption_font,
+                        size=self._caption_size,
+                        colour=self._caption_colour,
+                    ),
                     encoding="utf-8",
                 )
                 filters.append(f"subtitles=filename={_filter_path(subtitles)}")
@@ -255,7 +275,7 @@ class FfmpegClipRenderer:
         return completed.stdout
 
 
-def _ass(captions: Sequence[Caption], *, font: str, size: int) -> str:
+def _ass(captions: Sequence[Caption], *, font: str, size: int, colour: str) -> str:
     """The captions as an ASS script: one style, one dialogue line per caption (ADR-0071 §2)."""
     header = (
         "[Script Info]\n"
@@ -269,7 +289,7 @@ def _ass(captions: Sequence[Caption], *, font: str, size: int) -> str:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Default,{font},{size},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,"
+        f"Style: Default,{font},{size},{colour},{colour},&H00000000,&H80000000,"
         "-1,0,0,0,100,100,0,0,1,4,1,2,80,80,60,1\n"
         "\n"
         "[Events]\n"

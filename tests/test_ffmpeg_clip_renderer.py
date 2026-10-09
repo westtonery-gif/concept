@@ -30,6 +30,7 @@ from omemo_content_factory.adapters.episode_source import (
 from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import (
     FfmpegClipRenderer,
     _drawable,
+    caption_colour,
 )
 from omemo_content_factory.infrastructure.file_system_episode_source import (
     EPISODE_ROOT_VAR,
@@ -194,6 +195,60 @@ def test_fcr_02_captions_are_burnt_in_while_they_are_said(tmp_path: Path) -> Non
     )
     assert _light_pixels(Path(clip.path), 0.5) > 200, "the caption is on screen while it is said"
     assert _light_pixels(Path(clip.path), 2.0) == 0, "and gone once it is over"
+
+
+def _brightest_rgb(video: Path, at_seconds: float) -> tuple[int, int, int]:
+    """The mean colour of the pixels in the frame that are clearly not black."""
+    frame = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{at_seconds}",
+            "-i",
+            str(video),
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    pixels = [tuple(frame[i : i + 3]) for i in range(0, len(frame) - 2, 3)]
+    lit = [p for p in pixels if max(p) > 200]
+    assert lit, "a caption is on screen"
+    return (
+        sum(p[0] for p in lit) // len(lit),
+        sum(p[1] for p in lit) // len(lit),
+        sum(p[2] for p in lit) // len(lit),
+    )
+
+
+@needs_libass
+def test_fcr_11_captions_can_be_yellow(tmp_path: Path) -> None:
+    """The caption colour is a renderer setting: yellow is red + green with no blue."""
+    black = _black_episode(tmp_path)
+    captions = (Caption(start_ms=0, end_ms=1_000, text="Морти, это видно?"),)
+    clip = FfmpegClipRenderer(caption_color="yellow").render(
+        _request(black, tmp_path / "yellow.mp4", start_ms=0, end_ms=3_000, captions=captions)
+    )
+    red, green, blue = _brightest_rgb(Path(clip.path), 0.5)
+    assert red > 200 and green > 200 and blue < 80, (red, green, blue)
+
+
+def test_fcr_11_a_caption_colour_is_a_name_or_hex() -> None:
+    assert caption_colour("yellow") == "&H0000FFFF"
+    assert caption_colour("#FF8000") == "&H000080FF"
+    assert caption_colour(" White ") == "&H00FFFFFF"
+    with pytest.raises(ValueError, match="caption colour"):
+        caption_colour("mauve")
 
 
 @needs_libass
