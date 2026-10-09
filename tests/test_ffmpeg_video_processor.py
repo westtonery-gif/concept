@@ -8,6 +8,7 @@ import json
 import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from fractions import Fraction
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,7 @@ def test_vpr_01_real_geometry_audio_metadata_and_hash(source: Path) -> None:
     assert output.clip.duration_ms == pytest.approx(3000 / 0.98, abs=40)
     info = _probe(output.clip.path)
     assert "old-private-title" not in json.dumps(info)
-    assert info["format"]["tags"]["comment"].startswith("video-processing-v1:")
+    assert info["format"]["tags"]["comment"].startswith("video-processing-v2:")
     video, audio = info["streams"]
     assert float(audio["duration"]) == pytest.approx(float(video["duration"]), abs=0.04)
     frame = subprocess.check_output(
@@ -132,7 +133,14 @@ def test_vpr_01_real_geometry_audio_metadata_and_hash(source: Path) -> None:
     assert crossings == pytest.approx(440, abs=3)
     report = json.loads(Path(output.report_path).read_text())
     assert report["output_sha256"] == output.output_sha256
-    assert report["settings"]["speed"] == report["settings"]["scale"] == 0.98
+    assert report["settings"]["speed"] == 0.98
+    assert report["settings"]["scale"] == 0.94
+    assert report["settings"]["version"] == 2
+    assert Fraction(video["avg_frame_rate"]) == 30
+    assert video["sample_aspect_ratio"] == "1:1"
+    assert int(video["nb_frames"]) == pytest.approx(90 / 0.98, abs=1)
+    assert report["output_frames"] == int(video["nb_frames"])
+    assert frame[180 * 640 + 10] < 5 and frame[180 * 640 + 30] > 245
 
 
 def test_vpr_02_restart_reuses_result_without_another_encode(source: Path) -> None:
@@ -244,3 +252,85 @@ def test_vpr_09_missing_encoder_cannot_leave_a_final_file(source: Path) -> None:
         FfmpegVideoProcessor(ffmpeg="uninstalled-encoder-for-test").process(request)
     assert not Path(request.destination).exists()
     assert not list(source.parent.glob(".processing-*"))
+
+
+def test_vpr_10_fractional_cfr_packet_intervals_and_gop(tmp_path: Path) -> None:
+    source = tmp_path / "fractional.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=24000/1001",
+            "-t",
+            "4",
+            "-c:v",
+            "libx264",
+            str(source),
+        ],
+        check=True,
+        timeout=30,
+    )
+    output = FfmpegVideoProcessor().process(_request(source))
+    video = _probe(output.clip.path)["streams"][0]
+    assert Fraction(video["avg_frame_rate"]) == Fraction(24000, 1001)
+    packets = json.loads(
+        subprocess.check_output(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_packets",
+                "-of",
+                "json",
+                output.clip.path,
+            ],
+            timeout=30,
+        )
+    )["packets"]
+    timestamps = sorted(int(p["pts"]) for p in packets)
+    assert len({b - a for a, b in pairwise(timestamps)}) == 1
+    keys = sorted(timestamps.index(int(p["pts"])) for p in packets if "K" in p["flags"])
+    assert len(keys) >= 2
+    assert max(b - a for a, b in pairwise([*keys, len(packets)])) <= 60
+
+
+def test_vpr_11_old_profile_is_not_reused_or_processed_twice(source: Path) -> None:
+    first = FfmpegVideoProcessor().process(_request(source))
+    report_path = Path(first.report_path)
+    report = json.loads(report_path.read_text())
+    report["settings"]["version"] = 1
+    report_path.write_text(json.dumps(report))
+    with pytest.raises(VideoProcessingError, match="different request"):
+        FfmpegVideoProcessor().process(_request(source))
+    with pytest.raises(VideoProcessingError, match="different settings"):
+        FfmpegVideoProcessor().process(
+            VideoProcessingRequest("upgrade", first.clip.path, str(source.parent / "upgrade.mp4"))
+        )
+    legacy = source.parent / "legacy.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-i",
+            first.clip.path,
+            "-c",
+            "copy",
+            "-metadata",
+            "comment=video-processing-v1:legacy",
+            str(legacy),
+        ],
+        check=True,
+        timeout=30,
+    )
+    with pytest.raises(VideoProcessingError, match="missing its report"):
+        FfmpegVideoProcessor().process(
+            VideoProcessingRequest("legacy", str(legacy), str(source.parent / "upgrade.mp4"))
+        )
+    assert not (source.parent / "upgrade.mp4").exists()

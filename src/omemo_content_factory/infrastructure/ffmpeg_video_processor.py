@@ -5,10 +5,12 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import math
 import os
 import tempfile
 from dataclasses import asdict
 from datetime import UTC, datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +28,7 @@ class FfmpegVideoProcessor:
         self,
         *,
         speed: float = 0.98,
-        scale: float = 0.98,
+        scale: float = 0.94,
         crf: int = 18,
         preset: str = "slow",
         ffmpeg: str = "ffmpeg",
@@ -51,7 +53,9 @@ class FfmpegVideoProcessor:
             raise ValueError("invalid video encoder preset")
         self._speed, self._scale = speed, scale
         self._settings = {
-            "version": 1,
+            "version": 2,
+            "fps_mode": "cfr",
+            "max_gop": 60,
             "speed": speed,
             "scale": scale,
             "crf": crf,
@@ -86,7 +90,7 @@ class FfmpegVideoProcessor:
             "settings": self._settings,
         }
         fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-        marker = f"video-processing-v1:{fingerprint}"
+        marker = f"video-processing-v2:{fingerprint}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
             return self._recover(destination, identity, marker)
@@ -96,7 +100,7 @@ class FfmpegVideoProcessor:
             self._render(source, temporary, report, marker)
             if _sha256(source) != source_hash:
                 raise VideoProcessingError("the source changed during video processing")
-            self._media._measure(temporary)  # validate before publishing a final filename
+            self._validate_output(temporary, report)  # validate before publishing a final filename
             if _sha256(temporary) == source_hash:
                 raise VideoProcessingError("processing did not change the video hash")
             # The final name is created atomically and never overwrites another job's file.
@@ -127,7 +131,9 @@ class FfmpegVideoProcessor:
         report = source.with_suffix(".processing.json")
         if not report.is_file():
             metadata = self._probe(source).get("format", {}).get("tags", {})
-            if str(metadata.get("comment", "")).startswith("video-processing-v1:"):
+            if str(metadata.get("comment", "")).startswith(
+                ("video-processing-v1:", "video-processing-v2:")
+            ):
                 raise VideoProcessingError("already processed input is missing its report")
             return None
         data = _read_report(report)
@@ -141,7 +147,8 @@ class FfmpegVideoProcessor:
 
     def _recover(self, path: Path, identity: dict[str, Any], marker: str) -> ProcessedVideo:
         report_path = path.with_suffix(".processing.json")
-        metadata = self._probe(path).get("format", {}).get("tags", {})
+        measured = self._probe(path)
+        metadata = measured.get("format", {}).get("tags", {})
         if metadata.get("comment") != marker:
             raise VideoProcessingError("destination belongs to another processing request")
         digest = _sha256(path)
@@ -155,7 +162,14 @@ class FfmpegVideoProcessor:
             self._media._measure(path), identity["source_sha256"], digest, str(report_path)
         )
         if not report_path.exists():
-            payload = {**identity, "output_sha256": digest, "clip": asdict(result.clip)}
+            video = next(s for s in measured["streams"] if s.get("codec_type") == "video")
+            payload = {
+                **identity,
+                "output_sha256": digest,
+                "clip": asdict(result.clip),
+                "fps": video["avg_frame_rate"],
+                "output_frames": int(video["nb_frames"]),
+            }
             with tempfile.NamedTemporaryFile(
                 mode="w", encoding="utf-8", dir=path.parent, delete=False
             ) as file:
@@ -185,6 +199,7 @@ class FfmpegVideoProcessor:
             raise VideoProcessingError(
                 "HDR video requires explicit SDR conversion before processing"
             )
+        rate = _frame_rate(video)
         width, height = _dimensions(video)
         speed, scale = self._speed, self._scale
         inner_w, inner_h = (
@@ -222,10 +237,14 @@ class FfmpegVideoProcessor:
             str(self._settings["crf"]),
             "-preset",
             str(self._settings["preset"]),
+            "-r",
+            str(rate),
             "-fps_mode",
-            "passthrough",
+            "cfr",
+            "-g",
+            str(self._settings["max_gop"]),
             "-video_track_timescale",
-            "90000",
+            str(_track_timescale(rate)),
         ]
         audio = next((s for s in report.get("streams", []) if s.get("codec_type") == "audio"), None)
         if audio is not None:
@@ -251,6 +270,29 @@ class FfmpegVideoProcessor:
         ]
         self._media._run(command, what="process the clipped video")
 
+    def _validate_output(self, path: Path, source_report: dict[str, Any]) -> None:
+        source_video = next(
+            s
+            for s in source_report["streams"]
+            if s.get("codec_type") == "video" and not s.get("disposition", {}).get("attached_pic")
+        )
+        measured = self._probe(path)
+        video = next(s for s in measured["streams"] if s.get("codec_type") == "video")
+
+        def has_audio(report: dict[str, Any]) -> bool:
+            return any(s.get("codec_type") == "audio" for s in report["streams"])
+
+        if (
+            Fraction(video.get("avg_frame_rate", "0/1")) != _frame_rate(source_video)
+            or video.get("sample_aspect_ratio") != "1:1"
+            or (video["width"], video["height"]) != _dimensions(source_video)
+            or has_audio(measured) != has_audio(source_report)
+        ):
+            raise VideoProcessingError(
+                "output violates the processing profile: FPS, SAR, size or audio"
+            )
+        self._media._measure(path)
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -258,6 +300,28 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(4 * 1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _frame_rate(video: dict[str, Any]) -> Fraction:
+    """Keep nominal CFR, or use the average rate when VFR rates disagree."""
+    rates = []
+    for key in ("r_frame_rate", "avg_frame_rate"):
+        try:
+            rate = Fraction(str(video.get(key, "0/0")))
+        except (ValueError, ZeroDivisionError):
+            rate = Fraction(0)
+        rates.append(rate if 0 < rate <= 1000 and rate.numerator <= 2147483647 else Fraction(0))
+    nominal, average = rates
+    if nominal and (not average or abs(nominal / average - 1) < Fraction(1, 100)):
+        return nominal
+    if average:
+        return average
+    raise VideoProcessingError("input has no valid frame rate")
+
+
+def _track_timescale(rate: Fraction) -> int:
+    scale = math.lcm(rate.numerator, 1000)
+    return scale if scale <= 2147483647 else rate.numerator
 
 
 def _dimensions(video: dict[str, Any]) -> tuple[int, int]:

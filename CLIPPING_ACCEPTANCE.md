@@ -180,10 +180,14 @@ Notion, — как `NBB` и `NRD`. Ниже адаптера ничего не �
 - VPW-04: a crash before the processing commit resumes the same Task and request; raw renders
   are not repeated and duplicate candidates are not created.
 - VPR-01..09: actual FFmpeg transformations preserve source bytes, change metadata/hash, produce
-  0.98x speed/98% geometry with pitch-preserved sound, handle silent/rotated video, reject HDR,
+  0.98x speed/94% geometry with pitch-preserved sound, handle silent/rotated video, reject HDR,
   recover a missing report after final-file publication, reuse matching outputs and reject
   changed inputs/settings or corrupt results. Concurrent same-request calls converge.
 - CMP-09: composition always injects a real processor; invalid settings fail at build time.
 
 Only clipped media is covered. Generation and the general post queue retain their previous
 behaviour; this change does not grant a new model Tool or change the Run aggregate.
+
+Profile-2 checks: preserve integer and fractional FPS, constant packet intervals,
+GOP <= 60, SAR 1:1, frame count adjusted for slowdown; reject prior-profile
+inputs/destinations without overwriting; retain retry and clip-only workflow gates.

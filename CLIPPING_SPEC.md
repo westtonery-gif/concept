@@ -242,7 +242,7 @@ path. The actual processed duration and geometry are checked against the existin
 including the duration increase caused by 0.98x playback. One failed processing Task produces no
 Artifact or fallback; it counts as a failed clip and does not stop independent clips.
 
-Default processing is speed 0.98, image scale 0.98 with black padding, fresh metadata and verified
+Default processing is speed 0.98, image scale 0.94 with black padding, fresh metadata and verified
 changed SHA-256, H.264 CRF 18. The audio tempo follows the video without changing pitch. The original
 cut remains a raw intermediate. The port carries typed requests/results and a technical
 `VideoProcessingError`; it is not a model Tool. Composition always supplies a processor.
@@ -259,3 +259,8 @@ intermediate. The generated-video department and `FilePostQueue` are unchanged. 
 Run artifacts are not silently replaced after approval: a new publication without `process-video`
 provenance is refused; already-submitted jobs may still be collected. An operator must explicitly
 re-produce legacy material under a new episode/Run identity or provide a reviewed migration.
+
+Profile 2 retains the rational source FPS as CFR (average FPS for VFR), using
+frame duplication/dropping, square pixels and GOP <= 60. Reports identify the
+profile version and measured FPS/frame count. Old renders are never overwritten
+or silently upgraded; use the original cut and a new destination.

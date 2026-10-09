@@ -165,7 +165,7 @@ QA зовёт модель **на каждый клип**, и на вход ид
 
 Every **cut** now passes `render-clip → process-video → format check → QA → human review`.
 Generated videos and the general post queue are unaffected. The required processor runs locally:
-0.98x speed, 98% centred image with thin black padding, new metadata and changed SHA-256. Audio
+0.98x speed, 94% centred image with thin black padding, new metadata and changed SHA-256. Audio
 slows with the picture without a pitch shift. Defaults are in `.env.example`; there is no skip flag.
 
 Deliver `*.unique.mp4`, not the raw cut beside it. Keep its `*.unique.processing.json` report:
@@ -179,3 +179,8 @@ Legacy active Runs produced before this change have no processing provenance. Th
 silently rewritten after review: a new publication is refused. Re-produce them under a new episode
 identity (and review the result), or perform an explicit reviewed migration. Already-submitted
 uploads are collected without another render or submission. Completed Runs are left as recorded.
+
+Profile 2 defaults to scale 0.94, CFR at the source rate, square pixels and GOP <= 60.
+Existing OMEMO_VIDEO_SCALE overrides still apply. Completed runs retain their
+committed results; to upgrade use a new run from the raw clip with an unused
+output path. Existing v1 outputs are neither overwritten nor processed a second time.

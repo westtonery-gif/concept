@@ -209,7 +209,8 @@ def test_cmp_09_video_processing_is_required_and_has_no_skip_flag() -> None:
 
     processor = build_video_processor({})
     assert isinstance(processor, FfmpegVideoProcessor)
-    assert processor._settings["speed"] == processor._settings["scale"] == 0.98
+    assert processor._settings["speed"] == 0.98
+    assert processor._settings["scale"] == 0.94
     for key, value in [
         ("OMEMO_VIDEO_SPEED", "nan"),
         ("OMEMO_VIDEO_SCALE", "0"),
