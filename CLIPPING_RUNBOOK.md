@@ -160,3 +160,22 @@ QA зовёт модель **на каждый клип**, и на вход ид
 | «the Whisper model is missing» | `OMEMO_WHISPER_MODEL` указывает не туда |
 | сцен не найдено в режиме `scene` | план пуст, это **не ошибка**; понижай `OMEMO_SCENE_THRESHOLD` |
 | клипы провалились с `CLIP_FORMAT_VIOLATION` | длиннее `OMEMO_CLIP_MAX_DURATION_MS` — подними лимит или уменьши `MAX_MS` |
+
+## Required processing after cutting (ADR-0095)
+
+Every **cut** now passes `render-clip → process-video → format check → QA → human review`.
+Generated videos and the general post queue are unaffected. The required processor runs locally:
+0.98x speed, 98% centred image with thin black padding, new metadata and changed SHA-256. Audio
+slows with the picture without a pitch shift. Defaults are in `.env.example`; there is no skip flag.
+
+Deliver `*.unique.mp4`, not the raw cut beside it. Keep its `*.unique.processing.json` report:
+it contains the source/result hashes and settings and enables verified reuse after a restart.
+`demo_cut.py` prints the processed path too. If processing fails, there is no fallback and the clip
+has `VIDEO_PROCESSING_FAILED`; other clips continue. Missing FFmpeg, unsupported HDR, conflicting
+output files and hash mismatches need correction before re-producing that clip. A changed source
+or settings require a new destination/production identity, rather than overwriting a reviewed file.
+
+Legacy active Runs produced before this change have no processing provenance. They are not
+silently rewritten after review: a new publication is refused. Re-produce them under a new episode
+identity (and review the result), or perform an explicit reviewed migration. Already-submitted
+uploads are collected without another render or submission. Completed Runs are left as recorded.

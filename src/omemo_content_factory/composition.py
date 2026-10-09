@@ -50,6 +50,7 @@ from omemo_content_factory.adapters.speech_synthesizer import (
     SpeechSynthesizerError,
 )
 from omemo_content_factory.adapters.video_generator import VideoGeneratorError
+from omemo_content_factory.adapters.video_processor import VideoProcessor
 from omemo_content_factory.agents import clip_post_writer, story_writer, storyboard_writer
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
@@ -90,6 +91,7 @@ from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import (
     FfmpegClipRenderer,
     caption_colour,
 )
+from omemo_content_factory.infrastructure.ffmpeg_video_processor import FfmpegVideoProcessor
 from omemo_content_factory.infrastructure.file_system_episode_source import (
     FileSystemEpisodeSource,
     episode_root_from_env,
@@ -524,6 +526,21 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
     )
 
 
+def build_video_processor(environ: Mapping[str, str]) -> VideoProcessor:
+    """Required clip processing; documented product defaults, no bypass (ADR-0095)."""
+    try:
+        return FfmpegVideoProcessor(
+            speed=float(environ.get("OMEMO_VIDEO_SPEED", "0.98")),
+            scale=float(environ.get("OMEMO_VIDEO_SCALE", "0.98")),
+            crf=int(environ.get("OMEMO_VIDEO_CRF", "18")),
+            preset=environ.get("OMEMO_VIDEO_PRESET", "slow"),
+            ffmpeg=environ.get("OMEMO_FFMPEG", "ffmpeg"),
+            ffprobe=environ.get("OMEMO_FFPROBE", "ffprobe"),
+        )
+    except ValueError as error:
+        raise CompositionError(f"OMEMO_VIDEO_* settings: {error}") from error
+
+
 def build_clip_settings(environ: Mapping[str, str]) -> ClipSettings:
     """Read the department's production parameters, with the defaults documented above."""
     raw_containers = environ.get(CONTAINERS_VAR, "").strip() or "mp4"
@@ -567,6 +584,7 @@ def build_clip_production(
         build_clip_renderer(environ),
         evaluator,
         settings=build_clip_settings(environ),
+        processor=build_video_processor(environ),
         desk=desk,
         post_writer=post_writer,
         posting=posting,

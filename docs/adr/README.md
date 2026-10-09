@@ -118,3 +118,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0092](0092-an-unattended-post-queue-for-clips-made-outside-a-run.md) | An unattended post queue for clips made outside a Run | Accepted |
 | [0093](0093-setup-tooling-that-does-not-need-an-ai-assistant.md) | Setup tooling that does not need an AI assistant | Accepted |
 | [0094](0094-any-model-provider-through-one-openai-compatible-client.md) | Any model provider, through one OpenAI-compatible client | Accepted |
+| [0095](0095-mandatory-video-processing-before-delivery.md) | Mandatory video processing before delivery — a workflow adapter, never a model Tool | Accepted |

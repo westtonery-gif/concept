@@ -14,6 +14,9 @@ footage, because empty footage is a legitimate answer that would hide a missing 
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
+
 from omemo_content_factory.adapters.clip_publisher import (
     ClipPublisherError,
     PlatformResult,
@@ -28,6 +31,11 @@ from omemo_content_factory.adapters.clip_renderer import (
 )
 from omemo_content_factory.adapters.episode_source import LocatedEpisode
 from omemo_content_factory.adapters.footage_index import FootageIndexError, IndexedFootage
+from omemo_content_factory.adapters.video_processor import (
+    ProcessedVideo,
+    VideoProcessingError,
+    VideoProcessingRequest,
+)
 
 __all__ = [
     "InMemoryClipPublisher",
@@ -87,6 +95,7 @@ class InMemoryClipRenderer:
         self._height = height
         self._container = container
         self.requests: list[ClipRenderRequest] = []
+        self.clips: dict[str, RenderedClip] = {}
         self.fails: set[str] = set()
         self.duration_override: int | None = None
 
@@ -104,13 +113,16 @@ class InMemoryClipRenderer:
             if self.duration_override is not None
             else request.end_ms - request.start_ms
         )
-        return RenderedClip(
+        clip = RenderedClip(
             path=request.destination,
             duration_ms=duration,
             width=self._width,
             height=self._height,
             container=self._container,
         )
+
+        self.clips[request.destination] = clip
+        return clip
 
     def rendered(self) -> tuple[str, ...]:
         """Destinations the renderer was asked to produce, oldest first."""
@@ -168,3 +180,33 @@ class InMemoryClipPublisher:
     def published(self) -> tuple[PublishRequest, ...]:
         """Control side: every distinct job ever submitted, in order."""
         return tuple(self._jobs.values())
+
+
+class InMemoryVideoProcessor:
+    """Recorded processing for offline clipping runs; never selected by real composition."""
+
+    def __init__(self, renderer: InMemoryClipRenderer) -> None:
+        self._renderer = renderer
+        self.requests: list[VideoProcessingRequest] = []
+        self.fails: set[str] = set()
+        self.results: dict[str, ProcessedVideo] = {}
+        self.duration_override: int | None = None
+
+    def process(self, request: VideoProcessingRequest, /) -> ProcessedVideo:
+        self.requests.append(request)
+        if request.source_path in self.fails:
+            raise VideoProcessingError("video processing is unavailable")
+        if request.request_id not in self.results:
+            raw = self._renderer.clips[request.source_path]
+            clip = replace(
+                raw,
+                path=request.destination,
+                duration_ms=self.duration_override or round(raw.duration_ms / 0.98),
+            )
+            self.results[request.request_id] = ProcessedVideo(
+                clip,
+                hashlib.sha256(request.source_path.encode()).hexdigest(),
+                hashlib.sha256(request.destination.encode()).hexdigest(),
+                request.destination + ".processing.json",
+            )
+        return self.results[request.request_id]

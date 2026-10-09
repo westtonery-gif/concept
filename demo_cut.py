@@ -28,12 +28,15 @@ from demo import safe_print
 from omemo_content_factory.adapters.clip_renderer import ClipRenderRequest
 from omemo_content_factory.adapters.episode_board import ClipMode
 from omemo_content_factory.adapters.footage_index import SkipZone
+from omemo_content_factory.adapters.video_processor import VideoProcessingRequest
 from omemo_content_factory.application.clip_plan import plan_clips
+from omemo_content_factory.application.clip_processing import processed_destination
 from omemo_content_factory.composition import (
     build_clip_renderer,
     build_clip_settings,
     build_episode_source,
     build_footage_index,
+    build_video_processor,
 )
 from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 
@@ -91,6 +94,7 @@ def main(argv: list[str]) -> int:
     safe_print(f"{len(plan.clips)} clips planned")
 
     renderer = build_clip_renderer(environ)
+    processor = build_video_processor(environ)
     out.mkdir(parents=True, exist_ok=True)
     for clip in plan.clips:
         destination = out / f"{plan.episode_ref}-{clip.index:02d}.mp4"
@@ -103,6 +107,13 @@ def main(argv: list[str]) -> int:
                 destination=str(destination),
             )
         )
+        rendered = processor.process(
+            VideoProcessingRequest(
+                request_id=f"cut-{plan.episode_ref}-{clip.index}",
+                source_path=rendered.path,
+                destination=processed_destination(rendered.path),
+            )
+        ).clip
         safe_print(
             f"clip {clip.index:02d}: {clip.start_ms / 1000:.1f}-{clip.end_ms / 1000:.1f}s "
             f"-> {rendered.path} ({rendered.duration_ms / 1000:.1f}s)"

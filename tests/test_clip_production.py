@@ -11,7 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -61,6 +61,7 @@ from omemo_content_factory.infrastructure.in_memory_clipping import (
     InMemoryClipRenderer,
     InMemoryEpisodeSource,
     InMemoryFootageIndex,
+    InMemoryVideoProcessor,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 
@@ -133,6 +134,10 @@ class _Factory:
     renderer: InMemoryClipRenderer
     desk: InMemoryReviewDesk
     evaluator: _Evaluator
+    processor: InMemoryVideoProcessor = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.processor = InMemoryVideoProcessor(self.renderer)
 
     def production(
         self, *, with_desk: bool = True, dies_after: int | None = None
@@ -148,6 +153,7 @@ class _Factory:
             self.renderer,
             self.evaluator,
             settings=SETTINGS,
+            processor=self.processor,
             desk=self.desk if with_desk else None,
         )
 
@@ -201,7 +207,7 @@ def test_crn_01_an_episode_becomes_one_run_with_a_task_and_artifact_per_clip(
     assert invocation.run_id == run_id_for_episode(EPISODE)
     index, *clips = run.tasks
     assert index.workflow_step_ref == INDEX_STEP_REF, "the index is recorded before any clip"
-    assert len(clips) == 3 == len(run.artifacts)
+    assert len(clips) == 6 and len(run.artifacts) == 3
     assert all(task.status is TaskStatus.SUCCEEDED for task in run.tasks)
     assert {a.kind for a in run.artifacts} == {CLIP_KIND}
     assert run.status is RunStatus.WAITING_HUMAN
@@ -260,7 +266,7 @@ def test_crn_04_a_rejected_clip_is_simply_not_shipped(factory: _Factory) -> None
     assert run is not None
     assert not [a for a in run.artifacts if a.status is ArtifactStatus.APPROVED]
     assert not [a for a in run.artifacts if a.status is ArtifactStatus.SUPERSEDED]
-    assert len(run.tasks) == 1 + 3, "the index and three clips; no rework Task was appended"
+    assert len(run.tasks) == 1 + 3 + 3, "index, renders and required processing; no rework"
     assert run.status is RunStatus.COMPLETED
 
 
@@ -534,6 +540,7 @@ def _with_posts(factory: _Factory, writer: _PostWriter) -> ClipProduction:
         factory.renderer,
         factory.evaluator,
         settings=SETTINGS,
+        processor=factory.processor,
         desk=factory.desk,
         post_writer=PostWriting(
             executor=writer,
@@ -760,8 +767,8 @@ def test_crn_15_the_posted_file_is_framed_with_the_approved_title(factory: _Fact
     assert len(finisher.requests) == 3
     first = finisher.requests[0]
     assert first.headline.startswith("Заголовок") and first.footer == "@concept"
-    assert first.destination == "episode-1-01-post.mp4"
-    assert publisher.published()[0].video_path == "episode-1-01-post.mp4"
+    assert first.destination == "episode-1-01.unique-post.mp4"
+    assert publisher.published()[0].video_path == "episode-1-01.unique-post.mp4"
 
 
 @pytest.mark.parametrize("dies_after", range(1, 12))
@@ -824,3 +831,80 @@ def test_crn_02_a_qa_outage_parks_the_run_and_the_next_invocation_asks_again(
     assert run is not None
     assert len(run.evaluations) == 3
     assert run.status is RunStatus.WAITING_HUMAN
+
+
+# --- ADR-0095: processing is a mandatory step, not a model Tool --------------------------
+
+
+def test_vpw_01_only_processed_files_reach_qa_and_review(factory: _Factory) -> None:
+    factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    processing = [t for t in run.tasks if t.workflow_step_ref == "process-video"]
+    assert len(processing) == 3 and len(factory.processor.requests) == 3
+    assert all(t.status is TaskStatus.SUCCEEDED for t in processing)
+    assert {a.output_ref for a in run.artifacts} == {
+        t.output.output_id for t in processing if t.output is not None
+    }
+    assert all(
+        json.loads(content)["path"].endswith(".unique.mp4") for content in factory.evaluator.calls
+    )
+    assert all("video_processing" in json.loads(a.content) for a in run.artifacts)
+    factory.production().invoke(EPISODE)
+    assert len(factory.processor.requests) == 3, "resume reuses committed processing"
+
+
+def test_vpw_02_processing_failure_never_falls_back_to_raw_video(factory: _Factory) -> None:
+    factory.processor.fails.add("episode-1-02.mp4")
+    invocation = factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert len(run.artifacts) == len(factory.evaluator.calls) == 2
+    assert invocation.tally.render_failed == 1
+    assert len(invocation.failed_clips) == 1
+    failed = [t for t in run.tasks if t.failure_reason == "VIDEO_PROCESSING_FAILED"]
+    assert len(failed) == 1 and failed[0].workflow_step_ref == "process-video"
+    assert not any("02.unique.mp4" in a.content for a in run.artifacts)
+
+
+def test_vpw_03_post_processing_duration_is_checked(factory: _Factory) -> None:
+    factory.processor.duration_override = 181_000
+    invocation = factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert invocation.tally.render_failed == 3
+    assert run.artifacts == ()
+    assert run.evaluations == ()
+    assert run.human_reviews == ()
+
+
+def test_vpw_04_crash_before_processing_commit_reuses_the_same_request(factory: _Factory) -> None:
+    class CrashBeforeCommit:
+        def __init__(self) -> None:
+            self.inner = SqliteRunStore(factory.path)
+            self.crashed = False
+
+        def save(self, run: Run, /) -> None:
+            if not self.crashed and any(
+                t.workflow_step_ref == "process-video" and t.status is TaskStatus.SUCCEEDED
+                for t in run.tasks
+            ):
+                self.crashed = True
+                raise _CrashError
+            self.inner.save(run)
+
+        def load(self, run_id: str, /) -> Run | None:
+            return self.inner.load(run_id)
+
+    production = factory.production()
+    production._store = CrashBeforeCommit()
+    with pytest.raises(_CrashError):
+        production.invoke(EPISODE)
+    first = factory.processor.requests[0]
+    factory.production().invoke(EPISODE)
+    assert factory.processor.requests[1] == first
+    assert len(factory.processor.results) == 3
+    assert len(factory.renderer.requests) == 3, "raw renders were committed before processing"
+    run = factory.stored()
+    assert run is not None and len(run.artifacts) == 3
+    assert len([t for t in run.tasks if t.workflow_step_ref == "process-video"]) == 3

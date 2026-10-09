@@ -201,3 +201,20 @@ def test_cmp_08_the_canvas_is_vertical_by_default_and_configurable(tmp_path: Pat
     for bad in ("tall", "1080x", "1081x1920"):
         with pytest.raises(CompositionError, match="OMEMO_CLIP_CANVAS"):
             build_clip_renderer({**environ, "OMEMO_CLIP_CANVAS": bad})
+
+
+def test_cmp_09_video_processing_is_required_and_has_no_skip_flag() -> None:
+    from omemo_content_factory.composition import build_video_processor
+    from omemo_content_factory.infrastructure.ffmpeg_video_processor import FfmpegVideoProcessor
+
+    processor = build_video_processor({})
+    assert isinstance(processor, FfmpegVideoProcessor)
+    assert processor._settings["speed"] == processor._settings["scale"] == 0.98
+    for key, value in [
+        ("OMEMO_VIDEO_SPEED", "nan"),
+        ("OMEMO_VIDEO_SCALE", "0"),
+        ("OMEMO_VIDEO_CRF", "bad"),
+        ("OMEMO_VIDEO_PRESET", "nonsense"),
+    ]:
+        with pytest.raises(CompositionError, match="OMEMO_VIDEO_"):
+            build_video_processor({key: value})

@@ -231,3 +231,31 @@ Arial 72 px на холсте 1920×1080 с чёрной обводкой, сн�
   продукта хочет сначала тест. До теста — один артефакт, один вердикт, один Approve на клип.
 - **Максимальная длина клипа** как продуктовое правило и конкретные лимиты платформ — конфигурация.
 - **Кэш префикса расшифровки** между вызовами QA одной серии (`ADR-0056` §3).
+
+## Mandatory processing of clipped video (ADR-0095, 2026-10-09)
+
+This amendment applies to **clipped videos only**, not generated videos or the general post queue.
+The clipping workflow is `episode-to-clips@v2`. Cutting records a raw `render-clip` Output; a
+required deterministic `process-video` Task then invokes the injected `VideoProcessor` port.
+Only that Task's succeeded Output creates the clip Artifact. QA and review receive the processed
+path. The actual processed duration and geometry are checked against the existing format limits,
+including the duration increase caused by 0.98x playback. One failed processing Task produces no
+Artifact or fallback; it counts as a failed clip and does not stop independent clips.
+
+Default processing is speed 0.98, image scale 0.98 with black padding, fresh metadata and verified
+changed SHA-256, H.264 CRF 18. The audio tempo follows the video without changing pitch. The original
+cut remains a raw intermediate. The port carries typed requests/results and a technical
+`VideoProcessingError`; it is not a model Tool. Composition always supplies a processor.
+
+Task input records source path, destination and raw Output reference before the adapter runs.
+The Task ID is the stable processing request ID. Successful processing Output, provenance hashes,
+report path and Artifact are saved together. Resume reuses a committed Task. A crash between file
+creation and the Run commit uses the adapter's verified file/report recovery rather than encoding
+or slowing again. Unknown destination files or mismatched hashes/settings fail closed.
+
+`demo_cut.py` applies the same required adapter before reporting its exported path. Finished cuts
+are `*.unique.mp4` with adjacent `*.unique.processing.json`; `*.mp4` without that suffix remains a raw
+intermediate. The generated-video department and `FilePostQueue` are unchanged. Pre-existing legacy
+Run artifacts are not silently replaced after approval: a new publication without `process-video`
+provenance is refused; already-submitted jobs may still be collected. An operator must explicitly
+re-produce legacy material under a new episode/Run identity or provide a reviewed migration.

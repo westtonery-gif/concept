@@ -52,8 +52,14 @@ from omemo_content_factory.adapters.footage_index import (
 )
 from omemo_content_factory.adapters.review_desk import PostDraft, ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
+from omemo_content_factory.adapters.video_processor import VideoProcessingError, VideoProcessor
 from omemo_content_factory.application.clip_format import ClipFormatLimits, check_clip_format
 from omemo_content_factory.application.clip_plan import PlannedClip, plan_clips
+from omemo_content_factory.application.clip_processing import (
+    PROCESS_STEP_REF,
+    is_processed_artifact,
+    process_clips,
+)
 from omemo_content_factory.application.clip_review import (
     POST_SCHEMA_REF,
     POST_STEP_REF,
@@ -111,7 +117,7 @@ inter-agent message to validate (ADR-0008 is about Schema-checked agent output).
 names the shape for the trace; nothing re-derives validity from it.
 """
 
-WORKFLOW_REF = "episode-to-clips@v1"
+WORKFLOW_REF = "episode-to-clips@v2"
 STEP_REF = "render-clip"
 AGENT_REF = "clip_renderer@v1"
 """The clip step names no LLM role: rendering is mechanical (ADR-0058 §4)."""
@@ -252,6 +258,7 @@ class ClipProduction:
         evaluator: ContextualArtifactEvaluator,
         *,
         settings: ClipSettings,
+        processor: VideoProcessor,
         desk: ReviewDesk | None = None,
         post_writer: PostWriting | None = None,
         posting: Posting | None = None,
@@ -261,6 +268,7 @@ class ClipProduction:
         self._source = source
         self._index = index
         self._renderer = renderer
+        self._processor = processor
         self._evaluator = evaluator
         self._settings = settings
         self._desk = desk
@@ -370,6 +378,9 @@ class ClipProduction:
             self._render_one(
                 run, episode, located, clip, outcome, task_id=None if task is None else task.task_id
             )
+        outcome.failed_clips.extend(
+            process_clips(run, self._store, self._processor, self._settings.limits)
+        )
         run.transition(RunStatus.WAITING_QA, Actor.CONTENT_DIRECTOR)
         self._store.save(run)
         return None
@@ -478,14 +489,13 @@ class ClipProduction:
             sort_keys=True,
         )
         # The Task succeeds first: an Output belongs to a succeeded Task (ADR-0005 §5), so the
-        # domain refuses the other order. All four land in one commit, so a stored Run never holds
-        # a clip whose Task succeeded without its Artifact (ADR-0026 §2).
+        # domain refuses the other order. Commit the raw result before the separately recorded
+        # processing step creates its candidate (ADR-0026 §2, ADR-0095).
         run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)
-        output_id = run.record_output(
+        run.record_output(
             task_id, payload=payload, schema_ref=CLIP_SCHEMA_REF, by=Actor.CONTENT_DIRECTOR
         )
-        artifact_id = run.create_artifact(output_id, kind=CLIP_KIND, by=Actor.CONTENT_DIRECTOR)
-        run.transition_artifact(artifact_id, ArtifactStatus.CANDIDATE, Actor.CONTENT_DIRECTOR)
+        # Raw bytes are committed first; only process-video may create the candidate.
         self._store.save(run)
 
     def _fail_clip(self, run: Run, task_id: str, reason: str, outcome: _Outcome) -> None:
@@ -649,8 +659,8 @@ class ClipProduction:
                 continue
             task_id, request_id, platforms = job
             try:
-                status = self._look_then_submit(artifact, request_id, post, platforms)
-            except (ClipPublisherError, ClipRendererError) as exc:
+                status = self._look_then_submit(run, artifact, request_id, post, platforms)
+            except (ClipPublisherError, ClipRendererError, VideoProcessingError) as exc:
                 outcome.posting_error = f"{type(exc).__name__}: {exc}"
                 return
             if status.state in (PublishState.PENDING, PublishState.NOT_FOUND):
@@ -691,6 +701,7 @@ class ClipProduction:
 
     def _look_then_submit(
         self,
+        run: Run,
         artifact: ArtifactView,
         request_id: str,
         post: PostDraft,
@@ -702,6 +713,10 @@ class ClipProduction:
         status = publisher.status(request_id)
         if status.state is not PublishState.NOT_FOUND:
             return status
+        if not is_processed_artifact(run, artifact):
+            raise VideoProcessingError(
+                "legacy clip has no process-video result; re-produce or migrate it before posting"
+            )
         video_path = str(json.loads(artifact.content)["path"])
         if self._posting.finisher is not None:
             # The approved title framed into the bars — local and repeatable (ADR-0078 §2).
@@ -898,7 +913,8 @@ def _tally(run: Run) -> ClipTally:
         verdicts[status] = verdicts.get(status, 0) + 1
     return ClipTally(
         render_failed=sum(
-            task.status is TaskStatus.FAILED and task.workflow_step_ref == STEP_REF
+            task.status is TaskStatus.FAILED
+            and task.workflow_step_ref in (STEP_REF, PROCESS_STEP_REF)
             for task in run.tasks
         ),
         passed=verdicts.get(EvaluationStatus.PASSED, 0),

@@ -169,3 +169,21 @@ Notion, — как `NBB` и `NRD`. Ниже адаптера ничего не �
 | CMP-05 | полное окружение | путь собирается; `has_desk` отражает наличие площадки |
 | CMP-06 | убрана одна переменная | сборка падает целиком, названа именно она — ничего полусобранного до Run не доходит |
 | CMP-07 | собранные части | настоящие реализации, не заглушки |
+
+## Required processing of clipped video (ADR-0095)
+
+- VPW-01: every new candidate belongs to a succeeded `process-video` Task; QA sees only processed
+  paths. A new invocation reuses the committed processing output.
+- VPW-02: processing failure creates no candidate for that clip, never substitutes the raw cut,
+  and independent clips still proceed.
+- VPW-03: format limits are applied to the actual processed duration/resolution.
+- VPW-04: a crash before the processing commit resumes the same Task and request; raw renders
+  are not repeated and duplicate candidates are not created.
+- VPR-01..09: actual FFmpeg transformations preserve source bytes, change metadata/hash, produce
+  0.98x speed/98% geometry with pitch-preserved sound, handle silent/rotated video, reject HDR,
+  recover a missing report after final-file publication, reuse matching outputs and reject
+  changed inputs/settings or corrupt results. Concurrent same-request calls converge.
+- CMP-09: composition always injects a real processor; invalid settings fail at build time.
+
+Only clipped media is covered. Generation and the general post queue retain their previous
+behaviour; this change does not grant a new model Tool or change the Run aggregate.
