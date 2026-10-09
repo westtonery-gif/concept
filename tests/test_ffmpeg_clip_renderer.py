@@ -251,6 +251,72 @@ def test_fcr_11_a_caption_colour_is_a_name_or_hex() -> None:
         caption_colour("mauve")
 
 
+def _mean_volume_db(video: Path) -> float:
+    """The mean level of the clip's audio, as ffmpeg's volumedetect reports it."""
+    done = subprocess.run(
+        ["ffmpeg", "-nostdin", "-i", str(video), "-vn", "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    for line in done.stderr.splitlines():
+        if "mean_volume:" in line:
+            return float(line.split("mean_volume:")[1].split("dB")[0])
+    raise AssertionError("volumedetect reported no mean volume")
+
+
+def _tone(tmp_path: Path) -> Path:
+    path = tmp_path / "tone.wav"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=1",
+            str(path),
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    )
+    return path
+
+
+def test_fcr_12_music_is_mixed_in_quietly_and_looped_to_the_clip(tmp_path: Path) -> None:
+    """A one-second tone under a silent three-second clip: audible, shorter than the loop, and
+    quieter when asked to be. The clip's own length decides the result's."""
+    black = _black_episode(tmp_path)
+    tone = _tone(tmp_path)
+    request = _request(black, tmp_path / "quiet.mp4", start_ms=0, end_ms=3_000, captions=())
+    quiet = FfmpegClipRenderer(music=str(tone), music_volume=0.1).render(request)
+    loud = FfmpegClipRenderer(music=str(tone), music_volume=0.8).render(
+        _request(black, tmp_path / "loud.mp4", start_ms=0, end_ms=3_000, captions=())
+    )
+    plain = FfmpegClipRenderer().render(
+        _request(black, tmp_path / "plain.mp4", start_ms=0, end_ms=3_000, captions=())
+    )
+    assert abs(quiet.duration_ms - 3_000) < 150, (
+        "the track is looped, not allowed to set the length"
+    )
+    assert _mean_volume_db(Path(plain.path)) < -80
+    assert -80 < _mean_volume_db(Path(quiet.path)) < _mean_volume_db(Path(loud.path))
+
+
+def test_fcr_12_a_missing_music_file_or_a_wild_volume_is_refused(tmp_path: Path) -> None:
+    black = _black_episode(tmp_path)
+    with pytest.raises(ClipRendererError, match="music file is missing"):
+        FfmpegClipRenderer(music=str(tmp_path / "nope.mp3")).render(
+            _request(black, tmp_path / "x.mp4", start_ms=0, end_ms=2_000, captions=())
+        )
+    for volume in (0, 1.5, -0.2):
+        with pytest.raises(ValueError, match="music volume"):
+            FfmpegClipRenderer(music="a.mp3", music_volume=volume)
+
+
 @needs_libass
 def test_fcr_02_a_clip_without_captions_is_left_clean(tmp_path: Path) -> None:
     black = _black_episode(tmp_path)

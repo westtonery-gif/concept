@@ -483,6 +483,8 @@ def build_speech_synthesizer(environ: Mapping[str, str]) -> SpeechSynthesizer:
 CLIP_CANVAS_VAR = "OMEMO_CLIP_CANVAS"
 _DEFAULT_CLIP_CANVAS = "2160x3840"
 CLIP_CAPTION_COLOR_VAR = "OMEMO_CLIP_CAPTION_COLOR"
+CLIP_MUSIC_VAR = "OMEMO_CLIP_MUSIC"
+CLIP_MUSIC_VOLUME_VAR = "OMEMO_CLIP_MUSIC_VOLUME"
 
 
 def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
@@ -490,8 +492,18 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
 
     `OMEMO_CLIP_CANVAS` is `WIDTHxHEIGHT` (default `2160x3840`, ADR-0076: the picture uncropped,
     no downscale, between black bars kept for banners) or `source` to keep the source frame.
-    `OMEMO_CLIP_CAPTION_COLOR` is `white` (default), `yellow` or `#RRGGBB`.
+    `OMEMO_CLIP_CAPTION_COLOR` is `white` (default), `yellow` or `#RRGGBB`. `OMEMO_CLIP_MUSIC` is
+    the path of a track mixed quietly under every clip (looped, faded), at the fraction
+    `OMEMO_CLIP_MUSIC_VOLUME` of its own level (default `0.2`); unset means no music.
     """
+    music = environ.get(CLIP_MUSIC_VAR, "").strip() or None
+    raw_volume = environ.get(CLIP_MUSIC_VOLUME_VAR, "").strip()
+    try:
+        music_volume = float(raw_volume) if raw_volume else 0.2
+        if not 0 < music_volume <= 1:
+            raise ValueError("a fraction above 0 and up to 1")
+    except ValueError as error:
+        raise CompositionError(f"{CLIP_MUSIC_VOLUME_VAR}: {error}") from None
     try:
         colour = environ.get(CLIP_CAPTION_COLOR_VAR, "").strip() or "white"
         caption_colour(colour)
@@ -499,7 +511,7 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
         raise CompositionError(f"{CLIP_CAPTION_COLOR_VAR}: {error}") from None
     raw = environ.get(CLIP_CANVAS_VAR, "").strip().casefold() or _DEFAULT_CLIP_CANVAS
     if raw == "source":
-        return FfmpegClipRenderer(caption_color=colour)
+        return FfmpegClipRenderer(caption_color=colour, music=music, music_volume=music_volume)
     width, sep, height = raw.partition("x")
     try:
         canvas = (int(width), int(height))
@@ -507,7 +519,9 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
         raise CompositionError(f"{CLIP_CANVAS_VAR} must be WIDTHxHEIGHT or 'source'") from None
     if not sep or any(side <= 0 or side % 2 for side in canvas):
         raise CompositionError(f"{CLIP_CANVAS_VAR} needs two positive, even sides")
-    return FfmpegClipRenderer(canvas=canvas, caption_color=colour)
+    return FfmpegClipRenderer(
+        canvas=canvas, caption_color=colour, music=music, music_volume=music_volume
+    )
 
 
 def build_clip_settings(environ: Mapping[str, str]) -> ClipSettings:

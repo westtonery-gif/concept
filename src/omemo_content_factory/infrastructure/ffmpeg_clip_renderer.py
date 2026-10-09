@@ -79,6 +79,8 @@ class FfmpegClipRenderer:
         caption_size: int = DEFAULT_CAPTION_SIZE,
         caption_color: str = "white",
         canvas: tuple[int, int] | None = None,
+        music: str | None = None,
+        music_volume: float = 0.2,
         crf: int = 18,
         preset: str = "medium",
     ) -> None:
@@ -90,6 +92,12 @@ class FfmpegClipRenderer:
             len(canvas) != 2 or any(side <= 0 or side % 2 for side in canvas)
         ):
             raise ValueError("a canvas is two positive, even sides")
+        if music is not None and not music.strip():
+            raise ValueError("a music file needs a non-blank path")
+        if not 0 < music_volume <= 1:
+            raise ValueError("music volume is a fraction above 0 and up to 1")
+        self._music = music.strip() if music else None
+        self._music_volume = music_volume
         self._ffmpeg = ffmpeg
         self._ffprobe = ffprobe
         self._timeout = timeout
@@ -138,6 +146,24 @@ class FfmpegClipRenderer:
                     f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
                 )
             burn = ["-vf", ",".join(filters)] if filters else []
+            duration_s = (request.end_ms - request.start_ms) / 1000
+            music_inputs: list[str] = []
+            if self._music is not None:
+                if not Path(self._music).is_file():
+                    raise ClipRendererError(f"the music file is missing: {self._music}")
+                # The track is looped under the clip, faded at both ends and kept well below the
+                # original sound; the clip's own audio decides how long the result is.
+                music_inputs = ["-stream_loop", "-1", "-i", self._music]
+                burn += [
+                    "-filter_complex",
+                    f"[1:a]volume={self._music_volume},afade=t=in:st=0:d=1,"
+                    f"afade=t=out:st={max(duration_s - 1.5, 0):.3f}:d=1.5[m];"
+                    "[0:a][m]amix=inputs=2:duration=first:normalize=0[a]",
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "[a]",
+                ]
             self._run(
                 [
                     self._ffmpeg,
@@ -147,6 +173,7 @@ class FfmpegClipRenderer:
                     _seconds(request.start_ms),
                     "-i",
                     str(source),
+                    *music_inputs,
                     "-t",
                     _seconds(request.end_ms - request.start_ms),
                     *burn,
