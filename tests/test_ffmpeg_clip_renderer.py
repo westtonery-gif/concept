@@ -633,3 +633,21 @@ def test_fcr_11_a_blurred_fill_leaves_no_black_bars(tmp_path: Path, with_music: 
 def test_fcr_11_a_fill_is_black_or_blur() -> None:
     with pytest.raises(ValueError, match="fill"):
         FfmpegClipRenderer(canvas=(180, 320), fill="green")
+
+
+def test_fcr_12_a_zoomed_picture_has_no_bars_for_a_headline() -> None:
+    renderer = FfmpegClipRenderer(canvas=(180, 320), fill="blur", picture_height=0.8)
+    assert not renderer.has_canvas
+    with pytest.raises(ValueError, match="picture height"):
+        FfmpegClipRenderer(canvas=(180, 320), fill="blur", picture_height=0.1)
+
+
+@needs_libass
+def test_fcr_12_zoomed_captions_come_one_word_at_a_time(tmp_path: Path) -> None:
+    from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import _word_ass
+
+    script = _word_ass(
+        (Caption(0, 1_000, "один два"),), width=180, height=320, font="Arial", colour="&H0000FFFF"
+    )
+    words = [line for line in script.splitlines() if line.startswith("Dialogue")]
+    assert [line.rsplit(",", 1)[1] for line in words] == ["один", "два"]

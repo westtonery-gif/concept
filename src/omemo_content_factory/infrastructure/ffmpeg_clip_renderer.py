@@ -80,6 +80,7 @@ class FfmpegClipRenderer:
         caption_color: str = "white",
         canvas: tuple[int, int] | None = None,
         fill: str = "black",
+        picture_height: float | None = None,
         music: str | None = None,
         music_volume: float = 0.2,
         crf: int = 18,
@@ -95,6 +96,8 @@ class FfmpegClipRenderer:
             raise ValueError("a canvas is two positive, even sides")
         if fill not in ("black", "blur"):
             raise ValueError("a canvas fill is 'black' or 'blur'")
+        if picture_height is not None and not 0.3 <= picture_height <= 1:
+            raise ValueError("a picture height is a fraction of the canvas, 0.3 to 1")
         if music is not None and not music.strip():
             raise ValueError("a music file needs a non-blank path")
         if not 0 < music_volume <= 1:
@@ -111,21 +114,32 @@ class FfmpegClipRenderer:
         self._caption_colour = caption_colour(caption_color)
         self._canvas = canvas
         self._fill = fill
+        self._picture_height = picture_height
         self._crf = crf
         self._preset = preset
 
     @property
-    def has_canvas(self) -> bool:
-        """Whether clips get bars — the only place a headline and footer can go (ADR-0078)."""
-        return self._canvas is not None
+    def _words_on_frame(self) -> bool:
+        """Zoomed pictures are cropped at the sides, so captions go on the finished frame, one
+        word at a time in the middle of the screen."""
+        return (
+            self._canvas is not None and self._fill == "blur" and self._picture_height is not None
+        )
 
-    def _on_canvas(self, filters: list[str]) -> tuple[list[str], str | None]:
+    @property
+    def has_canvas(self) -> bool:
+        """Whether clips get bars — the only place a headline and footer can go (ADR-0078).
+
+        A zoomed picture leaves only narrow blurred strips, so there is nowhere to put them."""
+        return self._canvas is not None and self._picture_height is None
+
+    def _on_canvas(self, filters: list[str], after: list[str]) -> tuple[list[str], str | None]:
         """Put the picture on the canvas: padded black, or on a blurred copy (a graph)."""
         if self._canvas is None:
             return filters, None
         width, height = self._canvas
         if self._fill == "blur":
-            return [], _blur_graph(filters, width, height)
+            return [], _blur_graph(filters, width, height, self._picture_height, after)
         # The same picture, uncropped, centred on our own bars (ADR-0075 §1).
         return [
             *filters,
@@ -144,19 +158,30 @@ class FfmpegClipRenderer:
 
         with tempfile.TemporaryDirectory() as workspace:
             filters: list[str] = []
+            after: list[str] = []
             if request.captions:
                 subtitles = Path(workspace) / "captions.ass"
-                subtitles.write_text(
-                    _ass(
+                if self._words_on_frame:
+                    assert self._canvas is not None
+                    script = _word_ass(
+                        request.captions,
+                        width=self._canvas[0],
+                        height=self._canvas[1],
+                        font=self._caption_font,
+                        colour=self._caption_colour,
+                    )
+                    target = after
+                else:
+                    script = _ass(
                         request.captions,
                         font=self._caption_font,
                         size=self._caption_size,
                         colour=self._caption_colour,
-                    ),
-                    encoding="utf-8",
-                )
-                filters.append(f"subtitles=filename={_filter_path(subtitles)}")
-            filters, blur_graph = self._on_canvas(filters)
+                    )
+                    target = filters
+                subtitles.write_text(script, encoding="utf-8")
+                target.append(f"subtitles=filename={_filter_path(subtitles)}")
+            filters, blur_graph = self._on_canvas(filters, after)
             burn = ["-vf", ",".join(filters)] if filters else []
             duration_s = (request.end_ms - request.start_ms) / 1000
             music_inputs: list[str] = []
@@ -344,6 +369,52 @@ def _ass(captions: Sequence[Caption], *, font: str, size: int, colour: str) -> s
     return header + "".join(lines)
 
 
+def _word_ass(
+    captions: Sequence[Caption], *, width: int, height: int, font: str, colour: str
+) -> str:
+    """One word at a time, big, in the middle of the frame, on the canvas's own pixels.
+
+    The line's time is shared among its words in proportion to their length — an estimate, since
+    the index keeps line times, not word times.
+    """
+    size = width * 9 // 100
+    outline = max(width // 120, 2)
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "WrapStyle: 2\n"
+        "ScaledBorderAndShadow: yes\n"
+        "\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, "
+        "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        f"Style: Word,{font},{size},{colour},{colour},&H00000000,&H00000000,"
+        f"-1,0,0,0,100,100,0,0,1,{outline},0,5,60,60,0,1\n"
+        "\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    lines: list[str] = []
+    for caption in captions:
+        words = caption.text.split()
+        if not words:
+            continue
+        weights = [len(word) + 1 for word in words]
+        span = caption.end_ms - caption.start_ms
+        start = float(caption.start_ms)
+        for word, weight in zip(words, weights, strict=True):
+            end = start + span * weight / sum(weights)
+            lines.append(
+                f"Dialogue: 0,{_ass_time(round(start))},{_ass_time(round(end))},Word,,0,0,0,,"
+                f"{_ass_text(word)}\n"
+            )
+            start = end
+    return header + "".join(lines)
+
+
 def _frame_ass(headline: str, footer: str | None, *, width: int, height: int, font: str) -> str:
     """One ASS script on the canvas: headline and footer in the bottom bar (ADR-0079).
 
@@ -414,7 +485,13 @@ def _ass_text(text: str) -> str:
     return " ".join(text.split()).replace("\\", "/").replace("{", "(").replace("}", ")")
 
 
-def _blur_graph(filters: list[str], width: int, height: int) -> str:
+def _blur_graph(
+    filters: list[str],
+    width: int,
+    height: int,
+    picture_height: float | None = None,
+    after: Sequence[str] = (),
+) -> str:
     """No bars: the picture sits on a blurred, darkened copy of itself that fills the frame.
 
     The copy is blurred small and scaled up, which is cheap; the captions are burnt first so they
@@ -423,12 +500,24 @@ def _blur_graph(filters: list[str], width: int, height: int) -> str:
     chain = ",".join(filters)
     head = f"[0:v]{chain}," if chain else "[0:v]"
     small = f"{width // 8}:{height // 8}"
+    if picture_height is None:
+        picture = (
+            f"[fg0]scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+        )
+    else:
+        # Zoomed: the picture fills the canvas width and this share of its height, cropped at the
+        # sides, with only a narrow blurred strip left above and below.
+        tall = round(height * picture_height / 2) * 2
+        picture = (
+            f"[fg0]scale={width}:{tall}:force_original_aspect_ratio=increase:flags=lanczos,"
+            f"crop={width}:{tall}[fg];"
+        )
     return (
         f"{head}split=2[fg0][bg0];"
         f"[bg0]scale={small}:force_original_aspect_ratio=increase,crop={small},"
         f"boxblur=4:2,eq=brightness=-0.08,scale={width}:{height}:flags=bicubic[bg];"
-        f"[fg0]scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
-        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
+        f"{picture}"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2{''.join(',' + step for step in after)},setsar=1[v]"
     )
 
 

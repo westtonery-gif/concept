@@ -485,6 +485,7 @@ def build_speech_synthesizer(environ: Mapping[str, str]) -> SpeechSynthesizer:
 CLIP_CANVAS_VAR = "OMEMO_CLIP_CANVAS"
 _DEFAULT_CLIP_CANVAS = "2160x3840"
 CLIP_FILL_VAR = "OMEMO_CLIP_FILL"
+CLIP_PICTURE_HEIGHT_VAR = "OMEMO_CLIP_PICTURE_HEIGHT"
 CLIP_CAPTION_COLOR_VAR = "OMEMO_CLIP_CAPTION_COLOR"
 CLIP_MUSIC_VAR = "OMEMO_CLIP_MUSIC"
 CLIP_MUSIC_VOLUME_VAR = "OMEMO_CLIP_MUSIC_VOLUME"
@@ -496,9 +497,9 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
     `OMEMO_CLIP_CANVAS` is `WIDTHxHEIGHT` (default `2160x3840`, ADR-0076: the picture uncropped,
     no downscale, between black bars kept for banners) or `source` to keep the source frame.
     `OMEMO_CLIP_FILL` is `black` (default, bars for banners) or `blur` (a blurred copy of the
-    picture fills the frame, no bars). `OMEMO_CLIP_CAPTION_COLOR` is `white` (default), `yellow`
-    or `#RRGGBB`. `OMEMO_CLIP_MUSIC` is
-    the path of a track mixed quietly under every clip (looped, faded), at the fraction
+    picture fills the frame, no bars); `OMEMO_CLIP_PICTURE_HEIGHT` (with `blur`, e.g. `0.79`) zooms
+    the picture to that share of the height, cropped at the sides, captions one word at a time. `OMEMO_CLIP_CAPTION_COLOR` is `white` (default),
+    `yellow` or `#RRGGBB`. `OMEMO_CLIP_MUSIC` is the path of a track mixed quietly under every clip (looped, faded), at the fraction
     `OMEMO_CLIP_MUSIC_VOLUME` of its own level (default `0.2`); unset means no music.
     """
     music = environ.get(CLIP_MUSIC_VAR, "").strip() or None
@@ -517,6 +518,15 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
     fill = environ.get(CLIP_FILL_VAR, "").strip().casefold() or "black"
     if fill not in ("black", "blur"):
         raise CompositionError(f"{CLIP_FILL_VAR} must be 'black' or 'blur'")
+    raw_height = environ.get(CLIP_PICTURE_HEIGHT_VAR, "").strip()
+    try:
+        picture_height = float(raw_height) if raw_height else None
+        if picture_height is not None and fill != "blur":
+            raise ValueError(f"needs {CLIP_FILL_VAR}=blur")
+        if picture_height is not None and not 0.3 <= picture_height <= 1:
+            raise ValueError("a fraction from 0.3 to 1")
+    except ValueError as error:
+        raise CompositionError(f"{CLIP_PICTURE_HEIGHT_VAR}: {error}") from None
     raw = environ.get(CLIP_CANVAS_VAR, "").strip().casefold() or _DEFAULT_CLIP_CANVAS
     if raw == "source":
         return FfmpegClipRenderer(caption_color=colour, music=music, music_volume=music_volume)
@@ -528,7 +538,12 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
     if not sep or any(side <= 0 or side % 2 for side in canvas):
         raise CompositionError(f"{CLIP_CANVAS_VAR} needs two positive, even sides")
     return FfmpegClipRenderer(
-        canvas=canvas, fill=fill, caption_color=colour, music=music, music_volume=music_volume
+        canvas=canvas,
+        fill=fill,
+        picture_height=picture_height,
+        caption_color=colour,
+        music=music,
+        music_volume=music_volume,
     )
 
 

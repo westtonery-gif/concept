@@ -22,3 +22,12 @@ the sharp picture. Configured by `OMEMO_CLIP_FILL` (`black` | `blur`).
   blurred fill rather than black, so check legibility on the first real clip.
 - Banners (ADR-0075's reason for the bars) would need `black`; choose per channel.
 - Tests: `FCR-11` (pixels: no black rows with and without music).
+
+## Amendment (same day): zoomed picture, one word at a time
+
+The maintainer showed a reference: the picture fills the width and ~79% of the height, cropped at
+the sides, with narrow blurred strips above and below, and captions are **one yellow word at a time
+in the middle**. `OMEMO_CLIP_PICTURE_HEIGHT` (needs `blur`) does that; captions are then drawn on the
+finished frame (not the source, whose edges are cut) with each line's time shared among its words by
+length — an estimate, since the index keeps line times only. A zoomed clip has no bars, so the
+headline/footer finish (ADR-0078) is off for it. A 16:9 frame keeps ~40% of its width.
