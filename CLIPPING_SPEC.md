@@ -264,3 +264,8 @@ Profile 2 retains the rational source FPS as CFR (average FPS for VFR), using
 frame duplication/dropping, square pixels and GOP <= 60. Reports identify the
 profile version and measured FPS/frame count. Old renders are never overwritten
 or silently upgraded; use the original cut and a new destination.
+
+Profile 3 defaults to bounded visual variation (`subtle`); `clean` preserves the
+previous look and `strong` increases the effects. Horizontal reflection is opt-in
+because clips may contain burnt-in subtitles. Chosen effects are recorded and
+stable for a retry. A different export is not a certification of originality.

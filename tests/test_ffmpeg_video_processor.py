@@ -85,7 +85,7 @@ def test_vpr_01_real_geometry_audio_metadata_and_hash(source: Path) -> None:
     assert output.clip.duration_ms == pytest.approx(3000 / 0.98, abs=40)
     info = _probe(output.clip.path)
     assert "old-private-title" not in json.dumps(info)
-    assert info["format"]["tags"]["comment"].startswith("video-processing-v2:")
+    assert info["format"]["tags"]["comment"].startswith("video-processing-v3:")
     video, audio = info["streams"]
     assert float(audio["duration"]) == pytest.approx(float(video["duration"]), abs=0.04)
     frame = subprocess.check_output(
@@ -135,7 +135,7 @@ def test_vpr_01_real_geometry_audio_metadata_and_hash(source: Path) -> None:
     assert report["output_sha256"] == output.output_sha256
     assert report["settings"]["speed"] == 0.98
     assert report["settings"]["scale"] == 0.94
-    assert report["settings"]["version"] == 2
+    assert report["settings"]["version"] == 3
     assert Fraction(video["avg_frame_rate"]) == 30
     assert video["sample_aspect_ratio"] == "1:1"
     assert int(video["nb_frames"]) == pytest.approx(90 / 0.98, abs=1)
@@ -334,3 +334,119 @@ def test_vpr_11_old_profile_is_not_reused_or_processed_twice(source: Path) -> No
             VideoProcessingRequest("legacy", str(legacy), str(source.parent / "upgrade.mp4"))
         )
     assert not (source.parent / "upgrade.mp4").exists()
+
+
+def test_vpr_12_visual_variants_reproducibility_and_audio(source: Path) -> None:
+    processor = FfmpegVideoProcessor()
+    first = processor.process(_request(source))
+    second = processor.process(
+        VideoProcessingRequest("clip-task-2", str(source), str(source.parent / "second.mp4"))
+    )
+
+    def decoded(path: str) -> list[str]:
+        return subprocess.check_output(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                path,
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0",
+                "-f",
+                "streamhash",
+                "-hash",
+                "sha256",
+                "-",
+            ],
+            text=True,
+            timeout=30,
+        ).splitlines()
+
+    first_hashes, second_hashes = decoded(first.clip.path), decoded(second.clip.path)
+    assert first_hashes[0] != second_hashes[0]
+    assert first_hashes[1] == second_hashes[1]
+    report = json.loads(Path(first.report_path).read_text())
+    assert (
+        report["visual_effects"]
+        != json.loads(Path(second.report_path).read_text())["visual_effects"]
+    )
+    # Re-render from the same request after an operator removes its output; effects stay stable.
+    Path(first.clip.path).unlink()
+    Path(first.report_path).unlink()
+    repeated = processor.process(_request(source))
+    assert decoded(repeated.clip.path) == first_hashes
+    assert (
+        json.loads(Path(repeated.report_path).read_text())["visual_effects"]
+        == report["visual_effects"]
+    )
+
+
+@pytest.mark.parametrize("width,height", [(640, 360), (360, 640), (1600, 90)])
+def test_vpr_13_rotation_fits_canvas(width: int, height: int) -> None:
+    from omemo_content_factory.infrastructure.video_visual_effects import (
+        VisualEffects,
+        visual_filter,
+    )
+
+    vf = visual_filter(width, height, 1, VisualEffects(angle_degrees=1.6))
+    frame = subprocess.check_output(
+        [
+            "ffmpeg",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=white:size={width}x{height}",
+            "-vf",
+            vf,
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "gray",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        timeout=30,
+    )
+    assert len(frame) == width * height
+    assert max(frame[:width] + frame[-width:] + frame[::width] + frame[width - 1 :: width]) < 5
+    assert frame[(height // 2) * width + width // 2] > 245
+
+
+def test_vpr_14_clean_and_explicit_mirror() -> None:
+    from omemo_content_factory.infrastructure.video_visual_effects import (
+        choose_effects,
+        visual_filter,
+    )
+
+    def frame(mirror: bool) -> bytes:
+        vf = visual_filter(320, 180, 1, choose_effects("same", "clean", mirror))
+        return subprocess.check_output(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=320x180",
+                "-vf",
+                vf,
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "gray",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            timeout=30,
+        )
+
+    normal = frame(False)
+    assert frame(True) == b"".join(normal[y * 320 : (y + 1) * 320][::-1] for y in range(180))

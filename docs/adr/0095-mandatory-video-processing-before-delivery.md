@@ -59,3 +59,24 @@ Existing profile-1 files cannot satisfy a profile-2 request and cannot be proces
 again as inputs. Committed workflow tasks are retained; upgrading a completed clip
 requires a new run from its raw source with an unused destination. Explicit
 OMEMO_VIDEO_SCALE overrides continue to take precedence over the new default.
+
+## Revision 3 — explicit visual variants (2026-10-10)
+
+Profile 2 used the same visual transformation for every export: different file
+hashes did not mean different decoded video. Profile 3 adds `look` (`clean`,
+`subtle`, `strong`; default `subtle`) and opt-in horizontal `mirror`. Subtle and
+strong vary rotation, contrast, saturation, gamma and sharpening within bounded
+ranges. Rotation fits the entire picture into the existing canvas, including
+when scale=1. Clean keeps the preceding geometry without these extra effects.
+
+Effects are deterministic from the processing request fingerprint, and actual
+parameters are included in the identity/report. Retries and recovery preserve
+the same effects; prior-profile inputs are refused to avoid cumulative processing.
+Composition owns OMEMO_VIDEO_LOOK and OMEMO_VIDEO_MIRROR (true/false). No change to
+Run, publication, the model Tool channel or generated-video workflows. Audio keeps
+the existing pitch-preserving tempo change. Music, dubbing and noise are not added
+by this profile. Existing clip-renderer music configuration remains available.
+
+Decoded video/audio regression tests distinguish actual pixel changes from file
+hash changes, cover seeded reproducibility and unchanged audio between variants.
+These checks do not certify perceptual originality, platform acceptance or rights.

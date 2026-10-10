@@ -21,6 +21,11 @@ from omemo_content_factory.adapters.video_processor import (
     VideoProcessingRequest,
 )
 from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import FfmpegClipRenderer
+from omemo_content_factory.infrastructure.video_visual_effects import (
+    VisualEffects,
+    choose_effects,
+    visual_filter,
+)
 
 
 class FfmpegVideoProcessor:
@@ -31,6 +36,8 @@ class FfmpegVideoProcessor:
         scale: float = 0.94,
         crf: int = 18,
         preset: str = "slow",
+        look: str = "subtle",
+        mirror: bool = False,
         ffmpeg: str = "ffmpeg",
         ffprobe: str = "ffprobe",
         timeout: float = 600,
@@ -51,9 +58,12 @@ class FfmpegVideoProcessor:
             "veryslow",
         ):
             raise ValueError("invalid video encoder preset")
+        choose_effects("validate", look, mirror)
         self._speed, self._scale = speed, scale
         self._settings = {
-            "version": 2,
+            "version": 3,
+            "look": look,
+            "mirror": mirror,
             "fps_mode": "cfr",
             "max_gop": 60,
             "speed": speed,
@@ -90,14 +100,19 @@ class FfmpegVideoProcessor:
             "settings": self._settings,
         }
         fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
-        marker = f"video-processing-v2:{fingerprint}"
+        effects = choose_effects(
+            fingerprint, str(self._settings["look"]), bool(self._settings["mirror"])
+        )
+        identity["visual_effects"] = asdict(effects)
+        fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        marker = f"video-processing-v3:{fingerprint}"
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
             return self._recover(destination, identity, marker)
         report = self._probe(source)
         with tempfile.TemporaryDirectory(prefix=".processing-", dir=destination.parent) as folder:
             temporary = Path(folder) / "video.mp4"
-            self._render(source, temporary, report, marker)
+            self._render(source, temporary, report, marker, effects)
             if _sha256(source) != source_hash:
                 raise VideoProcessingError("the source changed during video processing")
             self._validate_output(temporary, report)  # validate before publishing a final filename
@@ -132,7 +147,7 @@ class FfmpegVideoProcessor:
         if not report.is_file():
             metadata = self._probe(source).get("format", {}).get("tags", {})
             if str(metadata.get("comment", "")).startswith(
-                ("video-processing-v1:", "video-processing-v2:")
+                ("video-processing-v1:", "video-processing-v2:", "video-processing-v3:")
             ):
                 raise VideoProcessingError("already processed input is missing its report")
             return None
@@ -183,7 +198,14 @@ class FfmpegVideoProcessor:
                 temporary.unlink(missing_ok=True)
         return result
 
-    def _render(self, source: Path, target: Path, report: dict[str, Any], marker: str) -> None:
+    def _render(
+        self,
+        source: Path,
+        target: Path,
+        report: dict[str, Any],
+        marker: str,
+        effects: VisualEffects,
+    ) -> None:
         video = next(
             (
                 s
@@ -202,14 +224,9 @@ class FfmpegVideoProcessor:
         rate = _frame_rate(video)
         width, height = _dimensions(video)
         speed, scale = self._speed, self._scale
-        inner_w, inner_h = (
-            max(2, round(width * scale / 2) * 2),
-            max(2, round(height * scale / 2) * 2),
-        )
         filters = (
-            f"scale={inner_w}:{inner_h}:flags=lanczos,setsar=1,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"setpts=(PTS-STARTPTS)/{speed},format=yuv420p"
+            visual_filter(width, height, scale, effects)
+            + f",setpts=(PTS-STARTPTS)/{speed},format=yuv420p"
         )
         command = [
             self._ffmpeg,

@@ -558,11 +558,16 @@ def build_clip_renderer(environ: Mapping[str, str]) -> ClipRenderer:
 def build_video_processor(environ: Mapping[str, str]) -> VideoProcessor:
     """Required clip processing; documented product defaults, no bypass (ADR-0095)."""
     try:
+        mirror = environ.get("OMEMO_VIDEO_MIRROR", "false").strip().lower()
+        if mirror not in ("true", "false"):
+            raise ValueError("OMEMO_VIDEO_MIRROR must be true or false")
         return FfmpegVideoProcessor(
             speed=float(environ.get("OMEMO_VIDEO_SPEED", "0.98")),
             scale=float(environ.get("OMEMO_VIDEO_SCALE", "0.94")),
             crf=int(environ.get("OMEMO_VIDEO_CRF", "18")),
             preset=environ.get("OMEMO_VIDEO_PRESET", "slow"),
+            look=environ.get("OMEMO_VIDEO_LOOK", "subtle"),
+            mirror=mirror == "true",
             ffmpeg=environ.get("OMEMO_FFMPEG", "ffmpeg"),
             ffprobe=environ.get("OMEMO_FFPROBE", "ffprobe"),
         )

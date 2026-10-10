@@ -191,3 +191,8 @@ behaviour; this change does not grant a new model Tool or change the Run aggrega
 Profile-2 checks: preserve integer and fractional FPS, constant packet intervals,
 GOP <= 60, SAR 1:1, frame count adjusted for slowdown; reject prior-profile
 inputs/destinations without overwriting; retain retry and clip-only workflow gates.
+
+Profile-3 checks: distinct request IDs produce different decoded video with the
+same decoded audio; repeating an ID reproduces the chosen effects, including after
+output deletion. Portrait, landscape and very wide frames fit without clipped
+corners. Composition validates look and mirror; default mirror is false.

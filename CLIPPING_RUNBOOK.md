@@ -184,3 +184,10 @@ Profile 2 defaults to scale 0.94, CFR at the source rate, square pixels and GOP 
 Existing OMEMO_VIDEO_SCALE overrides still apply. Completed runs retain their
 committed results; to upgrade use a new run from the raw clip with an unused
 output path. Existing v1 outputs are neither overwritten nor processed a second time.
+
+Profile 3: OMEMO_VIDEO_LOOK=subtle (default) adds bounded rotation, colour and
+sharpening variation; clean disables the extra effects, strong increases them.
+OMEMO_VIDEO_MIRROR=false protects burnt-in subtitle readability; true reflects
+all picture content. Effects are included in the report and stable on retries.
+Use the raw source and an unused output path to upgrade prior-profile exports.
+The treatment does not certify platform originality or usage rights.

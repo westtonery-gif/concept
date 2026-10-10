@@ -211,11 +211,19 @@ def test_cmp_09_video_processing_is_required_and_has_no_skip_flag() -> None:
     assert isinstance(processor, FfmpegVideoProcessor)
     assert processor._settings["speed"] == 0.98
     assert processor._settings["scale"] == 0.94
+    assert processor._settings["look"] == "subtle"
+    assert processor._settings["mirror"] is False
+    configured = build_video_processor({"OMEMO_VIDEO_LOOK": "strong", "OMEMO_VIDEO_MIRROR": "true"})
+    assert isinstance(configured, FfmpegVideoProcessor)
+    assert configured._settings["look"] == "strong"
+    assert configured._settings["mirror"] is True
     for key, value in [
         ("OMEMO_VIDEO_SPEED", "nan"),
         ("OMEMO_VIDEO_SCALE", "0"),
         ("OMEMO_VIDEO_CRF", "bad"),
         ("OMEMO_VIDEO_PRESET", "nonsense"),
+        ("OMEMO_VIDEO_LOOK", "nonsense"),
+        ("OMEMO_VIDEO_MIRROR", "yes"),
     ]:
         with pytest.raises(CompositionError, match="OMEMO_VIDEO_"):
             build_video_processor({key: value})
