@@ -79,6 +79,7 @@ class FfmpegClipRenderer:
         caption_size: int = DEFAULT_CAPTION_SIZE,
         caption_color: str = "white",
         canvas: tuple[int, int] | None = None,
+        fill: str = "black",
         music: str | None = None,
         music_volume: float = 0.2,
         crf: int = 18,
@@ -92,6 +93,8 @@ class FfmpegClipRenderer:
             len(canvas) != 2 or any(side <= 0 or side % 2 for side in canvas)
         ):
             raise ValueError("a canvas is two positive, even sides")
+        if fill not in ("black", "blur"):
+            raise ValueError("a canvas fill is 'black' or 'blur'")
         if music is not None and not music.strip():
             raise ValueError("a music file needs a non-blank path")
         if not 0 < music_volume <= 1:
@@ -107,6 +110,7 @@ class FfmpegClipRenderer:
         self._caption_size = caption_size
         self._caption_colour = caption_colour(caption_color)
         self._canvas = canvas
+        self._fill = fill
         self._crf = crf
         self._preset = preset
 
@@ -114,6 +118,20 @@ class FfmpegClipRenderer:
     def has_canvas(self) -> bool:
         """Whether clips get bars — the only place a headline and footer can go (ADR-0078)."""
         return self._canvas is not None
+
+    def _on_canvas(self, filters: list[str]) -> tuple[list[str], str | None]:
+        """Put the picture on the canvas: padded black, or on a blurred copy (a graph)."""
+        if self._canvas is None:
+            return filters, None
+        width, height = self._canvas
+        if self._fill == "blur":
+            return [], _blur_graph(filters, width, height)
+        # The same picture, uncropped, centred on our own bars (ADR-0075 §1).
+        return [
+            *filters,
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1",
+        ], None
 
     def render(self, request: ClipRenderRequest, /) -> RenderedClip:
         """Write the clip with its captions burnt in; return what ffprobe says it actually is."""
@@ -138,13 +156,7 @@ class FfmpegClipRenderer:
                     encoding="utf-8",
                 )
                 filters.append(f"subtitles=filename={_filter_path(subtitles)}")
-            if self._canvas is not None:
-                # The same picture, uncropped, centred on our own bars (ADR-0075 §1).
-                width, height = self._canvas
-                filters.append(
-                    f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
-                    f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
-                )
+            filters, blur_graph = self._on_canvas(filters)
             burn = ["-vf", ",".join(filters)] if filters else []
             duration_s = (request.end_ms - request.start_ms) / 1000
             music_inputs: list[str] = []
@@ -154,16 +166,18 @@ class FfmpegClipRenderer:
                 # The track is looped under the clip, faded at both ends and kept well below the
                 # original sound; the clip's own audio decides how long the result is.
                 music_inputs = ["-stream_loop", "-1", "-i", self._music]
-                burn += [
-                    "-filter_complex",
+                audio_graph = (
                     f"[1:a]volume={self._music_volume},afade=t=in:st=0:d=1,"
                     f"afade=t=out:st={max(duration_s - 1.5, 0):.3f}:d=1.5[m];"
-                    "[0:a][m]amix=inputs=2:duration=first:normalize=0[a]",
-                    "-map",
-                    "0:v",
-                    "-map",
-                    "[a]",
-                ]
+                    "[0:a][m]amix=inputs=2:duration=first:normalize=0[a]"
+                )
+                graph = f"{blur_graph};{audio_graph}" if blur_graph else audio_graph
+                video_map = "[v]" if blur_graph else "0:v"
+                burn = ["-filter_complex", graph, "-map", video_map, "-map", "[a]"]
+                if not blur_graph and filters:
+                    burn = ["-vf", ",".join(filters), *burn]
+            elif blur_graph is not None:
+                burn = ["-filter_complex", blur_graph, "-map", "[v]", "-map", "0:a?"]
             self._run(
                 [
                     self._ffmpeg,
@@ -398,6 +412,24 @@ def _ass_time(milliseconds: int) -> str:
 def _ass_text(text: str) -> str:
     """Caption text that cannot turn into ASS markup: no override blocks, escapes or breaks."""
     return " ".join(text.split()).replace("\\", "/").replace("{", "(").replace("}", ")")
+
+
+def _blur_graph(filters: list[str], width: int, height: int) -> str:
+    """No bars: the picture sits on a blurred, darkened copy of itself that fills the frame.
+
+    The copy is blurred small and scaled up, which is cheap; the captions are burnt first so they
+    stay on the sharp picture.
+    """
+    chain = ",".join(filters)
+    head = f"[0:v]{chain}," if chain else "[0:v]"
+    small = f"{width // 8}:{height // 8}"
+    return (
+        f"{head}split=2[fg0][bg0];"
+        f"[bg0]scale={small}:force_original_aspect_ratio=increase,crop={small},"
+        f"boxblur=4:2,eq=brightness=-0.08,scale={width}:{height}:flags=bicubic[bg];"
+        f"[fg0]scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos[fg];"
+        "[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1[v]"
+    )
 
 
 def _filter_path(path: Path) -> str:

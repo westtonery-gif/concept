@@ -564,3 +564,72 @@ def test_fse_04_the_root_is_required(tmp_path: Path) -> None:
         with pytest.raises(EpisodeSourceError) as caught:
             episode_root_from_env(environ)
         assert EPISODE_ROOT_VAR in str(caught.value)
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("with_music", [False, True])
+def test_fcr_11_a_blurred_fill_leaves_no_black_bars(tmp_path: Path, with_music: bool) -> None:
+    """The picture sits on a blurred copy of itself: no black bars in the 9:16 frame."""
+    source = tmp_path / "white.mp4"
+    music = tmp_path / "music.wav"
+    for args, out in (
+        (
+            [
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=white:duration=2:size=320x180:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "anullsrc=duration=2",
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                "-shortest",
+            ],
+            source,
+        ),
+        (["-f", "lavfi", "-i", "sine=frequency=440:duration=1"], music),
+    ):
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-y", *args, str(out)],
+            capture_output=True,
+            check=True,
+            timeout=120,
+        )
+    renderer = FfmpegClipRenderer(
+        canvas=(180, 320), fill="blur", music=str(music) if with_music else None
+    )
+    clip = renderer.render(_request(source, tmp_path / "v.mp4", start_ms=0, end_ms=2_000))
+    assert (clip.width, clip.height) == (180, 320)
+    frame = subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            "0.5",
+            "-i",
+            clip.path,
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "gray",
+            "-",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    rows = [frame[row * 180 : (row + 1) * 180] for row in range(320)]
+    assert all(sum(rows[r]) / 180 > 128 for r in (5, 314)), "bars are filled, not black"
+
+
+def test_fcr_11_a_fill_is_black_or_blur() -> None:
+    with pytest.raises(ValueError, match="fill"):
+        FfmpegClipRenderer(canvas=(180, 320), fill="green")
