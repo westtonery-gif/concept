@@ -1771,6 +1771,9 @@ process at the time, not a pattern to keep copying.)
     only after a re-run with 24.1–24.3 in place shows how much QA still flags storyline jumps.
     **That re-run happened (2026-09-22, see 24):** 14 of 15 clips were flagged/failed, and nearly
     every flag is a scene or thread boundary — so this is now the next thing blocking useful clips.
+    **2026-10-11: ADR-0097 (Proposed) — a `MOMENTS` mode with a `clip_moment_picker@v1` role choosing
+    the strongest moments from the numbered transcript; boundaries are line edges by construction,
+    the plan is a recorded Task Output. Four open questions for the maintainer in the ADR; no code.**
 
 26. **The episode board's `Run status` / `Run id` are never written — found 2026-09-21 in 24.4.**
     `EpisodeBoard.report_status` exists and `NotionEpisodeBoard` implements it (ADR-0055), and the
