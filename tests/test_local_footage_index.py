@@ -468,3 +468,42 @@ def test_fix_08_the_real_whisper_runs_end_to_end(episode: Path) -> None:
     assert abs(footage.scenes[0].at_ms - 2_000) <= 100
     for span in footage.speech:
         assert 0 <= span.start_ms < span.end_ms <= footage.duration_ms
+
+
+@needs_ffmpeg
+def test_fix_11_a_vad_model_makes_whisper_speak_only_where_a_voice_is(
+    episode: Path, tmp_path: Path
+) -> None:
+    """Music and titles stay silent instead of becoming invented lyrics (the anime's opening)."""
+    vad = tmp_path / "silero.bin"
+    vad.write_bytes(b"model")
+    argv_file = tmp_path / "argv.json"
+    script = tmp_path / "whisper-cli"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "argv = sys.argv\n"
+        f"open({str(argv_file)!r}, 'w').write(json.dumps(argv))\n"
+        "out = argv[argv.index('-of') + 1]\n"
+        f"open(out + '.json', 'w').write(json.dumps({json.dumps(TRANSCRIPT)}))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    model = tmp_path / "ggml.bin"
+    model.write_bytes(b"model")
+    settings = WhisperSettings(model=model, language="ru", scene_threshold=10.0, vad_model=vad)
+    LocalFootageIndex(settings, whisper=str(script), timeout=120.0).index(
+        LocatedEpisode(source_ref="episode.mp4", path=str(episode))
+    )
+    argv = json.loads(argv_file.read_text(encoding="utf-8"))
+    assert "--vad" in argv
+    assert argv[argv.index("-vm") + 1] == str(vad)
+
+
+def test_fix_11_a_missing_vad_model_is_refused_at_build_time(tmp_path: Path) -> None:
+    model = tmp_path / "ggml.bin"
+    model.write_bytes(b"model")
+    with pytest.raises(FootageIndexError, match="VAD model is missing"):
+        WhisperSettings(
+            model=model, language="ru", scene_threshold=10.0, vad_model=tmp_path / "nope.bin"
+        )

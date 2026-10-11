@@ -40,6 +40,7 @@ __all__ = [
     "LANGUAGE_VAR",
     "MODEL_VAR",
     "SCENE_THRESHOLD_VAR",
+    "VAD_MODEL_VAR",
     "LocalFootageIndex",
     "WhisperSettings",
     "whisper_settings_from_env",
@@ -48,6 +49,8 @@ __all__ = [
 MODEL_VAR = "OMEMO_WHISPER_MODEL"
 LANGUAGE_VAR = "OMEMO_WHISPER_LANGUAGE"
 SCENE_THRESHOLD_VAR = "OMEMO_SCENE_THRESHOLD"
+VAD_MODEL_VAR = "OMEMO_WHISPER_VAD_MODEL"
+"""A Silero VAD model file; when set, whisper writes text only where a voice is detected."""
 
 _DEFAULT_SCENE_THRESHOLD = 10.0
 """``scdet``'s score above which a frame is a cut. A real-episode question (ADR-0064 Deferred)."""
@@ -81,11 +84,21 @@ with it; with these flags the dialogue came back (task 24.2).
 class WhisperSettings:
     """Where the model is and what language to expect. ``__slots__``, built from the environment."""
 
-    __slots__ = ("language", "model", "scene_threshold")
+    __slots__ = ("language", "model", "scene_threshold", "vad_model")
 
-    def __init__(self, *, model: Path, language: str, scene_threshold: float) -> None:
+    def __init__(
+        self,
+        *,
+        model: Path,
+        language: str,
+        scene_threshold: float,
+        vad_model: Path | None = None,
+    ) -> None:
         if not model.is_file():
             raise FootageIndexError(f"the Whisper model is missing: {model}")
+        if vad_model is not None and not vad_model.is_file():
+            raise FootageIndexError(f"the Whisper VAD model is missing: {vad_model}")
+        self.vad_model = vad_model
         if not language.strip():
             raise FootageIndexError("a Whisper language is required; use 'auto' to detect it")
         if scene_threshold <= 0:
@@ -107,10 +120,12 @@ def whisper_settings_from_env(environ: Mapping[str, str]) -> WhisperSettings:
         threshold = float(raw_threshold) if raw_threshold else _DEFAULT_SCENE_THRESHOLD
     except ValueError:
         raise FootageIndexError(f"{SCENE_THRESHOLD_VAR} must be a number") from None
+    raw_vad = environ.get(VAD_MODEL_VAR, "").strip()
     return WhisperSettings(
         model=Path(raw_model),
         language=environ.get(LANGUAGE_VAR, "").strip() or "auto",
         scene_threshold=threshold,
+        vad_model=Path(raw_vad) if raw_vad else None,
     )
 
 
@@ -282,6 +297,10 @@ class LocalFootageIndex:
             ]
             if self._settings.language != "auto":
                 command += ["-l", self._settings.language]
+            if self._settings.vad_model is not None:
+                # Text only where a voice is detected: music and titles stay silent instead of
+                # becoming invented lyrics.
+                command += ["--vad", "-vm", str(self._settings.vad_model)]
             self._run(command, what="transcribe the episode", stderr_too=True)
             report = stem.with_suffix(".json")
             if not report.is_file():
