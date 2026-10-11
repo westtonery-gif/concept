@@ -51,12 +51,19 @@ from omemo_content_factory.adapters.speech_synthesizer import (
 )
 from omemo_content_factory.adapters.video_generator import VideoGeneratorError
 from omemo_content_factory.adapters.video_processor import VideoProcessor
-from omemo_content_factory.agents import clip_post_writer, story_writer, storyboard_writer
+from omemo_content_factory.agents import (
+    clip_moment_picker,
+    clip_post_writer,
+    story_writer,
+    storyboard_writer,
+)
 from omemo_content_factory.application.brief_production import BriefProduction
 from omemo_content_factory.application.clip_format import ClipFormatLimits
+from omemo_content_factory.application.clip_moments import MomentLimits
 from omemo_content_factory.application.clip_production import (
     ClipProduction,
     ClipSettings,
+    MomentPicking,
     Posting,
     PostWriting,
 )
@@ -602,6 +609,7 @@ def build_clip_production(
     desk: ReviewDesk | None = None,
     post_writer: PostWriting | None = None,
     posting: Posting | None = None,
+    moment_picker: MomentPicking | None = None,
 ) -> ClipProduction:
     """Assemble the clipping department's production path (ADR-0059).
 
@@ -622,6 +630,7 @@ def build_clip_production(
         desk=desk,
         post_writer=post_writer,
         posting=posting,
+        moment_picker=moment_picker,
     )
 
 
@@ -654,6 +663,41 @@ def build_posting(environ: Mapping[str, str]) -> Posting:
         finisher=finisher,
         footer=footer,
         max_new_per_invocation=limit,
+    )
+
+
+MOMENT_MIN_MS_VAR = "OMEMO_CLIP_MOMENT_MIN_MS"
+MOMENT_COUNT_VAR = "OMEMO_CLIP_MOMENT_COUNT"
+
+
+def build_moment_picking(
+    client: LLMClient,
+    environ: Mapping[str, str],
+    *,
+    prompts: PromptCatalogueInput = None,
+) -> MomentPicking:
+    """Compile ``clip_moment_picker@v1`` with its limits (ADR-0097 §7).
+
+    A moment is at least ``OMEMO_CLIP_MOMENT_MIN_MS`` (default 60 s — the maintainer wants clips
+    of more than a minute) and at most ``OMEMO_CLIP_MAX_MS``; ``OMEMO_CLIP_MOMENT_COUNT`` (default
+    12) is how many an episode may yield. Documented defaults, like every ``OMEMO_CLIP_*`` value.
+    """
+    try:
+        limits = MomentLimits(
+            min_ms=int(environ.get(MOMENT_MIN_MS_VAR, "").strip() or 60_000),
+            max_ms=build_clip_settings(environ).max_ms,
+            count=int(environ.get(MOMENT_COUNT_VAR, "").strip() or 12),
+        )
+    except ValueError as error:
+        raise CompositionError(f"{MOMENT_MIN_MS_VAR}/{MOMENT_COUNT_VAR}: {error}") from None
+    resolved = _resolve_prompts(prompts)
+    agents = clip_moment_picker.AGENTS
+    executors = build_executor_map(agents, resolved, client, clip_moment_picker.SCHEMAS)
+    bindings = build_schema_map(agents, resolved, clip_moment_picker.SCHEMAS)
+    return MomentPicking(
+        executor=executors[clip_moment_picker.AGENT_REF],
+        schema_binding=bindings[clip_moment_picker.AGENT_REF],
+        limits=limits,
     )
 
 

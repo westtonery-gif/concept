@@ -28,10 +28,11 @@ from omemo_content_factory.adapters.episode_board import EpisodeBoardError
 from omemo_content_factory.adapters.episode_source import EpisodeSourceError
 from omemo_content_factory.adapters.footage_index import FootageIndexError
 from omemo_content_factory.adapters.review_desk import ReviewDesk, ReviewDeskError
-from omemo_content_factory.agents import clip_post_writer, clip_qa_agent
+from omemo_content_factory.agents import clip_moment_picker, clip_post_writer, clip_qa_agent
 from omemo_content_factory.application.clip_production import (
     ClipInvocation,
     ClipProduction,
+    MomentPicking,
     Posting,
     PostWriting,
 )
@@ -40,6 +41,7 @@ from omemo_content_factory.composition import (
     GOOGLE_REVIEW_DESK_VARS,
     NOTION_REVIEW_DESK_VARS,
     build_clip_production,
+    build_moment_picking,
     build_post_writing,
     build_posting,
     build_qa_evaluator,
@@ -79,6 +81,13 @@ def _build_post_writer(environ: Mapping[str, str]) -> PostWriting | None:
     return build_post_writing(client_for_role(clip_post_writer.AGENT_REF, environ))
 
 
+def _build_moment_picker(environ: Mapping[str, str]) -> MomentPicking | None:
+    """The moment-picker role (ADR-0097), when it has a provider binding; MOMENTS needs it."""
+    if not environ.get("OMEMO_PROVIDER__CLIP_MOMENT_PICKER_V1", "").strip():
+        return None
+    return build_moment_picking(client_for_role(clip_moment_picker.AGENT_REF, environ), environ)
+
+
 def _build_posting(environ: Mapping[str, str]) -> Posting | None:
     """Auto-posting (ADR-0073), when upload-post is configured; otherwise approved is the end."""
     if not environ.get("OMEMO_UPLOAD_POST_API_KEY", "").strip():
@@ -92,6 +101,7 @@ def _build(environ: Mapping[str, str]) -> ClipProduction:
         evaluator=_build_evaluator(),
         desk=_build_desk(environ),
         post_writer=_build_post_writer(environ),
+        moment_picker=_build_moment_picker(environ),
         posting=_build_posting(environ),
     )
 

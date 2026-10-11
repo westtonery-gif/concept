@@ -15,7 +15,7 @@ from omemo_content_factory.adapters.clip_renderer import Caption
 from omemo_content_factory.adapters.episode_board import ClipMode
 from omemo_content_factory.adapters.footage_index import IndexedFootage, SpeechSpan
 
-__all__ = ["ClipPlan", "PlannedClip", "plan_clips"]
+__all__ = ["ClipPlan", "PlannedClip", "plan_clips", "planned_clip"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +70,8 @@ def plan_clips(
     if not episode_ref.strip():
         raise ValueError("plan_clips needs a non-blank episode_ref")
 
+    if mode is ClipMode.MOMENTS:
+        raise ValueError("MOMENTS is planned from picked moments, not by plan_clips (ADR-0097)")
     if mode is ClipMode.SCENE and not indexed.scenes:
         return ClipPlan(episode_ref=episode_ref, mode=mode)  # CLP-06: nothing was detected
     bounds: list[tuple[int, int]] = []
@@ -90,6 +92,17 @@ def plan_clips(
         for number, (start, end) in enumerate(bounds, start=1)
     )
     return ClipPlan(episode_ref=episode_ref, mode=mode, clips=clips)
+
+
+def planned_clip(indexed: IndexedFootage, index: int, start_ms: int, end_ms: int) -> PlannedClip:
+    """One clip over ``[start_ms, end_ms)`` with its transcript and captions."""
+    return PlannedClip(
+        index=index,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        transcript=_transcript(indexed.speech, start_ms, end_ms),
+        captions=_captions(indexed.speech, start_ms, end_ms),
+    )
 
 
 MIN_STRETCH_MS = 5_000

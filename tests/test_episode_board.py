@@ -72,10 +72,10 @@ def test_epb_02_a_well_formed_episode_is_immutable() -> None:
         episode.extra = 1  # type: ignore[attr-defined]  # __slots__ admits no new attribute
 
 
-def test_epb_03_there_are_exactly_two_modes() -> None:
-    """ADR-0058 §1 replaced SEMANTIC/BOTH; a stale name must not survive as a spare option."""
-    assert {mode.name for mode in ClipMode} == {"CHUNK", "SCENE"}
-    assert {mode.value for mode in ClipMode} == {"chunk", "scene"}
+def test_epb_03_the_modes_are_exactly_these() -> None:
+    """ADR-0058 §1 replaced SEMANTIC/BOTH; ADR-0097 added MOMENTS. No stale spare option."""
+    assert {mode.name for mode in ClipMode} == {"CHUNK", "SCENE", "MOMENTS"}
+    assert {mode.value for mode in ClipMode} == {"chunk", "scene", "moments"}
 
 
 def test_epb_04_the_error_is_technical_and_the_port_is_structural() -> None:

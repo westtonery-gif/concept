@@ -39,7 +39,7 @@ from omemo_content_factory.adapters.clip_renderer import (
     ClipRenderRequest,
     FinishRequest,
 )
-from omemo_content_factory.adapters.episode_board import EpisodeBoard, IncomingEpisode
+from omemo_content_factory.adapters.episode_board import ClipMode, EpisodeBoard, IncomingEpisode
 from omemo_content_factory.adapters.episode_source import (
     EpisodeSource,
     EpisodeSourceError,
@@ -54,7 +54,14 @@ from omemo_content_factory.adapters.review_desk import PostDraft, ReviewDesk
 from omemo_content_factory.adapters.run_store import RunStore
 from omemo_content_factory.adapters.video_processor import VideoProcessingError, VideoProcessor
 from omemo_content_factory.application.clip_format import ClipFormatLimits, check_clip_format
-from omemo_content_factory.application.clip_plan import PlannedClip, plan_clips
+from omemo_content_factory.application.clip_moments import (
+    MomentLimits,
+    MomentsError,
+    decode_moments,
+    moments_task_input,
+    plan_from_moments,
+)
+from omemo_content_factory.application.clip_plan import ClipPlan, PlannedClip, plan_clips
 from omemo_content_factory.application.clip_processing import (
     PROCESS_STEP_REF,
     is_processed_artifact,
@@ -136,6 +143,12 @@ INDEX_STEP_REF = "index-footage"
 INDEX_AGENT_REF = "footage_index@v1"
 """The index step: recorded once per Run, so QA and resumption read it back (ADR-0068 §2)."""
 
+PICK_STEP_REF = "pick-moments"
+MOMENT_PICKER_REF = "clip_moment_picker@v1"
+MOMENT_PLAN_FAILED_REASON = "MOMENT_PLAN_FAILED"
+_MOMENT_ATTEMPTS = 2
+"""One call and one repair round that shows the model its faults (ADR-0097 §3)."""
+
 SOURCE_MISSING_REASON = "EPISODE_SOURCE_MISSING"
 INDEX_FAILED_REASON = "FOOTAGE_INDEX_FAILED"
 RENDER_FAILED_REASON = "CLIP_RENDER_FAILED"
@@ -169,6 +182,15 @@ class PostWriting:
 
     executor: TaskExecutor
     schema_binding: SchemaBinding
+
+
+@dataclass(frozen=True, slots=True)
+class MomentPicking:
+    """The moment-picker role, compiled, and the limits its answer is judged against (ADR-0097)."""
+
+    executor: TaskExecutor
+    schema_binding: SchemaBinding
+    limits: MomentLimits
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +284,7 @@ class ClipProduction:
         desk: ReviewDesk | None = None,
         post_writer: PostWriting | None = None,
         posting: Posting | None = None,
+        moment_picker: MomentPicking | None = None,
     ) -> None:
         self._store = store
         self._board = board
@@ -274,6 +297,7 @@ class ClipProduction:
         self._desk = desk
         self._post_writer = post_writer
         self._posting = posting
+        self._moment_picker = moment_picker
 
     @property
     def has_desk(self) -> bool:
@@ -347,6 +371,10 @@ class ClipProduction:
         episode = self._board.fetch_episode(episode_ref)
         if episode is None:
             raise ClipProductionError(f"episode {episode_ref!r} is no longer ready to clip")
+        if episode.mode is ClipMode.MOMENTS and self._moment_picker is None:
+            raise ClipProductionError(
+                "the episode asks for MOMENTS but no moment picker is configured"
+            )
         located = self._source.locate(episode.source_ref)
         if located is None:
             return self._fail(run, SOURCE_MISSING_REASON)
@@ -357,14 +385,20 @@ class ClipProduction:
         if footage is None:
             return INDEX_FAILED_REASON
 
-        plan = plan_clips(
-            footage,
-            episode_ref=episode_ref,
-            mode=episode.mode,
-            chunk_ms=self._settings.chunk_ms,
-            max_ms=self._settings.max_ms,
-            pause_tolerance_ms=self._settings.pause_tolerance_ms,
-        )
+        if episode.mode is ClipMode.MOMENTS:
+            picked = self._moment_plan(run, episode, located, footage)
+            if picked is None:
+                return MOMENT_PLAN_FAILED_REASON
+            plan = picked
+        else:
+            plan = plan_clips(
+                footage,
+                episode_ref=episode_ref,
+                mode=episode.mode,
+                chunk_ms=self._settings.chunk_ms,
+                max_ms=self._settings.max_ms,
+                pause_tolerance_ms=self._settings.pause_tolerance_ms,
+            )
 
         # Resumption: the plan is a pure function of the footage (CLP-09), so re-planning gives
         # exactly the clips a crashed invocation was producing. A Task already recorded for a clip
@@ -383,6 +417,50 @@ class ClipProduction:
         )
         run.transition(RunStatus.WAITING_QA, Actor.CONTENT_DIRECTOR)
         self._store.save(run)
+        return None
+
+    def _moment_plan(
+        self, run: Run, episode: IncomingEpisode, located: LocatedEpisode, footage: IndexedFootage
+    ) -> ClipPlan | None:
+        """The picked moments as a plan; ``None`` after failing the Run (ADR-0097 §4–§5).
+
+        Each attempt is a recorded ``pick-moments`` Task, so a resumed invocation reads the answer
+        back and never asks again; a Task left ``RUNNING`` is finished on its stored input. A
+        second attempt carries the first's faults. No answer and no repair fall back to anything.
+        """
+        picker = self._moment_picker
+        assert picker is not None
+        tasks = [task for task in run.tasks if task.workflow_step_ref == PICK_STEP_REF]
+        faults: tuple[str, ...] = ()
+        for attempt in range(_MOMENT_ATTEMPTS):
+            if attempt < len(tasks):
+                task_id = tasks[attempt].task_id
+            else:
+                task_id = start_task(
+                    run,
+                    workflow_step_ref=PICK_STEP_REF,
+                    agent_ref=MOMENT_PICKER_REF,
+                    task_input=moments_task_input(
+                        footage,
+                        picker.limits,
+                        episode_file=located.source_ref,
+                        faults=faults,
+                    ),
+                )
+                self._store.save(run)  # committed before the model call (ADR-0026 §2)
+            if run.task(task_id).status is TaskStatus.RUNNING:
+                finish_task(run, picker.executor, task_id, schema_binding=picker.schema_binding)
+                self._store.save(run)
+            task = run.task(task_id)
+            if task.status is not TaskStatus.SUCCEEDED or task.output is None:
+                break
+            try:
+                moments = decode_moments(_moments_text(task.output.payload), footage, picker.limits)
+            except MomentsError as error:
+                faults = error.faults
+                continue
+            return plan_from_moments(footage, moments, episode_ref=episode.episode_ref)
+        self._fail(run, MOMENT_PLAN_FAILED_REASON)
         return None
 
     def _footage(self, run: Run, located: LocatedEpisode) -> IndexedFootage | None:
@@ -886,6 +964,16 @@ def _source_ref(run: Run) -> str:
         return str(json.loads(task.task_input)["source_ref"]) if task is not None else ""
     except (ValueError, KeyError, TypeError):  # pragma: no cover - our own input shape
         return ""
+
+
+def _moments_text(payload: str) -> str:
+    """The ``moments`` field of a recorded ``pick-moments`` Output ('' when it is not there)."""
+    try:
+        fields = json.loads(payload)
+    except ValueError:
+        return ""
+    value = fields.get("moments") if isinstance(fields, dict) else None
+    return value if isinstance(value, str) else ""
 
 
 def _index_task(run: Run) -> TaskView | None:

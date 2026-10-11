@@ -1773,7 +1773,10 @@ process at the time, not a pattern to keep copying.)
     every flag is a scene or thread boundary — so this is now the next thing blocking useful clips.
     **2026-10-11: ADR-0097 (Proposed) — a `MOMENTS` mode with a `clip_moment_picker@v1` role choosing
     the strongest moments from the numbered transcript; boundaries are line edges by construction,
-    the plan is a recorded Task Output. Four open questions for the maintainer in the ADR; no code.**
+    the plan is a recorded Task Output. **Accepted and built 2026-10-11** (`application/clip_moments.py`,
+    `agents/clip_moment_picker.py`, `pick-moments` step, `MPK` tests, suite 1826 passed); the maintainer
+    chose ≥ 60 s, ~12 moments, per-card (not default). **Not run live** — waits for a new episode, and
+    the Notion board's `Mode` select needs a `moments` option.**
 
 26. **The episode board's `Run status` / `Run id` are never written — found 2026-09-21 in 24.4.**
     `EpisodeBoard.report_status` exists and `NotionEpisodeBoard` implements it (ADR-0055), and the

@@ -196,3 +196,19 @@ Profile-3 checks: distinct request IDs produce different decoded video with the
 same decoded audio; repeating an ID reproduces the chosen effects, including after
 output deletion. Portrait, landscape and very wide frames fit without clipped
 corners. Composition validates look and mirror; default mirror is false.
+
+## 8. `MOMENTS` mode (ADR-0097) — `MPK`, `tests/test_clip_moments.py`
+
+| ID | What it proves |
+|---|---|
+| MPK-01 | The decoder accepts lines-by-number, reports every fault together, refuses overlaps, too many moments, unlisted lines, skip-zone runs, an open vocabulary |
+| MPK-02 | `plan_from_moments` is pure and in episode order; `plan_clips` refuses `MOMENTS`; the input numbers lines and carries limits and faults |
+| MPK-03 | Prompt, Schema and Agent agree; the Prompt teaches the decoder's vocabulary |
+| MPK-04 | Picked moments become clips in episode order, one recorded `pick-moments` Task |
+| MPK-05 | A second invocation never asks the model again |
+| MPK-06 | A refused answer gets one repair round carrying its faults |
+| MPK-07 | Two refusals or a model outage fail the Run with `MOMENT_PLAN_FAILED`, nothing rendered |
+| MPK-08 | `MOMENTS` without a picker is a configuration error |
+| MPK-09 | `CHUNK`/`SCENE` never call the picker |
+
+**Not yet proven live:** no real model has answered the picker; the first episode is the check.

@@ -1,8 +1,6 @@
 # ADR-0097: A moment-picker Agent chooses the strongest moments of an episode
 
-- **Status:** Proposed (the maintainer asked for this ADR on 2026-10-11 after naming the goal —
-  "choosing the right moments is the key to a successful cut: laughter, tears, surprise, cult
-  lines"; the open questions below are theirs to answer before code)
+- **Status:** Accepted (the maintainer answered the four questions on 2026-10-11, below)
 - **Date:** 2026-10-11
 - **Deciders:** Maintainer (goal); Lead Architect (shape)
 - **Amends:** ADR-0058 §4 ("v1 has no planner agent") — a planner returns, for one **new** mode
@@ -65,8 +63,8 @@ line and the end of its last, so every accepted interval is already legal.
 ### 4. The plan is a recorded Task Output, not a pure function
 
 `plan_clips` was a pure function of the footage, so a crashed invocation re-planned and got the
-same clips (CLP-09). A model call is not pure. So for `MOMENTS` the validated moments are
-**recorded as the Output of a `pick-moments` Task** — exactly how `index-footage` is recorded
+same clips (CLP-09). A model call is not pure. So for `MOMENTS` the model's answer is
+**recorded as the Output of a `pick-moments` Task** (re-decoded, deterministically, on every read) — exactly how `index-footage` is recorded
 (ADR-0068 §2) — and every later invocation reads them back instead of asking again. A new pure
 `plan_from_moments(footage, moments)` turns them into `PlannedClip`s in **episode order** (the
 index, the captions and the transcript are built exactly as `plan_clips` does). A Task found
@@ -91,7 +89,8 @@ review page in v1.
 
 ### 7. Configuration, with documented defaults (CMP-02's reasoning)
 
-`OMEMO_CLIP_MOMENT_MIN_MS` (default `20000`), `OMEMO_CLIP_MOMENT_COUNT` (default `12`);
+`OMEMO_CLIP_MOMENT_MIN_MS` (default `60000` — the maintainer wants clips of more than a
+minute), `OMEMO_CLIP_MOMENT_COUNT` (default `12`);
 the maximum is the existing `OMEMO_CLIP_MAX_MS`. The picker's provider/model/price/tokens/thinking
 come from the usual per-role binding `CLIP_MOMENT_PICKER_V1`.
 
@@ -131,13 +130,12 @@ come from the usual per-role binding `CLIP_MOMENT_PICKER_V1`.
   posts in that order; posting by rank is a separate, small change.
 - **Cutting inside a long line** (a whisper segment of 25 s is one unit here).
 
-## Open questions for the maintainer
+## The maintainer's answers (2026-10-11)
 
-1. The length window for a moment: `20–90 s` (short-form's sweet spot) or keep up to the 2-minute
-   maximum?
-2. How many moments per episode: 12 as proposed, or fewer and stronger?
-3. Should `MOMENTS` become the default mode on new cards once it has run on one episode?
-4. Is a first trial on episode 1 or episode 2 (both have QA verdicts to compare against)?
+1. Length: **more than 60 seconds** (the maximum stays the existing `OMEMO_CLIP_MAX_MS`, 2 min).
+2. Count: **about 12** per episode.
+3. `MOMENTS` is **not** the default: it is chosen per card, "по желанию".
+4. The first trial is on **a new episode** the maintainer will provide, not on episodes 1 or 2.
 
 ## Implementation order (each spec-before-code)
 

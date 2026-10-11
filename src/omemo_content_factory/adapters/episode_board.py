@@ -37,6 +37,13 @@ class ClipMode(Enum):
     falls mid-scene and a scene belongs to one thread.
     """
 
+    MOMENTS = "moments"
+    """A model picks the strongest moments of the transcript, cut at line edges (ADR-0097).
+
+    For when *what is worth watching* matters more than where scenes change. Chosen per episode,
+    never a default, and never a silent fallback for another mode.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class IncomingEpisode:

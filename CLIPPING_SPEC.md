@@ -269,3 +269,18 @@ Profile 3 defaults to bounded visual variation (`subtle`); `clean` preserves the
 previous look and `strong` increases the effects. Horizontal reflection is opt-in
 because clips may contain burnt-in subtitles. Chosen effects are recorded and
 stable for a retry. A different export is not a certification of originality.
+
+## 11. The `MOMENTS` mode (ADR-0097)
+
+`ClipMode.MOMENTS` is chosen per episode on the board (`Mode` = `moments`); it is never a default
+and never a fallback. A `pick-moments` step runs after indexing: `clip_moment_picker@v1` receives the
+numbered transcript (lines inside skip zones are not listed), the limits and — on the repair round —
+the faults of its previous answer, and returns `moments`, one `first-last | kind | why` per line.
+`application/clip_moments.py` `decode_moments` alone judges it (line range listed, ordered, inside
+`[min, max]`, outside skip zones, not overlapping, closed `kind`, at most `count`), reports **all**
+faults together and repairs nothing. A refused answer gets one repair round; two refusals, or a model
+outage, fail the Run with `MOMENT_PLAN_FAILED` and cut nothing. Each attempt is a recorded Task whose
+Output is the model's answer, so a resumed invocation re-decodes it and never asks again.
+`plan_from_moments` turns the moments into `PlannedClip`s in episode order; from there the path is the
+same as for the other modes. Configuration: `OMEMO_CLIP_MOMENT_MIN_MS` (60 s), `OMEMO_CLIP_MAX_MS`,
+`OMEMO_CLIP_MOMENT_COUNT` (12), and the role binding `CLIP_MOMENT_PICKER_V1`.

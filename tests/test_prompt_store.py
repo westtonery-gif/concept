@@ -10,12 +10,12 @@ from pathlib import Path
 import pytest
 
 import omemo_content_factory.composition as composition
+from omemo_content_factory.agents import clip_moment_picker, story_writer, storyboard_writer
 from omemo_content_factory.agents import clip_post_writer as clip_post
 from omemo_content_factory.agents import clip_qa_agent as clip_qa
 from omemo_content_factory.agents import content_researcher as rin
 from omemo_content_factory.agents import qa_agent as qa
 from omemo_content_factory.agents import script_writer as leo
-from omemo_content_factory.agents import story_writer, storyboard_writer
 from omemo_content_factory.application.skill_execution import SkillPreprocessingTaskExecutor
 from omemo_content_factory.composition import (
     CompositionError,
@@ -96,6 +96,7 @@ def test_pst_01_bundled_catalogue_preserves_migrated_prompts_exactly() -> None:
         clip_post.PROMPT_REF,  # the clip's post text (ADR-0072)
         story_writer.PROMPT_REF,  # a voiced story script (ADR-0087)
         storyboard_writer.PROMPT_REF,  # its shots (ADR-0089)
+        clip_moment_picker.PROMPT_REF,  # the strongest moments of an episode (ADR-0097)
     }
     assert prompts[rin.PROMPT_REF] == Prompt(
         prompt_id="content-researcher",
