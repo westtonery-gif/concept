@@ -1,6 +1,6 @@
 """Tests for the moment picker and the MOMENTS mode (ADR-0097).
 
-Maps CLIPPING_ACCEPTANCE.md §8 (MPK): the pure decoder and plan, the role's consistency, and the
+Maps CLIPPING_ACCEPTANCE.md §10 (MPK): the pure decoder and plan, the role's consistency, and the
 production path with a scripted picker — recorded once, repaired once, failing loudly.
 """
 

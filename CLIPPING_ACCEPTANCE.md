@@ -197,7 +197,7 @@ same decoded audio; repeating an ID reproduces the chosen effects, including aft
 output deletion. Portrait, landscape and very wide frames fit without clipped
 corners. Composition validates look and mirror; default mirror is false.
 
-## 8. `MOMENTS` mode (ADR-0097) — `MPK`, `tests/test_clip_moments.py`
+## 10. `MOMENTS` mode (ADR-0097) — `MPK`, `tests/test_clip_moments.py`
 
 | ID | What it proves |
 |---|---|
