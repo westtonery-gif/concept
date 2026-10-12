@@ -372,7 +372,20 @@ def _spans(report: object, duration_ms: int) -> tuple[SpeechSpan, ...]:
             continue
         spans.append(SpeechSpan(start_ms=start, end_ms=end, text=text.strip()))
         end_of_previous = end
-    return _without_loops(spans)
+    return _without_loops([span for span in spans if not _stretched(span)])
+
+
+_STRETCH_MS = 8_000
+_STRETCH_WORDS = 3
+
+
+def _stretched(span: SpeechSpan) -> bool:
+    """One or two words spread over many seconds: whisper naming the music, not a line of speech.
+
+    On the Kick Buttowski episode «Пьется.» covered 20 s of a montage; burnt in, a single word
+    froze on screen for the whole of it.
+    """
+    return span.end_ms - span.start_ms > _STRETCH_MS and len(span.text.split()) < _STRETCH_WORDS
 
 
 def _without_loops(spans: list[SpeechSpan]) -> tuple[SpeechSpan, ...]:

@@ -369,6 +369,10 @@ def _ass(captions: Sequence[Caption], *, font: str, size: int, colour: str) -> s
     return header + "".join(lines)
 
 
+_MAX_WORD_MS = 900
+"""The longest a single word stays on screen in one-word captions."""
+
+
 def _word_ass(
     captions: Sequence[Caption], *, width: int, height: int, font: str, colour: str
 ) -> str:
@@ -407,8 +411,11 @@ def _word_ass(
         start = float(caption.start_ms)
         for word, weight in zip(words, weights, strict=True):
             end = start + span * weight / sum(weights)
+            # A word stays up no longer than it takes to say; the rest of a long span is silence
+            # or music, where a frozen word reads as a bug.
+            shown = min(end, start + _MAX_WORD_MS)
             lines.append(
-                f"Dialogue: 0,{_ass_time(round(start))},{_ass_time(round(end))},Word,,0,0,0,,"
+                f"Dialogue: 0,{_ass_time(round(start))},{_ass_time(round(shown))},Word,,0,0,0,,"
                 f"{_ass_text(word)}\n"
             )
             start = end

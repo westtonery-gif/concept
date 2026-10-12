@@ -651,3 +651,13 @@ def test_fcr_12_zoomed_captions_come_one_word_at_a_time(tmp_path: Path) -> None:
     )
     words = [line for line in script.splitlines() if line.startswith("Dialogue")]
     assert [line.rsplit(",", 1)[1] for line in words] == ["один", "два"]
+
+
+def test_fcr_12_a_word_never_stays_up_longer_than_it_takes_to_say() -> None:
+    from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import _word_ass
+
+    script = _word_ass(
+        (Caption(0, 20_000, "Музыка."),), width=180, height=320, font="Arial", colour="&H0000FFFF"
+    )
+    line = next(row for row in script.splitlines() if row.startswith("Dialogue"))
+    assert line.split(",")[1:3] == ["0:00:00.00", "0:00:00.90"]

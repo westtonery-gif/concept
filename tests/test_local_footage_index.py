@@ -507,3 +507,23 @@ def test_fix_11_a_missing_vad_model_is_refused_at_build_time(tmp_path: Path) -> 
         WhisperSettings(
             model=model, language="ru", scene_threshold=10.0, vad_model=tmp_path / "nope.bin"
         )
+
+
+def test_fix_12_a_word_or_two_stretched_over_many_seconds_is_not_speech() -> None:
+    """«Пьется.» over 20 s of a montage froze on screen; a long line with many words stays."""
+    from omemo_content_factory.infrastructure.local_footage_index import _spans
+
+    report = {
+        "transcription": [
+            {"offsets": {"from": 0, "to": 600}, "text": " Музыка."},
+            {"offsets": {"from": 1_000, "to": 21_000}, "text": " Пьется."},
+            {
+                "offsets": {"from": 21_000, "to": 31_000},
+                "text": " Это длинная реплика из многих слов",
+            },
+        ]
+    }
+    assert [span.text for span in _spans(report, 40_000)] == [
+        "Музыка.",
+        "Это длинная реплика из многих слов",
+    ]
