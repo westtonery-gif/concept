@@ -22,6 +22,10 @@ env/
 # --- Local run store (ADR-0026: default OMEMO_RUN_STORE_PATH) ----------------
 .omemo/
 
+# --- Produced media ---------------------------------------------------------
+/clips/
+/generation-tests/
+
 # --- Tooling caches ---------------------------------------------------------
 .ruff_cache/
 .mypy_cache/
@@ -41,3 +45,7 @@ coverage.xml
 .DS_Store
 Thumbs.db
 tmp-probe/
+
+# Google Desktop OAuth downloads; refresh tokens belong in .omemo/.
+/client_secret*.json
+/credentials.json

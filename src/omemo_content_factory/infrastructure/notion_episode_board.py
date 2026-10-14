@@ -10,18 +10,11 @@ Where the contract is silent the rule is ADR-0040's: an episode that simply is n
 **configuration** fault is ``EpisodeBoardError``. A mode property holding something that is not
 a ``ClipMode`` is the second kind: a misconfigured board, never silently "not ready".
 
-This is the **third** Notion implementation. Its request helper, auth header and property reader are
-still duplicated from ``notion_brief_board`` — ADR-0061 holds the extraction until three exist in
-``src/``, and this is the third, so the shared client is now due as its own behaviour-neutral
-refactor (ADR-0055 §3), never mixed into this module's own commit.
+HTTP transport is shared with the other Notion adapters (ADR-0092).
 """
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +25,17 @@ from omemo_content_factory.adapters.episode_board import (
     IncomingEpisode,
 )
 from omemo_content_factory.domain.run import RunStatus
+from omemo_content_factory.infrastructure._notion import (
+    DEFAULT_API_URL,
+    NOTION_API_VERSION,
+    request_json,
+)
+from omemo_content_factory.infrastructure._notion import (
+    plain_text as _plain_text,
+)
+from omemo_content_factory.infrastructure._notion import (
+    quoted as _quoted,
+)
 
 __all__ = [
     "DEFAULT_API_URL",
@@ -40,9 +44,6 @@ __all__ = [
     "NotionEpisodeSettings",
     "notion_episode_settings_from_env",
 ]
-
-NOTION_API_VERSION = "2022-06-28"
-DEFAULT_API_URL = "https://api.notion.com"
 
 TOKEN_VAR = "OMEMO_EPISODE_NOTION_TOKEN"
 DATABASE_ID_VAR = "OMEMO_EPISODE_NOTION_DATABASE_ID"
@@ -237,46 +238,16 @@ class NotionEpisodeBoard:
         body: dict[str, Any] | None = None,
         missing_ok: bool = False,
     ) -> dict[str, Any] | None:
-        headers = {
-            "Authorization": f"Bearer {self._settings.token}",
-            "Notion-Version": NOTION_API_VERSION,
-            "Accept": "application/json",
-        }
-        data = None
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            self._api_url + path, data=data, headers=headers, method=method
+        return request_json(
+            method,
+            path,
+            api_url=self._api_url,
+            token=self._settings.token,
+            timeout=self._timeout,
+            error_type=EpisodeBoardError,
+            body=body,
+            missing_ok=missing_ok,
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as error:
-            error.close()
-            if error.code == 404 and missing_ok:
-                return None
-            raise EpisodeBoardError(
-                f"Notion refused {method} {path.split('?')[0]}: HTTP {error.code}"
-            ) from error
-        except (urllib.error.URLError, OSError) as error:
-            raise EpisodeBoardError(f"Notion could not be reached: {error}") from error
-        return _json_object(raw)
-
-
-def _json_object(raw: bytes) -> dict[str, Any]:
-    try:
-        decoded = json.loads(raw)
-    except ValueError as error:
-        raise EpisodeBoardError("Notion returned a response that is not JSON") from error
-    if not isinstance(decoded, dict):
-        raise EpisodeBoardError("Notion returned a response that is not a JSON object")
-    return decoded
-
-
-def _plain_text(chunk: object) -> str:
-    text = chunk.get("plain_text") if isinstance(chunk, dict) else None
-    return text if isinstance(text, str) else ""
 
 
 def _rich_text(content: str) -> dict[str, Any]:
@@ -285,11 +256,6 @@ def _rich_text(content: str) -> dict[str, Any]:
 
 def _page_path(episode_ref: str) -> str:
     return f"/v1/pages/{_quoted(episode_ref)}"
-
-
-def _quoted(value: str) -> str:
-    # Dots are encoded too, so a ref of ".." cannot become a dot segment of the path.
-    return urllib.parse.quote(value, safe="").replace(".", "%2E")
 
 
 def _normalized_id(notion_id: str) -> str:

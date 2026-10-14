@@ -147,8 +147,22 @@ def test_cmp_04_the_renderer_takes_no_configuration_yet(tmp_path: Path) -> None:
 
 
 def test_cmp_05_the_production_path_assembles_from_one_environment(tmp_path: Path) -> None:
+    from omemo_content_factory.infrastructure.clip_text_file import export_youtube_texts
+
     production = build_clip_production(_episode_env(tmp_path), evaluator=_Evaluator())
+    assert production._post_exporter is export_youtube_texts
     assert production.has_desk is False, "no desk configured means reviews stay in the store"
+
+
+def test_local_board_builds_without_any_notion_configuration(tmp_path: Path) -> None:
+    from omemo_content_factory.adapters.episode_board import ClipMode, IncomingEpisode
+    from omemo_content_factory.infrastructure.local_episode_board import LocalEpisodeBoard
+
+    env = {k: v for k, v in _episode_env(tmp_path).items() if "NOTION" not in k}
+    board = LocalEpisodeBoard(IncomingEpisode("local", "episode.mp4", ClipMode.MOMENTS))
+    production = build_clip_production(env, evaluator=_Evaluator(), board=board)
+    assert production._board is board
+    assert board.fetch_episode("other") is None
 
 
 def test_cmp_05_a_desk_is_carried_through(tmp_path: Path) -> None:

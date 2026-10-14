@@ -22,7 +22,7 @@ instead of repeating.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from omemo_content_factory.adapters.clip_publisher import (
@@ -285,6 +285,7 @@ class ClipProduction:
         post_writer: PostWriting | None = None,
         posting: Posting | None = None,
         moment_picker: MomentPicking | None = None,
+        post_exporter: Callable[[Run], object] | None = None,
     ) -> None:
         self._store = store
         self._board = board
@@ -298,6 +299,7 @@ class ClipProduction:
         self._post_writer = post_writer
         self._posting = posting
         self._moment_picker = moment_picker
+        self._post_exporter = post_exporter
 
     @property
     def has_desk(self) -> bool:
@@ -331,6 +333,7 @@ class ClipProduction:
                 status=run.status,
                 clips=len(run.artifacts),
                 tally=_tally(run),
+                post_error=self._export_posts(run),
             )
 
         outcome = _Outcome()
@@ -629,6 +632,9 @@ class ClipProduction:
                 self._record_edited_posts(run, taken)
                 self._store.save(run)
 
+        export_error = self._export_posts(run)
+        if export_error:
+            outcome.post_error = "; ".join(filter(None, (outcome.post_error, export_error)))
         self._approve(run, outcome)
         self._publish(run, outcome)
         if open_clip_reviews(run):
@@ -641,6 +647,15 @@ class ClipProduction:
             except Exception as exc:
                 outcome.publish_error = f"{type(exc).__name__}: {exc}"
         self._complete(run)
+
+    def _export_posts(self, run: Run) -> str | None:
+        """Save existing post text; a file error can be retried without another model call."""
+        if self._post_exporter is not None:
+            try:
+                self._post_exporter(run)
+            except OSError as exc:
+                return f"TXT export failed: {type(exc).__name__}: {exc}"
+        return None
 
     def _write_posts(self, run: Run, outcome: _Outcome) -> None:
         """Draft the post text of every QA-passed candidate that has none yet (ADR-0072 §2).
@@ -828,6 +843,13 @@ class ClipProduction:
         outcome: _Outcome,
     ) -> None:
         """A finished job: ``PUBLISHED`` if every platform took it, a failed Task otherwise."""
+        expected = _job(run.task(task_id))[2]
+        reported = [result.platform for result in status.results]
+        if status.state is PublishState.COMPLETED and (
+            set(reported) != set(expected) or len(reported) != len(expected)
+        ):
+            outcome.posting_error = "Publisher returned incomplete platform results; recheck status"
+            return
         failed = [result for result in status.results if not result.success]
         if status.state is PublishState.COMPLETED and not failed:
             run.transition_task(task_id, TaskStatus.SUCCEEDED, Actor.CONTENT_DIRECTOR)

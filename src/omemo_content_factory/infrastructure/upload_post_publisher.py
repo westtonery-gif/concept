@@ -247,7 +247,7 @@ def _results(raw: object) -> tuple[PlatformResult, ...]:
         results.append(
             PlatformResult(
                 platform=platform,
-                success=entry.get("success") is True,
+                success=entry.get("success") is True and entry.get("skipped") is not True,
                 url=url if isinstance(url, str) and url.strip() else None,
                 message=message if isinstance(message, str) and message.strip() else None,
             )

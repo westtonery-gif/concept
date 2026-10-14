@@ -1,9 +1,9 @@
-"""One tiny real call to the model a role uses: proves the key, the model name and the price work.
+"""One tiny real call to the model a role uses: checks the key, model access and structured reply.
 
     python check_llm.py [role]          # default role: qa_agent@v1
 
-Costs a fraction of a cent. Prints the provider, the answer, the tokens, the exact cost from your
-configured rates and the latency; on failure it prints the provider's own refusal.
+Makes one paid API request. Prints provider, answer, tokens, estimated cost from configured
+rates and latency; on failure it prints the provider's refusal.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def main(argv: list[str]) -> int:
     if not answer:
         sys.stderr.write(
             "the model answered but not in the expected shape — try OMEMO_STRUCTURED__DEFAULT=json "
-            "(or tool-required) in .env, see docs/SETUP.md\n"
+            "(or tool-required) in .env, see README.md\n"
         )
         return 1
     return 0

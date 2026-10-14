@@ -8,6 +8,8 @@ export or a deployment's environment always wins over the file.
 from __future__ import annotations
 
 import os
+import re
+import tempfile
 from collections.abc import MutableMapping
 from pathlib import Path
 
@@ -56,7 +58,7 @@ def replace_block(path: str | Path, name: str, lines: list[str]) -> None:
     block = [begin, *lines, end]
     try:
         existing = target.read_text(encoding="utf-8").splitlines()
-    except OSError:
+    except FileNotFoundError:
         existing = []
     if begin in existing and end in existing and existing.index(begin) < existing.index(end):
         first, last = existing.index(begin), existing.index(end)
@@ -64,9 +66,35 @@ def replace_block(path: str | Path, name: str, lines: list[str]) -> None:
     else:
         spacer = [""] if existing and existing[-1].strip() else []
         updated = [*existing, *spacer, *block]
-    temporary = target.with_suffix(target.suffix + ".tmp")
-    temporary.write_text("\n".join(updated) + "\n", encoding="utf-8")
-    temporary.replace(target)
+    _write_private(target, "\n".join(updated) + "\n")
+
+
+def set_api_key(path: str | Path, name: str, value: str) -> None:
+    """Replace a key without duplicate assignments or exposing it in output."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", name):
+        raise ValueError("invalid key variable name")
+    if not re.fullmatch(r"[A-Za-z0-9_./+=:-]+", value):
+        raise ValueError("API key must be a non-empty token without spaces or quotes")
+    target = Path(path)
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        lines = []
+    updated = [line for line in lines if not (entry := _parse(line)) or entry[0] != name]
+    updated.append(f"{name}={value}")
+    _write_private(target, "\n".join(updated) + "\n")
+
+
+def _write_private(target: Path, text: str) -> None:
+    # mkstemp creates mode 0600 before any secret bytes are written.
+    fd, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _parse(line: str) -> tuple[str, str] | None:

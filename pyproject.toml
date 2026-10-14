@@ -1,6 +1,4 @@
-# Project metadata and tooling configuration for OMEMO Content Factory.
-# Scope: ROADMAP Stage 1 (engineering foundation only). No runtime dependencies
-# are declared yet — domain logic, adapters and integrations arrive in later stages.
+# Project metadata and tooling configuration for Concept Content Factory.
 
 [build-system]
 requires = ["hatchling"]
@@ -24,9 +22,11 @@ classifiers = [
     "Typing :: Typed",
     "Private :: Do Not Upload",
 ]
-dependencies = ["anthropic>=0.40", "cryptography>=42"]
+# SDK 1.x removed the request transformer exercised by our provider contract tests.
+dependencies = ["anthropic>=0.40,<1", "cryptography>=42"]
 
 [project.optional-dependencies]
+youtube = ["google-api-python-client>=2,<3", "google-auth-oauthlib>=1.2,<2"]
 # Local speech (ADR-0085): not in `dependencies`, a machine that never speaks does not need them.
 tts = ["kokoro-onnx>=0.4"]
 dev = [

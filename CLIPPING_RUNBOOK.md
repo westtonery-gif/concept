@@ -1,3 +1,10 @@
+# Local setup update (2026-10-13)
+
+`python configure_llm.py` selects direct GPT or Claude and saves the key locally.
+Posting now requires an explicit `--publish` flag, only after user approval.
+Entry scripts now load their sibling `.env`; older instructions below about manually sourcing
+it are no longer required. Existing exported variables still win over the file.
+
 # CLIPPING_RUNBOOK.md — как нарезать серию
 
 > Операторская инструкция департамента нарезки. Не нормативный документ: архитектура — в

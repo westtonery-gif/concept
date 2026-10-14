@@ -29,6 +29,8 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import TypeVar
 
+import anthropic
+
 from omemo_content_factory.infrastructure.fake_llm import FakeLLMClient
 from omemo_content_factory.infrastructure.llm import (
     AnthropicLLMClient,
@@ -173,11 +175,14 @@ def _resolve_client(
             ) from exc
         try:
             return AnthropicLLMClient(
+                api_key=environ.get("ANTHROPIC_API_KEY") or None,
                 model=binding.model,
                 pricing=pricing,
                 max_tokens=_parse_max_tokens(agent_ref, binding.max_tokens),
                 thinking=_parse_thinking(agent_ref, binding.thinking),
             )
+        except anthropic.AnthropicError as exc:
+            raise ProviderModelSelectionError("ANTHROPIC_API_KEY is not set") from exc
         except ValueError as exc:
             # The adapter also refuses a budget that is not below max_tokens — a pair only visible
             # once both values are known, and refused before a single token is bought (ADR-0052 §2).

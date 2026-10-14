@@ -1,25 +1,29 @@
-"""Choose the model the factory's text roles use — any provider, one command (ADR-0094).
+"""Настроить GPT (OpenAI) или Claude (Anthropic) напрямую для всех текстовых ролей.
 
-    python configure_llm.py xai --model grok-4 --input-price 3 --output-price 15
-    python configure_llm.py ollama --model llama3.1 --free
-    python configure_llm.py openai-compatible --model my-model --base-url https://llm.example/v1 \
-        --key-env MY_GATEWAY_KEY --input-price 1 --output-price 2
+    python configure_llm.py                 # выбор сервиса + скрытый ввод ключа
+    python configure_llm.py gpt
+    python configure_llm.py claude
 
-Writes one managed block of ``OMEMO_*__DEFAULT`` lines into ``.env`` (every other line is left as
-it is), after running it through the same selection the factory uses. **Prices are yours to give**
-— per one million tokens, from your provider's price page; the factory never guesses a rate.
-The API key is never written: put it in ``.env`` or export it under the name this prints.
-
-Providers: anthropic, openai-compatible, or a preset — see ``--list``.
+Модель, цены и лимит подставляются из готового профиля (проверены 2026-10-13).
+Другая модель: --model ID --input-price N --output-price N (USD / миллион токенов).
+Настройка сохраняется в .env рядом со скриптом. Сетевых запросов здесь нет.
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
+import os
 import sys
+import warnings
+from dataclasses import replace
 from pathlib import Path
 
-from omemo_content_factory.infrastructure.dotenv_file import replace_block
+from omemo_content_factory.infrastructure.dotenv_file import (
+    load_dotenv,
+    replace_block,
+    set_api_key,
+)
 from omemo_content_factory.infrastructure.llm_setup import (
     BLOCK_NAME,
     LLMChoice,
@@ -29,8 +33,96 @@ from omemo_content_factory.infrastructure.llm_setup import (
 )
 from omemo_content_factory.infrastructure.provider_model import PROVIDER_PRESETS
 
+# Explicit setup choices, not runtime fallbacks. Sources and date: ADR-0094 amendment.
+PROFILES = {
+    "gpt": LLMChoice("openai", "gpt-4.1-mini", "0.40", "1.60"),
+    "claude": LLMChoice("anthropic", "claude-haiku-4-5-20251001", "1", "5", thinking="disabled"),
+}
+ALIASES = {"1": "gpt", "openai": "gpt", "2": "claude", "anthropic": "claude"}
+
+
+def _choice(args: argparse.Namespace) -> LLMChoice:
+    selected = args.provider or input("Выберите модель: 1 — GPT, 2 — Claude: ").strip().lower()
+    selected = ALIASES.get(selected, selected)
+    if selected not in PROFILES:
+        raise ValueError("Выберите gpt или claude.")
+    profile = PROFILES[selected]
+    model = args.model or profile.model
+    if model != profile.model and (args.input_price is None or args.output_price is None):
+        raise ValueError("Для другой модели укажите --input-price и --output-price.")
+    return replace(
+        profile,
+        model=model,
+        input_price=profile.input_price if args.input_price is None else args.input_price,
+        output_price=profile.output_price if args.output_price is None else args.output_price,
+        max_tokens=args.max_tokens,
+        thinking=args.thinking or profile.thinking,
+    )
+
+
+def _configure(choice: LLMChoice, path: Path, *, no_key: bool) -> None:
+    problem = problem_with(choice)
+    if problem:
+        raise ValueError(problem)
+    print(f"{choice.provider}: {choice.model}")
+    print(f"Цены: ${choice.input_price} вход / ${choice.output_price} выход за 1 млн токенов.")
+    environ = dict(os.environ)
+    load_dotenv(path, environ)
+    key_name = key_variable(choice)
+    if key_name and not no_key and not environ.get(key_name, "").strip():
+        # Refuse getpass's echoing fallback if a terminal is unavailable.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            secret = getpass.getpass(f"Вставьте {key_name} (ввод скрыт): ").strip()
+        set_api_key(path, key_name, secret)
+    replace_block(path, BLOCK_NAME, env_block(choice))
+    print(f"Настройка сохранена: {path}")
+    overrides = sorted(
+        name
+        for name, value in environ.items()
+        if name.startswith("OMEMO_PROVIDER__") and not name.endswith("__DEFAULT") and value.strip()
+    )
+    if overrides:
+        print("Сохранены отдельные настройки ролей, они имеют приоритет: " + ", ".join(overrides))
+    if no_key:
+        print(f"Перед запуском задайте {key_name} в .env или окружении.")
+    print("Проверка подключения (один платный запрос): python check_llm.py")
+
 
 def main(argv: list[str]) -> int:
+    if "--list" in argv or (
+        argv
+        and argv[0] in {*PROVIDER_PRESETS, "anthropic", "openai-compatible"}
+        and (argv[0] not in {"openai", "anthropic"} or "--model" in argv)
+    ):
+        return _generic_main(argv)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawTextHelpFormatter
+    )
+    parser.add_argument("provider", nargs="?", choices=["gpt", "claude", "openai", "anthropic"])
+    parser.add_argument("--model", help="другая модель выбранного сервиса")
+    parser.add_argument("--input-price", help="USD за миллион входных токенов")
+    parser.add_argument("--output-price", help="USD за миллион выходных токенов")
+    parser.add_argument("--max-tokens", type=int, default=16000)
+    parser.add_argument("--thinking", help="настройка thinking для выбранной модели")
+    parser.add_argument("--env-file", type=Path, default=Path(__file__).resolve().parent / ".env")
+    parser.add_argument("--no-key", action="store_true", help="сохранить профиль без ввода ключа")
+    args = parser.parse_args(argv)
+    try:
+        _configure(_choice(args), args.env_file, no_key=args.no_key)
+    except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
+        print(
+            "Ввод отменён или скрытый ввод недоступен. Запустите команду в терминале.",
+            file=sys.stderr,
+        )
+        return 2
+    except (ValueError, OSError) as error:
+        print(f"Не удалось настроить: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _generic_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )

@@ -127,7 +127,7 @@ def test_fail_closed_anthropic_with_invalid_pricing(rate: str) -> None:
 
 def test_fail_closed_unknown_provider() -> None:
     with pytest.raises(ProviderModelSelectionError):
-        client_for_role(_ROLE, _env(provider="openai", model="gpt"))
+        client_for_role(_ROLE, _env(provider="unknown-provider", model="model"))
 
 
 # --- internal unit (only where necessary): env parsing normalizes and omits ---------------

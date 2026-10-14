@@ -121,3 +121,5 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0095](0095-mandatory-video-processing-before-delivery.md) | Mandatory video processing before delivery — a workflow adapter, never a model Tool | Accepted |
 | [0096](0096-a-blurred-fill-instead-of-black-bars.md) | A blurred fill instead of black bars | Accepted |
 | [0097](0097-a-moment-picker-agent-for-clipping.md) | A moment-picker Agent chooses the strongest moments of an episode | Accepted |
+
+| [0098](0098-shared-notion-http-functions.md) | Shared HTTP functions for the three Notion adapters | Accepted |

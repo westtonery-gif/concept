@@ -69,7 +69,6 @@ from omemo_content_factory.domain.evaluation import EvaluationStatus
 from omemo_content_factory.domain.human_review import ReviewStatus
 from omemo_content_factory.domain.run import Actor, Run, RunStatus
 from omemo_content_factory.domain.workflow import Workflow, WorkflowStep
-from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
@@ -111,12 +110,14 @@ def _env_token(agent_ref: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in agent_ref).upper()
 
 
-def _print_binding_instructions() -> None:
+def _print_binding_instructions(agent_refs: Sequence[str] | None = None) -> None:
     """Print every per-role provider/model/pricing variable needed for a real client."""
-    for agent in (*AGENTS, *qa_agent.AGENTS):
-        token = _env_token(agent.agent_id)
+    if agent_refs is None:
+        agent_refs = [agent.agent_id for agent in (*AGENTS, *qa_agent.AGENTS)]
+    for agent_ref in agent_refs:
+        token = _env_token(agent_ref)
         safe_print(f"  export OMEMO_PROVIDER__{token}=anthropic")
-        safe_print(f"  export OMEMO_MODEL__{token}=claude-sonnet-4-6")
+        safe_print(f"  export OMEMO_MODEL__{token}=REPLACE_WITH_MODEL_ID")
         safe_print(
             f"  export OMEMO_INPUT_PRICE_PER_MILLION__{token}=REPLACE_WITH_CURRENT_DECIMAL_RATE"
         )
@@ -124,6 +125,8 @@ def _print_binding_instructions() -> None:
             f"  export OMEMO_OUTPUT_PRICE_PER_MILLION__{token}=REPLACE_WITH_CURRENT_DECIMAL_RATE"
         )
         safe_print(f"  export OMEMO_PRICE_CURRENCY__{token}=USD")
+        safe_print(f"  export OMEMO_MAX_TOKENS__{token}=16000")
+        safe_print(f"  export OMEMO_THINKING__{token}=inherit")
 
 
 def _build_executors() -> dict[str, TaskExecutor]:
@@ -256,7 +259,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         qa = _build_qa_evaluator()
     except ProviderModelSelectionError as exc:
         safe_print(f"Provider/model selection failed: {exc}")
-        safe_print("Each role needs its own binding and pricing (ADR-0016/0029). Set:")
+        safe_print("Run python configure_llm.py, or configure the roles individually:")
         _print_binding_instructions()
         return
 
@@ -287,7 +290,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         else:
             location = run_store_path(os.environ)
             safe_print(f"Resuming {RUN_ID} from {location} at '{run.status.value}';")
-            safe_print("committed steps are not run again. Delete that file to start over.")
+            safe_print(
+                "Committed steps are not run again. To start separately, set "
+                "OMEMO_RUN_STORE_PATH to a new SQLite file."
+            )
             director.resume_workflow(run, WORKFLOW, brief=BRIEF)
     except MeasuredEvaluatorError as exc:
         safe_print(f"QA gave no verdict ({type(exc).__name__}: {exc}).")
@@ -342,5 +348,7 @@ def _show_model_calls(run: Run) -> None:
 
 
 if __name__ == "__main__":
+    from omemo_content_factory.infrastructure.dotenv_file import load_project_env
+
     load_project_env(__file__)
     main()

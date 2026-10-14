@@ -32,7 +32,6 @@ from omemo_content_factory.domain.output import OutputEvent
 from omemo_content_factory.domain.run import Run, RunEvent, RunFailed
 from omemo_content_factory.domain.schema import Schema, SchemaStatus, SchemaVersion
 from omemo_content_factory.domain.task import TaskEvent, TaskFailed
-from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.llm import (
     AnthropicLLMClient,
     LLMTaskExecutor,
@@ -259,5 +258,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from omemo_content_factory.infrastructure.dotenv_file import load_project_env
+
     load_project_env(__file__)
     main()

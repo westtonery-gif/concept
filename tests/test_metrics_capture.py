@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, cast
 
 import anthropic
-import httpx2
+import httpx
 import pytest
 from anthropic.types import ContentBlock, Message, ToolUseBlock, Usage
 
@@ -54,7 +54,7 @@ class _ScriptedAnthropic:
 
 class _FailingMessages:
     def create(self, **kwargs: object) -> Message:
-        request = httpx2.Request("POST", "https://api.anthropic.test/v1/messages")
+        request = httpx.Request("POST", "https://api.anthropic.test/v1/messages")
         raise anthropic.APIConnectionError(request=request)
 
 

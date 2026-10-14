@@ -28,7 +28,6 @@ from omemo_content_factory.adapters.speech_synthesizer import (
 )
 from omemo_content_factory.composition import build_speech_synthesizer
 from omemo_content_factory.infrastructure.dialogue_mixer import DialogueLine, DialogueMixer
-from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 
 SAMPLE = """\
 # a banker who laughs, a farmer who does not give up (ElevenLabs premade voices)
@@ -111,5 +110,7 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    from omemo_content_factory.infrastructure.dotenv_file import load_project_env
+
     load_project_env(__file__)
     sys.exit(main(sys.argv))

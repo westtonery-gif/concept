@@ -1,338 +1,244 @@
 # Concept Content Factory
 
-Industrial multi-agent content production system for **Concept** — a
-managed, reproducible, human-in-the-loop pipeline for producing content.
+Фабрика контента на Python: специализированные AI-роли готовят материал, QA проверяет его,
+человек принимает решение. Результаты, версии, затраты и состояние прогонов сохраняются в SQLite.
 
-> **Status:** the content factory (brief → research → script → QA → human review) and two
-> additive departments — **clipping** (episode → vertical clips with captions, QA, review, posting)
-> and **generation** (voiced story videos from words) — run end to end. See
-> [ROADMAP.md](ROADMAP.md) for the plan and [docs/adr/](docs/adr/README.md) for every decision.
-> New machine? Start at [docs/SETUP.md](docs/SETUP.md).
+В репозитории реализованы три направления:
 
-## Documentation (source of truth)
+| Направление | Что происходит | Точка входа |
+|---|---|---|
+| Сценарии из брифа | Notion → исследователь → сценарист → QA → ревью | `demo_notion.py`, `factory_service.py` |
+| Нарезка видео | Локальный эпизод → расшифровка и сцены → клипы → QA → ревью → публикация при настройке | `demo_clips.py` |
+| Генерация истории | Идея → сценарий → голоса → раскадровка → изображения → анимация | Отдельные `demo_story*.py`, `demo_dialogue.py`, `demo_frames.py`, `demo_animate.py` |
 
-The architecture is governed by three charters, in strict order of authority:
+Генерация истории пока управляется отдельными командами. HTTP-сервис запускает производство
+брифов и обработку решений ревью; нарезка и генерация через него не запускаются.
 
-| Document | Answers |
-|----------|---------|
-| [PROJECT.md](PROJECT.md) | **What** we are building and by which principles |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | **How** the system is structured |
-| [ROADMAP.md](ROADMAP.md) | In **which order** we implement it |
-| [docs/adr/](docs/adr/README.md) | **Why** each architectural decision was made |
+## Установка
 
-Code must never contradict the documentation; on conflict, the documentation
-wins (PROJECT.md, section 17).
-
-## Requirements
-
-- Python **3.11+**
-- git
-
-## Quickstart (no AI assistant needed)
+Нужен **Python 3.11 или новее**. Команды ниже выполняются из корня репозитория.
 
 ```bash
-git clone <this repo> concept && cd concept
-scripts/setup.sh          # venv + package + .env from the example + a readiness report
-.venv/bin/python configure_llm.py xai --model <name> --input-price <n> --output-price <n>
-                          # any provider: xai, openai, openrouter, groq, mistral, deepseek, ollama, …
-$EDITOR .env              # add that provider's key and what the departments you use need
-.venv/bin/python check_llm.py                   # one tiny real call: key, model, price
-.venv/bin/python doctor.py clipping posting     # until it says "ready"
-```
-
-Every entrypoint (`demo_*.py`, `factory_service.py`, `doctor.py`) reads `.env` itself — you do not
-need to `source` it, and a variable you export in the shell wins over the file. External tools
-(ffmpeg with libass, whisper.cpp, chromaprint) and each department's variables are listed in
-[docs/SETUP.md](docs/SETUP.md). Windows: use WSL.
-
-Manual install, if you prefer (bash; on Windows PowerShell activate with
-`.venv\Scripts\Activate.ps1`):
-
-```bash
-python -m venv .venv
+python3.12 -m venv .venv           # или другой установленный Python 3.11+
 source .venv/bin/activate
-pip install --upgrade pip
-pip install -e ".[dev]"
-cp .env.example .env
-```
-
-## Running the checks
-
-The local quality gate mirrors CI exactly:
-
-```bash
-ruff format --check .   # formatting
-ruff check .            # linting
-mypy                    # static typing (strict)
-pytest                  # tests
-```
-
-Use `ruff format .` to apply formatting, and `pytest --cov` for coverage.
-
-## Using pre-commit
-
-`pre-commit` is the **first level of quality control** (ADR-0002 Revision 1). It
-runs the approved checks automatically each time you create a commit, so obvious
-problems are caught **before** they enter the repository. It does **not** replace
-CI — CI remains the authoritative gate (see [CONTRIBUTING.md](CONTRIBUTING.md)).
-
-**1. Install the dependencies** (the dev extra includes `pre-commit` and the
-tools the hooks use):
-
-```bash
-pip install -e ".[dev]"
-```
-
-**2. Install the git hooks** (one-time, per clone):
-
-```bash
-pre-commit install
-```
-
-**What happens on commit.** When you run `git commit`, pre-commit runs the three
-approved checks on the project:
-
-- **Ruff Format** — applies formatting;
-- **Ruff Check** — lints the code;
-- **mypy** — static type checking (strict).
-
-If everything passes, the commit is created. If a check fails (or Ruff Format
-reformats files), **the commit is aborted**.
-
-**If a check fails:**
-
-1. Read the hook output to see what failed.
-2. If **Ruff Format** changed files, or you fix lint/type errors, **re-stage**
-   the changed files (`git add ...`) and commit again.
-3. Re-run the hooks manually at any time without committing:
-
-   ```bash
-   pre-commit run --all-files
-   ```
-
-> Bypassing the hooks (`git commit --no-verify`) is discouraged: CI runs the same
-> checks and will fail the Pull Request anyway.
-
-## Running the smoke entrypoint
-
-A Stage 1 entrypoint that proves the package installs, imports and reads
-configuration (no business logic, no external calls):
-
-```bash
+python -m pip install -e ".[dev]"
 python -m omemo_content_factory
 ```
 
-It logs the version, the active environment and the log level.
+Последняя команда проверяет импорт и конфигурацию, печатает версию; внешних вызовов нет.
+На Windows создайте окружение через `py -3.12 -m venv .venv` и активируйте
+`.venv\Scripts\Activate.ps1` в PowerShell.
 
-## Running the demo
+## Конфигурация
 
-`demo.py` runs one workflow — Research → Writer → Editor — through the real
-`ContentDirector` and the Run/Task/Output/Artifact domain, with each role backed
-by a live Anthropic model behind the application's `TaskExecutor` port:
-
-```bash
-python demo.py
-```
-
-A real model call needs `ANTHROPIC_API_KEY` plus explicit
-`OMEMO_LLM_INPUT_PRICE_PER_MILLION`, `OMEMO_LLM_OUTPUT_PRICE_PER_MILLION` and
-`OMEMO_LLM_PRICE_CURRENCY` values, plus an explicit request budget — `OMEMO_LLM_MAX_TOKENS` and
-`OMEMO_LLM_THINKING` (`adaptive` | `disabled` | `inherit` | `budget:<tokens>`, ADR-0052) — in the
-environment (optionally `OMEMO_LLM_MODEL` to choose the model); missing configuration is explained
-and the demo exits cleanly. No QA, Human Review,
-publication or external integrations are involved.
-
-## Running the factory-role demo
-
-`demo_factory.py` runs the same kind of end-to-end Workflow, but through the **actual catalogued
-production roles** migrated from Main Core (ADR-0016) — Rin (`content_researcher@v1`) then Leo
-(`script_writer@v1`), with Leo's script judged at the fail-closed QA gate by the QA role
-(`qa_agent@v1`, ADR-0038) — assembled by the real Composition Root instead of `demo.py`'s
-hand-written one-off prompts. Unlike `demo.py`, each role resolves **its own** provider/model via
-`client_for_role` (ADR-0016) — there is no shared/default model:
+Для текстовых ролей запустите мастер и выберите **GPT** или **Claude**:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export OMEMO_PROVIDER__CONTENT_RESEARCHER_V1=anthropic
-export OMEMO_MODEL__CONTENT_RESEARCHER_V1=claude-sonnet-4-6
-export OMEMO_INPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_OUTPUT_PRICE_PER_MILLION__CONTENT_RESEARCHER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_PRICE_CURRENCY__CONTENT_RESEARCHER_V1=USD
-export OMEMO_MAX_TOKENS__CONTENT_RESEARCHER_V1=16000
-export OMEMO_THINKING__CONTENT_RESEARCHER_V1=adaptive
-export OMEMO_PROVIDER__SCRIPT_WRITER_V1=anthropic
-export OMEMO_MODEL__SCRIPT_WRITER_V1=claude-sonnet-4-6
-export OMEMO_INPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_OUTPUT_PRICE_PER_MILLION__SCRIPT_WRITER_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_PRICE_CURRENCY__SCRIPT_WRITER_V1=USD
-export OMEMO_MAX_TOKENS__SCRIPT_WRITER_V1=16000
-export OMEMO_THINKING__SCRIPT_WRITER_V1=adaptive
-export OMEMO_PROVIDER__QA_AGENT_V1=anthropic
-export OMEMO_MODEL__QA_AGENT_V1=claude-sonnet-4-6
-export OMEMO_INPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_OUTPUT_PRICE_PER_MILLION__QA_AGENT_V1=REPLACE_WITH_CURRENT_DECIMAL_RATE
-export OMEMO_PRICE_CURRENCY__QA_AGENT_V1=USD
-export OMEMO_MAX_TOKENS__QA_AGENT_V1=16000
-export OMEMO_THINKING__QA_AGENT_V1=adaptive
-python demo_factory.py
+python configure_llm.py
+# Или сразу нужный сервис:
+python configure_llm.py gpt
+python configure_llm.py claude
 ```
 
-Every candidate stops at the Approval Gate (`WAITING_HUMAN` with a Review open, ADR-0044): a
-`passed` one waits for approval, a `flagged` / `failed` one is an escalation. Play the reviewer to
-approve a passed candidate (the Run completes), or to drive a rework from the model's flags with
-instructions (ADR-0032) or with a rejection's reason (ADR-0045). A candidate QA did not pass cannot
-be approved:
+Вставьте ключ в терминале: ввод скрыт. Он сохраняется в локальном `.env` с доступом только
+владельцу; файл исключён из Git. Настройка не делает платных запросов. Если ключ выбранного
+сервиса уже есть в `.env` или окружении, он используется повторно.
+
+| Выбор | Прямой API | Стартовая модель | Ключ |
+|---|---|---|---|
+| GPT | OpenAI | `gpt-4.1-mini` | `OPENAI_API_KEY` |
+| Claude | Anthropic | `claude-haiku-4-5-20251001` | `ANTHROPIC_API_KEY` |
+
+Мастер подставляет модель, стандартные цены и лимит ответа 16000 токенов. Это стартовые
+профили; качество выбора сцен на конкретных сериях нужно проверять. Цены проверены 13.10.2026:
+[GPT-4.1 mini](https://developers.openai.com/api/docs/models/gpt-4.1-mini) — $0.40/$1.60,
+[Claude Haiku 4.5](https://platform.claude.com/docs/en/models/haiku-4-5/overview) — $1/$5
+за миллион входных/выходных токенов. Учёт расходов использует эти ставки и может отличаться
+от счёта провайдера из-за кеширования и других условий тарифа.
+
+Для другой модели задайте её ID и обе цены; параметры `--max-tokens` и `--thinking` можно менять:
+
+```bash
+python configure_llm.py gpt --model MODEL_ID --input-price INPUT_RATE --output-price OUTPUT_RATE
+python check_llm.py   # проверка подключения: один платный запрос к выбранной модели
+```
+
+Скрипты `demo*.py`, `factory_service.py` и `check_llm.py` автоматически читают `.env` рядом
+с собой. Переменные, уже экспортированные в терминале, имеют приоритет — после переключения
+модели уберите старые экспорты или откройте новый терминал. Файл не нужно выполнять через `source`.
+Общий профиль `OMEMO_*__DEFAULT` действует на все текстовые роли, включая выбор моментов,
+тексты постов и QA. Существующие настройки отдельной роли имеют приоритет; мастер сообщает
+о них. Параметры выбранного направления добавляйте из [.env.example](.env.example), сохраняя
+созданный мастером файл. Подключения Notion, генерации медиа и публикации настраиваются отдельно.
+
+## Бриф → сценарий → ревью
+
+```bash
+python demo_factory.py                    # встроенный пример брифа
+python demo_notion.py <notion-page-id>     # бриф из настроенной базы Notion
+python factory_service.py                # HTTP-сервис для n8n
+```
+
+Запускайте нужный вариант. Путь через Notion требует `OMEMO_NOTION_*`, сервис — ещё
+`OMEMO_SERVICE_TOKEN`. Ревью доступно в Notion или Google Docs; без настроенного сервиса ревью
+решения можно вводить флагами CLI:
 
 ```bash
 python demo_factory.py --approve
-python demo_factory.py --request-changes "add a source for the 70% figure"
-python demo_factory.py --reject "off-brand tone"
+python demo_factory.py --request-changes "Добавить источник для утверждения"
+python demo_factory.py --reject "Не соответствует брифу"
 ```
 
-If the QA call itself fails (provider error, or an answer that breaks the verdict grammar), the Run
-stays at `WAITING_QA` and running the demo again asks QA again (ADR-0038).
+Одобрить можно только материал, прошедший QA. Доработка запускает заново автора текущего
+материала, создаёт новую версию и снова проходит проверки. Повторный запуск продолжает
+сохранённый прогон. По умолчанию база — `.omemo/runs.sqlite3`; для отдельного нового запуска
+укажите новый путь в `OMEMO_RUN_STORE_PATH`, сохранив предыдущую базу.
 
-Replace the rate placeholders with the provider's current per-million-token prices. Pricing is
-explicit and per role; an Anthropic binding without both rates and a currency fails closed rather
-than recording a guessed cost (ADR-0029). So are the output budget and the thinking choice
-(ADR-0052): there is no default `max_tokens` and nothing is inherited silently from the model, since
-a role that spends its whole budget on reasoning never emits a structured answer and the Run fails
-as `INVALID`. `budget:<tokens>` is the only form Haiku 4.5 and older models accept; Opus 5 and
-Sonnet 5 reject it with a `400` and take `adaptive`. `.env.example` explains each value.
+Настройка баз и ревью: [инструкция для брифов](docs/operations/briefs.md).
+Автоматизация: [n8n/README.md](n8n/README.md).
 
-The Run is saved after every step to `OMEMO_RUN_STORE_PATH` (default `.omemo/runs.sqlite3`,
-git-ignored; ADR-0026). Running the demo again **resumes** that Run instead of starting over: an
-interrupted run continues where it stopped, a finished one is only shown, and no model is called
-for work already committed. Delete the file to start from scratch.
+## Нарезка видео
 
-A role with no `OMEMO_PROVIDER__<ROLE>` binding fails closed
-(`ProviderModelSelectionError`) — the demo prints the exact exports each role still needs and
-exits cleanly, same as it does when `ANTHROPIC_API_KEY` is missing.
+**Локальное видео без Notion, до публикации в YouTube Shorts:**
 
-## Running the Notion demo
+```sh
+python factory.py '/полный/путь/серия.mp4' --profile my-channel
+```
 
-`demo_notion.py` runs the same real Rin → Leo → QA Workflow, but the brief comes from a real
-Notion database instead of a hardcoded string — the first real "core reads its input from the
-outside" path (ROADMAP Stage 9, ADR-0040). Everything else (roles, QA gate, rework, Run store) is
-exactly `demo_factory.py`, reused rather than duplicated.
+При первом запуске команда запрашивает недостающие настройки GPT/Claude, Whisper и
+Google OAuth. Затем готовит клипы и TXT и требует отдельное `publish` перед каждой
+загрузкой. Системные инструменты устанавливаются заранее.
+[Установка и первый запуск](LOCAL_FACTORY.md). `--draft-only` готовит без публикации.
+
+Рядом с клипом создаётся TXT для **YouTube Shorts**: `clip.unique.mp4` → `clip.unique.txt`,
+с названием и описанием. Этот шаг встроен в конвейер: нарезка → обработка → QA →
+название и описание для YouTube Shorts → TXT рядом с видео → ревью.
+Для генерации текста нужен настроенный GPT/Claude. Если текста ещё нет, TXT не создаётся.
+Существующие TXT не перезаписываются, поэтому их можно редактировать вручную. Они предназначены
+для ручной загрузки; автоматическая публикация читает проверенный текст из базы, не из TXT.
+
+
+После нарезки и встраивания субтитров каждый новый клип проходит обработку **перед QA**:
+скорость 0,98× с сохранением высоты голоса, масштаб 94%, постоянная частота кадров,
+лёгкие воспроизводимые изменения цвета, резкости и наклона, пересборка метаданных.
+Исходный файл сохраняется; результат — `*.unique.mp4`, рядом `*.unique.processing.json`.
+Повторный запуск использует проверенный результат и не замедляет видео второй раз.
+Это изменение файла, а не гарантия оригинальности для площадки.
+
+Настройки: `OMEMO_VIDEO_SPEED`, `OMEMO_VIDEO_SCALE`, `OMEMO_VIDEO_CRF`,
+`OMEMO_VIDEO_PRESET`, `OMEMO_VIDEO_LOOK` (`clean`, `subtle`, `strong`).
+Зеркалирование `OMEMO_VIDEO_MIRROR=false` по умолчанию: оно переворачивает и вшитые субтитры.
+Обработка применяется только к нарезкам. Ошибка обработки не пропускает исходный клип в QA.
+Старые одобренные клипы без этого этапа не заменяются автоматически: для новой публикации
+потребуется новый прогон с новой идентичностью эпизода/Run либо отдельная проверенная миграция.
+Для реального запуска нужны `ffmpeg` и `ffprobe`; HDR-вход модуль отклоняет.
+
+
+Доступен режим **`moments`**: в карточке эпизода выберите `Mode= moments` и настройте GPT/Claude через
+`configure_llm.py` (либо отдельную роль `CLIP_MOMENT_PICKER_V1` в `.env.example`). Модель выбирает по расшифровке
+законченные моменты; QA и ручное ревью остаются обязательными. По умолчанию — до 12 моментов
+длиной 60–120 секунд. Пределы: `OMEMO_CLIP_MOMENT_MIN_MS`, `OMEMO_CLIP_MAX_MS`,
+`OMEMO_CLIP_MOMENT_COUNT`. Качество реального отбора ещё предстоит проверить на исходнике.
+
+Новый вид субтитров включается вместе с увеличенным кадром на размытом фоне:
 
 ```bash
-# same ANTHROPIC_API_KEY / OMEMO_PROVIDER__* / pricing / budget exports as demo_factory.py, plus:
-export OMEMO_NOTION_TOKEN=secret_...
-export OMEMO_NOTION_DATABASE_ID=...
-export OMEMO_NOTION_READY_PROPERTY=Stage
-export OMEMO_NOTION_READY_VALUE="Ready for production"
-export OMEMO_NOTION_RUN_STATUS_PROPERTY="Run status"
-export OMEMO_NOTION_RUN_ID_PROPERTY="Run id"
-export OMEMO_NOTION_REVIEW_LINK_PROPERTY="Review"   # a URL property
-python demo_notion.py <notion-page-id>
+export OMEMO_CLIP_FILL=blur
+export OMEMO_CLIP_PICTURE_HEIGHT=0.79
+export OMEMO_CLIP_CAPTION_COLOR=yellow
 ```
 
-A brief that is not on the board, not marked ready, or has no text all print the same message and
-exit cleanly (`BriefBoard.fetch_brief` returns `None` for each, deliberately indistinguishable —
-ADR-0040 §3). `--approve`, `--request-changes "<instructions>"` and `--reject "<reason>"` work the
-same as in `demo_factory.py`.
+Слова выводятся по одному в центре, не дольше 0,9 секунды каждое. Их время приблизительно
+распределяется внутри фразы Whisper, это не точное выравнивание каждого слова по аудио.
+Увеличение обрезает края кадра. Старое оформление остаётся при незаданных параметрах.
+Для фильтрации музыки при распознавании можно указать `OMEMO_WHISPER_VAD_MODEL` — путь
+к совместимой модели Silero для whisper.cpp. Она отдельно не скачивается автоматически.
 
-Every status the Run passes through (`queued`, `running`, `waiting_qa`, `waiting_human`,
-`completed`, `failed`) is written back onto the page's `Run status` / `Run id` properties as soon as
-it is stored, and synced once more at the end of each invocation (ADR-0041). If Notion refuses a
-report, the Run carries on regardless — the refusal is logged and printed, and the next run retries.
-Once a review is published, its Google Doc link is written into the page's `Review` URL property
-(ADR-0047); a link already shown is not written again.
 
-## Running the factory as a service for n8n
-
-`factory_service.py` (ROADMAP Stage 11, ADR-0049) serves the same production path as
-`demo_notion.py` over HTTP, so n8n can trigger it: `POST /v1/briefs` `{"brief_ref": "<page id>"}`
-produces or advances a brief, `POST /v1/reviews/sweep` advances every Run waiting for a human
-(decisions typed into the review Docs), `GET /v1/health` checks it's up. Both POSTs need
-`Authorization: Bearer $OMEMO_SERVICE_TOKEN`, answer `202` at once, and one background worker
-produces one brief at a time.
+Нужны локальные `ffmpeg`/`ffprobe`, ffmpeg с `libass` для субтитров, `whisper-cli` и файл модели
+Whisper. `fpcalc` используется для поиска повторяющихся заставок. В `.env.example` есть настройки
+борда эпизодов, папки с видео и ревью.
 
 ```bash
-# everything demo_notion.py needs, plus:
-export OMEMO_SERVICE_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-python factory_service.py            # listens on 127.0.0.1:8765 (OMEMO_SERVICE_HOST/PORT)
+python demo_clips.py <notion-page-id-of-episode>
 ```
 
-The two n8n workflows that call it, and how to set them up, are in [`n8n/`](n8n/README.md).
+Полная последовательность — в [CLIPPING_RUNBOOK.md](CLIPPING_RUNBOOK.md).
+Повторный запуск читает решения и продолжает производство. Публикация через Upload-Post требует отдельного запуска
+`python demo_clips.py --publish <id>` и отправляет только одобренные клипы с текстом поста.
+Обычный запуск ничего не публикует даже при настроенном ключе. Текущий режим: пользователь
+пишет «постинг», получает предпросмотр видео, канала, названия и описания и явно одобряет
+публикацию. Целевой канал — `@tsxmoon-n7s`; прямое подключение OAuth подтверждено 2026-10-13. Расписания нет.
 
-## Google Docs review desk
+## Генерация истории
 
-`GoogleDocsReviewDesk` (ROADMAP Stage 10, ADR-0043) publishes a candidate for human review as a
-Google Doc and reads the reviewer's decision back. `demo_notion.py` publishes the pending review of
-a Run waiting for a human at the end of every invocation and prints the Doc's link (ADR-0044);
-publishing again finds the same Doc, and a refusal leaves the Run untouched for the next run to
-retry. Without the two variables below reviews stay in the Run store; setting only one is an error.
-On the next invocation of a waiting Run the reviewer's decision is read from the Doc (ADR-0045):
-the reviewer fills `РЕШЕНИЕ:` with `одобрено`, `доработать` or `отклонено` (and the reason under
-`ПРИЧИНА:`). Approval completes a QA-passed candidate; changes or a rejection rework it into a new
-version whose review gets a new Doc. An approval of a candidate QA did not pass is not recorded —
-change the decision instead. A `--approve` / `--request-changes` / `--reject` flag overrides the
-Doc. Operator setup:
-
-1. In Google Cloud, enable the **Google Drive API**, create a **service account** and download its
-   JSON key — keep it outside the repository.
-2. Create a folder for review Docs, preferably on a **shared drive** (a service account has no Drive
-   storage of its own), and share it with the service account's e-mail as an editor.
-3. Configure:
+Сначала настройте LLM-роли, один сервис озвучки и BytePlus для Seedream/Seedance.
+Для работы со звуком и сборки видео нужен ffmpeg. Команды выполняются поэтапно:
 
 ```bash
-export OMEMO_GOOGLE_SERVICE_ACCOUNT_FILE=/path/outside/the/repo/service-account.json
-export OMEMO_GOOGLE_REVIEW_FOLDER_ID=<folder id from the folder's URL>
+python demo_story.py "Идея истории"
 ```
 
-Each review Doc starts with a decision block. The reviewer types one word after `РЕШЕНИЕ:` —
-`одобрено`, `отклонено` or `доработать` — and, for a rejection or rework, the reason after
-`ПРИЧИНА:`. Everything below the `======== МАТЕРИАЛЫ РЕВЬЮ ========` line (run, artifact version,
-brief, QA flags, candidate) is never read as a decision. An empty or unrecognised word keeps the
-review pending (the latter logs a warning); a deleted marker or separator line is an error.
+Скрипт напечатает путь `generation-tests/stories/<story>.txt`. Перед озвучкой замените
+`voice:<key>` в его репликах на голоса выбранного сервиса. Для этого же имени `<story>`:
 
-## Project layout
-
-```
-omemo-content-factory/
-├── PROJECT.md                  # Charter: goals & principles (source of truth)
-├── ARCHITECTURE.md             # Charter: system design
-├── ROADMAP.md                  # Charter: implementation order
-├── README.md                   # This file
-├── CONTRIBUTING.md             # Workflow, branching, quality gate
-├── LICENSE                     # MIT
-├── pyproject.toml              # Project metadata + tool config (ruff/mypy/pytest)
-├── .pre-commit-config.yaml     # Pre-commit hooks: Ruff Format, Ruff Check, mypy
-├── .env.example                # Documented environment variables
-├── .gitignore
-├── .github/
-│   └── workflows/
-│       └── ci.yml              # CI: format → lint → types → tests
-├── docs/
-│   └── adr/                    # Architecture Decision Records
-├── src/
-│   └── omemo_content_factory/  # The import package (src layout)
-│       ├── __about__.py        # Version (single source of truth)
-│       ├── __init__.py
-│       ├── __main__.py         # `python -m omemo_content_factory`
-│       ├── config.py           # Env-based infrastructure configuration
-│       ├── log.py              # Logging configuration helper
-│       ├── py.typed            # PEP 561 typed marker
-│       ├── domain/             # Domain core: Run, Task, Output, Artifact, Human Review, Evaluation
-│       ├── skills/             # Skills library: Skill contract + deterministic one-task Skills
-│       ├── tools/              # Tool Layer: Tool contract + per-agent Toolbox + model-invoked Tools
-│       ├── adapters/           # Adapter contracts: RunStore, BriefBoard, ReviewDesk, AnalyticsSink
-│       ├── application/        # ContentDirector + task execution + QA evaluation
-│       └── infrastructure/     # LLM executor + SQLite RunStore + in-memory adapter stubs
-├── demo.py                     # End-to-end demo of the domain via ContentDirector
-├── demo_factory.py             # Same, but through the real catalogued Rin -> Leo roles
-├── demo_notion.py              # Same, but the brief is fetched from a real Notion database
-└── tests/                      # pytest suite
+```bash
+python demo_dialogue.py generation-tests/stories/<story>.txt generation-tests/dialogue/<story>/dialogue.wav
+python demo_storyboard.py generation-tests/stories/<story>.txt
+python demo_frames.py sheets generation-tests/stories/<story>.txt
+python demo_frames.py shots generation-tests/stories/<story>.txt
+python demo_animate.py plan generation-tests/stories/<story>.txt
+python demo_animate.py run generation-tests/stories/<story>.txt
+python demo_animate.py join generation-tests/stories/<story>.txt
 ```
 
-## Contributing
+`plan` рассчитывает тайминг и оценку цены без отправки генераций. `run` запускает анимацию,
+а `join` собирает **видео без звука** в `generation-tests/frames/<story>/silent.mp4`.
+Озвучка остаётся отдельным WAV; финальное наложение звука пока выполняется отдельно.
+Точечная перерисовка: `demo_frames.py sheets|shots <story.txt> [keys|numbers] --note "Правка"`.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Every change follows
-**Build → Test → Commit → Review**, and architectural changes require an
-[ADR](docs/adr/README.md).
+## Где искать код и документацию
 
-## License
+| Путь | Назначение |
+|---|---|
+| `src/omemo_content_factory/domain/` | Прогоны, задачи, результаты, версии, QA и решения человека |
+| `src/omemo_content_factory/application/` | Последовательность производства и возобновление прогонов |
+| `src/omemo_content_factory/agents/`, `prompts/` | Роли, схемы ответов и версионированные промпты |
+| `src/omemo_content_factory/adapters/`, `infrastructure/` | Контракты и реализации внешних сервисов |
+| `src/omemo_content_factory/composition.py` | Сборка компонентов из настроек |
+| `tests/` | Тесты и проверки контрактов |
 
-[MIT](LICENSE) © 2026 OMEMO Health
+Архитектурная иерархия: [PROJECT.md](PROJECT.md) → [ARCHITECTURE.md](ARCHITECTURE.md) →
+[ROADMAP.md](ROADMAP.md) → [ADR](docs/adr/README.md) → код.
+Модель данных — [DOMAIN_MODEL.md](DOMAIN_MODEL.md), спецификации и критерии приёмки —
+`*_SPEC.md` / `*_ACCEPTANCE.md`. История сессий и старый нумерованный список задач —
+[архив заметок](docs/history/development-notes.md).
+
+`demo.py` — ранний пример Research → Writer → Editor с отдельными `OMEMO_LLM_*` настройками;
+для основного пути используйте `demo_factory.py`.
+
+## Проверки
+
+В активированном окружении:
+
+```bash
+python -m ruff format --check .
+python -m ruff check .
+python -m mypy
+python -m pytest
+```
+
+Порядок разработки и настройка pre-commit: [CONTRIBUTING.md](CONTRIBUTING.md).
+Лицензия: [MIT](LICENSE).
+
+### YouTube Shorts напрямую, с одобрением в чате
+
+Для @tsxmoon-n7s выбран прямой Google OAuth. Подключение: `configure_youtube.py`.
+Предпросмотр готового MP4 + соседнего TXT: `post_youtube.py`; отправка только после
+явного апрува пользователя. OAuth для этого канала подтверждён 2026-10-13. Реальная загрузка ещё не проверялась.
+Полная инструкция: [YOUTUBE_SETUP.md](YOUTUBE_SETUP.md).
+
+## Дополнительная настройка
+
+[Проверка окружения и другие провайдеры](docs/SETUP.md): `python doctor.py`,
+`python configure_llm.py --list`. Для быстрого старта с локальным видео — [LOCAL_FACTORY.md](LOCAL_FACTORY.md).

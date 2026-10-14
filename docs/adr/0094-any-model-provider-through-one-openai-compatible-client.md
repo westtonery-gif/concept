@@ -102,3 +102,26 @@ all roles at one model is ~50 lines of `.env`.
 - **Not done:** image input for this family (the image-aware port of ADR-0080/0083 does not exist
   in code yet, so there is nothing to implement it against), streaming, provider-side prompt
   caching, and exact per-vendor rate presets (rates are never hardcoded — ADR-0029).
+
+## Local setup amendment (2026-10-13)
+
+The requested simple setup offers two direct providers: GPT (OpenAI) and Claude (Anthropic).
+`configure_llm.py` asks for that choice and a hidden local key; it writes an explicit shared
+model binding to `.env`. Entry scripts load that file, without overriding shell exports.
+Existing role-specific overrides remain authoritative and are reported by setup.
+
+The setup presets are GPT-4.1 mini (`gpt-4.1-mini`, USD 0.40/1.60 per million input/output
+tokens) and Claude Haiku 4.5 (`claude-haiku-4-5-20251001`, USD 1/5), with a 16000 output budget;
+GPT inherits thinking and Claude disables it for forced function calls. These are conservative
+starting presets, not a claim that they are the latest/best models. Rates were checked on
+2026-10-13 at https://developers.openai.com/api/docs/models/gpt-4.1-mini and
+https://platform.claude.com/docs/en/models/haiku-4-5/overview. The CLI displays the choice before
+key entry, permits explicit model/rate overrides, and never silently applies a preset's rates
+to a different model. Runtime selection still has no implicit model default. Reported costs
+are estimates from configured standard token rates, not the provider's invoice.
+
+Keys are never command-line arguments or printed; local writes use a private temporary file
+and atomic replacement, with owner-only permissions. Setup itself makes no network request.
+Missing keys and interrupted hidden input cause no configuration write. Tests cover both
+choices, switching, role overrides, key secrecy, and automatic loading from another directory.
+Text configuration does not configure Notion, media generation or posting accounts.

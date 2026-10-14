@@ -908,3 +908,108 @@ def test_vpw_04_crash_before_processing_commit_reuses_the_same_request(factory: 
     run = factory.stored()
     assert run is not None and len(run.artifacts) == 3
     assert len([t for t in run.tasks if t.workflow_step_ref == "process-video"]) == 3
+
+
+def test_youtube_text_files_use_saved_posts_and_preserve_manual_edits(
+    factory: _Factory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omemo_content_factory.infrastructure.clip_text_file import export_youtube_texts
+
+    monkeypatch.chdir(tmp_path)
+    _with_posts(factory, _PostWriter()).invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    # A missing video must not leave an orphan text file.
+    for artifact in run.artifacts[:2]:
+        Path(json.loads(artifact.content)["path"]).write_bytes(b"video")
+    paths = export_youtube_texts(run)
+    assert len(paths) == 2
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("YouTube Shorts\n\nНазвание:\nЗаголовок")
+        assert "Описание:\nОписание #shorts" in text
+        assert path.with_suffix(".mp4").is_file()
+    paths[0].write_text("Ручная правка", encoding="utf-8")
+    assert export_youtube_texts(run) == ()
+    assert paths[0].read_text(encoding="utf-8") == "Ручная правка"
+
+
+def test_youtube_export_does_not_invent_missing_post_text(factory: _Factory) -> None:
+    from omemo_content_factory.infrastructure.clip_text_file import export_youtube_texts
+
+    factory.production().invoke(EPISODE)
+    run = factory.stored()
+    assert run is not None
+    assert export_youtube_texts(run) == ()
+
+
+def test_post_text_export_is_a_resumable_step_inside_production(
+    factory: _Factory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omemo_content_factory.infrastructure.clip_text_file import export_youtube_texts
+
+    monkeypatch.chdir(tmp_path)
+    writer = _PostWriter()
+    production = _with_posts(factory, writer)
+
+    def unavailable(run: Run) -> None:
+        stored = factory.stored()
+        assert stored is not None
+        assert all(latest_post(stored, a.artifact_id) for a in run.artifacts)
+        raise OSError("disk unavailable")
+
+    production._post_exporter = unavailable
+    first = production.invoke(EPISODE)
+    assert first.post_error and "TXT export failed" in first.post_error
+    run = factory.stored()
+    assert run is not None
+    videos = [Path(json.loads(a.content)["path"]) for a in run.artifacts]
+    for video in videos:
+        video.write_bytes(b"video")
+
+    production._post_exporter = export_youtube_texts
+    assert production.invoke(EPISODE).post_error is None
+    assert len(writer.inputs) == 3, "export retry must reuse saved descriptions"
+    assert all(video.with_suffix(".txt").is_file() for video in videos)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    assert production.invoke(EPISODE).status is RunStatus.COMPLETED
+    sidecar = videos[0].with_suffix(".txt")
+    sidecar.unlink()
+    assert production.invoke(EPISODE).post_error is None
+    assert sidecar.is_file(), "completed runs also restore missing TXT files"
+    assert len(writer.inputs) == 3
+
+
+@pytest.mark.parametrize("reported", [(), ("tiktok",), ("youtube", "youtube")])
+def test_incomplete_publication_results_are_rechecked_without_reupload(
+    factory: _Factory, monkeypatch: pytest.MonkeyPatch, reported: tuple[str, ...]
+) -> None:
+    from omemo_content_factory.adapters.clip_publisher import (
+        PlatformResult,
+        PublishState,
+        PublishStatus,
+    )
+
+    publisher = InMemoryClipPublisher()
+    production = _posting_production(factory, publisher)
+    production.invoke(EPISODE)
+    _decide_all(factory, ReviewStatus.APPROVED)
+    original_status = publisher.status
+
+    def incomplete(request_id: str) -> PublishStatus:
+        status = original_status(request_id)
+        if status.state is PublishState.COMPLETED:
+            return PublishStatus(
+                state=PublishState.COMPLETED,
+                results=tuple(PlatformResult(platform=p, success=True) for p in reported),
+            )
+        return status
+
+    monkeypatch.setattr(publisher, "status", incomplete)
+    first = production.invoke(EPISODE)
+    assert first.posting_error and "incomplete" in first.posting_error
+    assert first.posted == () and first.status is RunStatus.WAITING_HUMAN
+    submissions = len(publisher.submissions)
+    monkeypatch.setattr(publisher, "status", original_status)
+    assert len(production.invoke(EPISODE).posted) == 3
+    assert len(publisher.submissions) == submissions

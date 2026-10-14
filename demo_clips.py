@@ -48,7 +48,6 @@ from omemo_content_factory.composition import (
     build_review_desk,
 )
 from omemo_content_factory.domain.run import RunStatus
-from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.provider_model import (
     ProviderModelSelectionError,
     client_for_role,
@@ -76,33 +75,39 @@ def _build_evaluator() -> ContextualArtifactEvaluator:
 
 def _build_post_writer(environ: Mapping[str, str]) -> PostWriting | None:
     """The post-text role (ADR-0072), when it has a provider binding; otherwise no drafts."""
-    if not environ.get("OMEMO_PROVIDER__CLIP_POST_WRITER_V1", "").strip():
+    if not (
+        environ.get("OMEMO_PROVIDER__CLIP_POST_WRITER_V1", "").strip()
+        or environ.get("OMEMO_PROVIDER__DEFAULT", "").strip()
+    ):
         return None
     return build_post_writing(client_for_role(clip_post_writer.AGENT_REF, environ))
 
 
 def _build_moment_picker(environ: Mapping[str, str]) -> MomentPicking | None:
     """The moment-picker role (ADR-0097), when it has a provider binding; MOMENTS needs it."""
-    if not environ.get("OMEMO_PROVIDER__CLIP_MOMENT_PICKER_V1", "").strip():
+    if not (
+        environ.get("OMEMO_PROVIDER__CLIP_MOMENT_PICKER_V1", "").strip()
+        or environ.get("OMEMO_PROVIDER__DEFAULT", "").strip()
+    ):
         return None
     return build_moment_picking(client_for_role(clip_moment_picker.AGENT_REF, environ), environ)
 
 
-def _build_posting(environ: Mapping[str, str]) -> Posting | None:
-    """Auto-posting (ADR-0073), when upload-post is configured; otherwise approved is the end."""
-    if not environ.get("OMEMO_UPLOAD_POST_API_KEY", "").strip():
+def _build_posting(environ: Mapping[str, str], *, enabled: bool = False) -> Posting | None:
+    """Publish only when explicitly requested; a configured key does not enable uploads."""
+    if not enabled:
         return None
     return build_posting(environ)
 
 
-def _build(environ: Mapping[str, str]) -> ClipProduction:
+def _build(environ: Mapping[str, str], *, publish: bool = False) -> ClipProduction:
     return build_clip_production(
         environ,
         evaluator=_build_evaluator(),
         desk=_build_desk(environ),
         post_writer=_build_post_writer(environ),
         moment_picker=_build_moment_picker(environ),
-        posting=_build_posting(environ),
+        posting=_build_posting(environ, enabled=publish),
     )
 
 
@@ -149,11 +154,14 @@ def _report(invocation: ClipInvocation) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
+    publish = arguments[:1] == ["--publish"]
+    if publish:
+        arguments = arguments[1:]
     if len(arguments) != 1 or not arguments[0].strip():
-        safe_print("usage: python demo_clips.py <notion page id of the episode>")
+        safe_print("usage: python demo_clips.py [--publish] <notion page id of the episode>")
         return 2
     try:
-        production = _build(os.environ)
+        production = _build(os.environ, publish=publish)
     except (
         EpisodeBoardError,
         EpisodeSourceError,
@@ -165,16 +173,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     except ProviderModelSelectionError as exc:
         safe_print(f"Provider/model selection failed: {exc}")
-        safe_print("The clip QA role needs its own binding and pricing (ADR-0016/0029). Set:")
-        _print_binding_instructions()
+        safe_print("Run python configure_llm.py, or configure each enabled clipping role:")
+        roles = [clip_qa_agent.AGENT_REF]
+        if (
+            os.environ.get("OMEMO_PROVIDER__CLIP_POST_WRITER_V1", "").strip()
+            or os.environ.get("OMEMO_PROVIDER__DEFAULT", "").strip()
+        ):
+            roles.append(clip_post_writer.AGENT_REF)
+        if (
+            os.environ.get("OMEMO_PROVIDER__CLIP_MOMENT_PICKER_V1", "").strip()
+            or os.environ.get("OMEMO_PROVIDER__DEFAULT", "").strip()
+        ):
+            roles.append(clip_moment_picker.AGENT_REF)
+        _print_binding_instructions(roles)
         return 1
 
     if not production.has_desk:
         safe_print("No review desk is configured; the reviews stay in the Run store.")
-    _report(production.invoke(arguments[0].strip()))
+    invocation = production.invoke(arguments[0].strip())
+    _report(invocation)
     return 0
 
 
 if __name__ == "__main__":
+    from omemo_content_factory.infrastructure.dotenv_file import load_project_env
+
     load_project_env(__file__)
     raise SystemExit(main())

@@ -10,19 +10,13 @@ properties, a Notion page does, so the decision is a dropdown the reviewer canno
 ambiguity left is "unset", which is ``None`` — still pending. An option outside the three is a
 misconfigured database and is refused, never read as silence.
 
-This is the **second** Notion implementation. Its request helper, auth header and property reader
-are duplicated from ``notion_brief_board`` on purpose: the rule of three (``CLAUDE.md``
-Conventions) authorises duplication at two, and ADR-0061 records that the shared client is
-extracted only once three implementations exist in ``src/``.
+HTTP transport is shared with the other Notion adapters (ADR-0092).
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +28,17 @@ from omemo_content_factory.adapters.review_desk import (
     ReviewPackage,
 )
 from omemo_content_factory.domain.human_review import ReviewId, ReviewStatus
+from omemo_content_factory.infrastructure._notion import (
+    DEFAULT_API_URL,
+    NOTION_API_VERSION,
+    request_json,
+)
+from omemo_content_factory.infrastructure._notion import (
+    plain_text as _plain_text,
+)
+from omemo_content_factory.infrastructure._notion import (
+    quoted as _quoted,
+)
 
 __all__ = [
     "DEFAULT_API_URL",
@@ -42,9 +47,6 @@ __all__ = [
     "NotionReviewSettings",
     "notion_review_settings_from_env",
 ]
-
-NOTION_API_VERSION = "2022-06-28"
-DEFAULT_API_URL = "https://api.notion.com"
 
 TOKEN_VAR = "OMEMO_REVIEW_NOTION_TOKEN"
 DATABASE_ID_VAR = "OMEMO_REVIEW_NOTION_DATABASE_ID"
@@ -317,29 +319,15 @@ class NotionReviewDesk:
     def _request(
         self, method: str, path: str, *, body: dict[str, Any] | None = None
     ) -> dict[str, Any] | None:
-        headers = {
-            "Authorization": f"Bearer {self._settings.token}",
-            "Notion-Version": NOTION_API_VERSION,
-            "Accept": "application/json",
-        }
-        data = None
-        if body is not None:
-            data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            self._api_url + path, data=data, headers=headers, method=method
+        return request_json(
+            method,
+            path,
+            api_url=self._api_url,
+            token=self._settings.token,
+            timeout=self._timeout,
+            error_type=ReviewDeskError,
+            body=body,
         )
-        try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as error:
-            error.close()
-            raise ReviewDeskError(
-                f"Notion refused {method} {path.split('?')[0]}: HTTP {error.code}"
-            ) from error
-        except (urllib.error.URLError, OSError) as error:
-            raise ReviewDeskError(f"Notion could not be reached: {error}") from error
-        return _json_object(raw)
 
 
 # --- rendering --------------------------------------------------------------------------
@@ -449,23 +437,3 @@ def _fingerprint(package: ReviewPackage) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _plain_text(chunk: object) -> str:
-    text = chunk.get("plain_text") if isinstance(chunk, dict) else None
-    return text if isinstance(text, str) else ""
-
-
-def _json_object(raw: bytes) -> dict[str, Any]:
-    try:
-        decoded = json.loads(raw)
-    except ValueError as error:
-        raise ReviewDeskError("Notion returned a response that is not JSON") from error
-    if not isinstance(decoded, dict):
-        raise ReviewDeskError("Notion returned a response that is not a JSON object")
-    return decoded
-
-
-def _quoted(value: str) -> str:
-    # Dots are encoded too, so a ref of ".." cannot become a dot segment of the path.
-    return urllib.parse.quote(value, safe="").replace(".", "%2E")

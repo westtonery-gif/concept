@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 from omemo_content_factory.adapters.brief_board import BriefBoard
+from omemo_content_factory.adapters.clip_publisher import ClipPublisher
 from omemo_content_factory.adapters.clip_renderer import ClipRenderer
 from omemo_content_factory.adapters.episode_board import EpisodeBoard
 from omemo_content_factory.adapters.episode_source import EpisodeSource
@@ -84,6 +85,7 @@ from omemo_content_factory.domain.agent import Agent
 from omemo_content_factory.domain.prompt import Prompt, PromptId, PromptVersion
 from omemo_content_factory.domain.schema import Schema
 from omemo_content_factory.domain.workflow import Workflow
+from omemo_content_factory.infrastructure.clip_text_file import export_youtube_texts
 from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
     API_KEY_VAR as ELEVENLABS_API_KEY_VAR,
 )
@@ -181,6 +183,10 @@ from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
 from omemo_content_factory.infrastructure.upload_post_publisher import (
     UploadPostPublisher,
     upload_post_settings_from_env,
+)
+from omemo_content_factory.infrastructure.youtube_publisher import (
+    YouTubePublisher,
+    youtube_settings_from_env,
 )
 from omemo_content_factory.tools.contract import Tool
 from omemo_content_factory.tools.current_date import CurrentDate
@@ -610,6 +616,7 @@ def build_clip_production(
     post_writer: PostWriting | None = None,
     posting: Posting | None = None,
     moment_picker: MomentPicking | None = None,
+    board: EpisodeBoard | None = None,
 ) -> ClipProduction:
     """Assemble the clipping department's production path (ADR-0059).
 
@@ -620,7 +627,7 @@ def build_clip_production(
     """
     return ClipProduction(
         build_run_store(environ),
-        build_episode_board(environ),
+        board if board is not None else build_episode_board(environ),
         build_episode_source(environ),
         build_footage_index(environ),
         build_clip_renderer(environ),
@@ -631,6 +638,7 @@ def build_clip_production(
         post_writer=post_writer,
         posting=posting,
         moment_picker=moment_picker,
+        post_exporter=export_youtube_texts,
     )
 
 
@@ -642,8 +650,19 @@ POSTS_PER_RUN_VAR = "OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN"
 
 
 def build_posting(environ: Mapping[str, str]) -> Posting:
-    """Build auto-posting through upload-post (ADR-0073); missing settings fail closed, named."""
-    settings = upload_post_settings_from_env(environ)
+    """Build the explicitly selected publisher; callers still require human approval."""
+    provider = environ.get("OMEMO_POSTING_PROVIDER", "upload-post")
+    publisher: ClipPublisher
+    platforms: tuple[str, ...]
+    if provider == "youtube":
+        publisher = YouTubePublisher(youtube_settings_from_env(environ))
+        platforms = ("youtube",)
+    elif provider == "upload-post":
+        settings = upload_post_settings_from_env(environ)
+        publisher = UploadPostPublisher(settings)
+        platforms = settings.platforms
+    else:
+        raise CompositionError("OMEMO_POSTING_PROVIDER must be youtube or upload-post")
     raw = environ.get(POSTS_PER_RUN_VAR, "").strip()
     try:
         limit = int(raw) if raw else None
@@ -658,8 +677,8 @@ def build_posting(environ: Mapping[str, str]) -> Posting:
     )
     footer = environ.get(CLIP_FOOTER_VAR, "").strip() or None
     return Posting(
-        publisher=UploadPostPublisher(settings),
-        platforms=settings.platforms,
+        publisher=publisher,
+        platforms=platforms,
         finisher=finisher,
         footer=footer,
         max_new_per_invocation=limit,

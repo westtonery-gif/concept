@@ -255,3 +255,10 @@ def test_upp_08_a_publish_request_is_well_formed() -> None:
         PublishRequest(request_id="r", video_path="/c.mp4", post=POST, platforms=())
     with pytest.raises(ValueError, match="request_id"):
         PublishRequest(request_id=" ", video_path="/c.mp4", post=POST, platforms=("youtube",))
+
+
+def test_skipped_platform_is_not_reported_as_published() -> None:
+    from omemo_content_factory.infrastructure.upload_post_publisher import _results
+
+    (result,) = _results({"youtube": {"success": True, "skipped": True}})
+    assert not result.success

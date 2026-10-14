@@ -22,7 +22,6 @@ from demo import safe_print
 
 from omemo_content_factory.adapters.frame_generator import FrameRequest
 from omemo_content_factory.composition import build_frame_generator
-from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 
 WIDTH, HEIGHT = 1080, 1920
 STYLE = (
@@ -113,5 +112,7 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    from omemo_content_factory.infrastructure.dotenv_file import load_project_env
+
     load_project_env(__file__)
     sys.exit(main(sys.argv))

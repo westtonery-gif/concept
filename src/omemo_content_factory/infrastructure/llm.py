@@ -272,6 +272,7 @@ class AnthropicLLMClient:
         thinking: ThinkingSetting,
         max_tool_calls: int = _DEFAULT_MAX_TOOL_CALLS,
         client: anthropic.Anthropic | None = None,
+        api_key: str | None = None,
         clock: Callable[[], datetime] = _utc_now,
     ) -> None:
         if (
@@ -292,7 +293,7 @@ class AnthropicLLMClient:
         self._max_tokens = max_tokens
         self._thinking = thinking
         self._max_tool_calls = max_tool_calls
-        self._client = anthropic.Anthropic() if client is None else client
+        self._client = anthropic.Anthropic(api_key=api_key) if client is None else client
         self._clock = clock
 
     def complete(
