@@ -123,3 +123,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 | [0097](0097-a-moment-picker-agent-for-clipping.md) | A moment-picker Agent chooses the strongest moments of an episode | Accepted |
 
 | [0098](0098-shared-notion-http-functions.md) | Shared HTTP functions for the three Notion adapters | Accepted |
+| [0099](0099-direct-instagram-and-tiktok-publishers.md) | Direct Instagram and TikTok publishers | Accepted |

@@ -39,3 +39,13 @@ def export_youtube_texts(run: Run) -> tuple[Path, ...]:
         if path is not None:
             written.append(path)
     return tuple(written)
+
+
+def read_clip_text(video: Path) -> PostDraft:
+    """The approved text beside a clip: the ``Название:`` and ``Описание:`` sections of its TXT."""
+    text = video.with_suffix(".txt").read_text(encoding="utf-8")
+    _, title_marker, rest = text.partition("Название:\n")
+    title, description_marker, description = rest.partition("\nОписание:\n")
+    if not title_marker or not description_marker or len(description.strip()) > 5000:
+        raise ValueError("TXT должен содержать Название: и Описание: (до 5000 символов)")
+    return PostDraft(title=title.strip(), description=description.strip())

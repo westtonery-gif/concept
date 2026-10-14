@@ -96,6 +96,7 @@ from omemo_content_factory.infrastructure.elevenlabs_speech_synthesizer import (
     ElevenLabsSpeechSynthesizer,
     elevenlabs_settings_from_env,
 )
+from omemo_content_factory.infrastructure.fan_out_publisher import FanOutPublisher
 from omemo_content_factory.infrastructure.ffmpeg_clip_renderer import (
     FfmpegClipRenderer,
     caption_colour,
@@ -114,6 +115,10 @@ from omemo_content_factory.infrastructure.google_docs_review_desk import (
 from omemo_content_factory.infrastructure.google_docs_review_desk import (
     GoogleDocsReviewDesk,
     google_docs_settings_from_env,
+)
+from omemo_content_factory.infrastructure.instagram_publisher import (
+    InstagramPublisher,
+    instagram_settings_from_env,
 )
 from omemo_content_factory.infrastructure.kokoro_speech_synthesizer import (
     MODEL_VAR as KOKORO_MODEL_VAR,
@@ -180,6 +185,10 @@ from omemo_content_factory.infrastructure.seedream_frame_generator import (
     seedream_settings_from_env,
 )
 from omemo_content_factory.infrastructure.sqlite_run_store import SqliteRunStore
+from omemo_content_factory.infrastructure.tiktok_publisher import (
+    TikTokPublisher,
+    tiktok_settings_from_env,
+)
 from omemo_content_factory.infrastructure.upload_post_publisher import (
     UploadPostPublisher,
     upload_post_settings_from_env,
@@ -649,20 +658,33 @@ POSTS_PER_RUN_VAR = "OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN"
 """How many approved clips start posting per invocation (unset = all) — pacing a schedule."""
 
 
+_DIRECT: dict[str, Callable[[Mapping[str, str]], ClipPublisher]] = {
+    "youtube": lambda environ: YouTubePublisher(youtube_settings_from_env(environ)),
+    "instagram": lambda environ: InstagramPublisher(instagram_settings_from_env(environ)),
+    "tiktok": lambda environ: TikTokPublisher(tiktok_settings_from_env(environ)),
+}
+"""Platforms posted to directly, without upload-post."""
+
+
 def build_posting(environ: Mapping[str, str]) -> Posting:
     """Build the explicitly selected publisher; callers still require human approval."""
-    provider = environ.get("OMEMO_POSTING_PROVIDER", "upload-post")
+    provider = environ.get("OMEMO_POSTING_PROVIDER", "upload-post").strip().casefold()
     publisher: ClipPublisher
     platforms: tuple[str, ...]
-    if provider == "youtube":
-        publisher = YouTubePublisher(youtube_settings_from_env(environ))
-        platforms = ("youtube",)
-    elif provider == "upload-post":
+    if provider == "upload-post":
         settings = upload_post_settings_from_env(environ)
         publisher = UploadPostPublisher(settings)
         platforms = settings.platforms
     else:
-        raise CompositionError("OMEMO_POSTING_PROVIDER must be youtube or upload-post")
+        # Direct publishers, one or several (ADR-0099 §4).
+        names = tuple(name.strip() for name in provider.split(",") if name.strip())
+        if not names or len(set(names)) != len(names) or not set(names) <= set(_DIRECT):
+            raise CompositionError(
+                "OMEMO_POSTING_PROVIDER must be upload-post or a list of " + ", ".join(_DIRECT)
+            )
+        children = {name: _DIRECT[name](environ) for name in names}
+        publisher = children[names[0]] if len(names) == 1 else FanOutPublisher(children)
+        platforms = names
     raw = environ.get(POSTS_PER_RUN_VAR, "").strip()
     try:
         limit = int(raw) if raw else None

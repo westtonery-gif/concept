@@ -18,6 +18,7 @@ from pathlib import Path
 
 import configure_llm
 import configure_youtube
+import post_clip
 import post_youtube
 from demo_clips import _build_evaluator, _build_moment_picker, _build_post_writer, _report
 
@@ -159,7 +160,14 @@ def ready_clips(run: Run) -> list[Path]:
     return clips
 
 
-def review_and_post(clips: list[Path], profile: str, settings: YouTubeSettings) -> int:
+def also_profile(platform: str, profile: str) -> str | None:
+    """The same profile name for Instagram/TikTok when one is connected there, else ``.env``."""
+    return profile if post_clip.profile_path(ROOT, platform, profile).is_file() else None
+
+
+def review_and_post(
+    clips: list[Path], profile: str, settings: YouTubeSettings, also: tuple[str, ...] = ()
+) -> int:
     for clip in clips:
         request, _, _ = post_youtube.prepare(clip, settings)
         previous = YouTubePublisher(settings).status(request.request_id)
@@ -173,6 +181,22 @@ def review_and_post(clips: list[Path], profile: str, settings: YouTubeSettings) 
         selected = replace(settings, made_for_kids=audience == "yes")
         _, fingerprint, preview = post_youtube.prepare(clip, selected)
         print(json.dumps(preview, ensure_ascii=False, indent=2))
+        extra = []
+        for platform in also:
+            extra_profile = also_profile(platform, profile)
+            env = post_clip.environment(platform, extra_profile)
+            _, extra_fingerprint, extra_preview = post_clip.prepare(clip, platform, env)
+            print(json.dumps(extra_preview, ensure_ascii=False, indent=2))
+            extra.append(
+                [
+                    str(clip),
+                    "--to",
+                    platform,
+                    *(["--profile", extra_profile] if extra_profile else []),
+                    "--approve",
+                    extra_fingerprint,
+                ]
+            )
         answer = input("Опубликовать именно этот ролик с этим текстом? Введите publish: ").strip()
         if answer != "publish":
             print("Пропущено, файл сохранён.")
@@ -193,6 +217,9 @@ def review_and_post(clips: list[Path], profile: str, settings: YouTubeSettings) 
         )
         if code:
             return code
+        for arguments in extra:
+            if code := post_clip.main(arguments):
+                return code
     return 0
 
 
@@ -208,6 +235,11 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--count", type=int, default=3, help="максимальное число моментов")
     parser.add_argument(
+        "--also",
+        default="",
+        help="ещё площадки через запятую: instagram,tiktok (подключите их заранее)",
+    )
+    parser.add_argument(
         "--draft-only", action="store_true", help="подготовить без подключения канала"
     )
     args = parser.parse_args(argv)
@@ -217,6 +249,9 @@ def main(argv: list[str]) -> int:
         if not video.is_file() or args.count < 1:
             raise ValueError("Нужен файл видео и --count >= 1")
         youtube_profile_path(ROOT, args.profile)  # Reject invalid names before any setup.
+        also = tuple(name.strip() for name in args.also.split(",") if name.strip())
+        if not set(also) <= set(post_clip.PLATFORMS):
+            raise ValueError("--also: instagram и/или tiktok")
         preflight()
         setup_model(args.whisper_model)
         settings = None if args.draft_only else setup_channel(args)
@@ -242,7 +277,7 @@ def main(argv: list[str]) -> int:
             return 1
         if settings is None:
             return 0
-        return review_and_post(clips, args.profile, settings)
+        return review_and_post(clips, args.profile, settings, also)
     except (EOFError, KeyboardInterrupt):
         print("Остановлено. Сохранённые результаты останутся для повторного запуска.")
         return 2

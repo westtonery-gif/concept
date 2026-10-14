@@ -238,6 +238,13 @@ python -m pytest
 явного апрува пользователя. OAuth для этого канала подтверждён 2026-10-13. Реальная загрузка ещё не проверялась.
 Полная инструкция: [YOUTUBE_SETUP.md](YOUTUBE_SETUP.md).
 
+### Instagram Reels и TikTok напрямую
+
+Instagram — через Facebook-страницу (`configure_instagram.py`), TikTok — черновиками до
+аудита приложения, потом напрямую (`configure_tiktok.py`). Предпросмотр и отправка по
+отпечатку: `post_clip.py --to instagram|tiktok`; в локальной фабрике — `--also instagram,tiktok`.
+Инструкция: [SOCIAL_SETUP.md](SOCIAL_SETUP.md).
+
 ## Дополнительная настройка
 
 [Проверка окружения и другие провайдеры](docs/SETUP.md): `python doctor.py`,
