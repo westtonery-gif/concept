@@ -129,7 +129,7 @@ def test_approval_changes_with_every_reviewed_input(clip: Path, change: str) -> 
         assert updated.request_id == request.request_id
 
 
-def test_composition_selects_direct_youtube_without_uploadpost_credentials() -> None:
+def test_composition_selects_direct_youtube() -> None:
     posting = build_posting(
         {"OMEMO_POSTING_PROVIDER": "youtube", "OMEMO_YOUTUBE_CHANNEL_ID": "UC-test"}
     )

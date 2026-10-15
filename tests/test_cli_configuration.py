@@ -68,7 +68,7 @@ def test_factory_configuration_help_includes_the_required_request_budget() -> No
             assert f"OMEMO_{field}__{role}=" in result.stdout
 
 
-def test_configured_upload_key_does_not_enable_posting_without_explicit_flag(
+def test_configured_publisher_does_not_enable_posting_without_explicit_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.syspath_prepend(str(ROOT))
@@ -76,17 +76,11 @@ def test_configured_upload_key_does_not_enable_posting_without_explicit_flag(
 
     _build_posting = import_module("demo_clips")._build_posting
 
-    from omemo_content_factory.adapters.clip_publisher import ClipPublisherError
+    from omemo_content_factory.composition import CompositionError
 
-    env = {"OMEMO_UPLOAD_POST_API_KEY": "unused-test-key"}
+    env = {"OMEMO_INSTAGRAM_USER_ID": "1784"}
     assert _build_posting(env) is None
-    with pytest.raises(ClipPublisherError, match="PROFILE"):
+    with pytest.raises(CompositionError, match="OMEMO_POSTING_PROVIDER"):
         _build_posting(env, enabled=True)
-    env.update(
-        {
-            "OMEMO_UPLOAD_POST_PROFILE": "test-profile",
-            "OMEMO_UPLOAD_POST_YOUTUBE_PRIVACY": "private",
-            "OMEMO_UPLOAD_POST_PLATFORMS": "youtube",
-        }
-    )
+    env["OMEMO_POSTING_PROVIDER"] = "instagram"
     assert _build_posting(env, enabled=True) is not None

@@ -4,10 +4,10 @@
 
 Each ``NAME.json`` in the folder is a clip to post (``video``, ``title``, ``description``). The
 pass collects what has finished, and starts the next clip when none is in flight, at most
-``OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN`` of them. It is what a schedule runs — see
+``OMEMO_POSTING_MAX_NEW_PER_RUN`` of them, through the publishers ``OMEMO_POSTING_PROVIDER``
+names (ADR-0100). It is what a schedule runs — see
 ``scripts/run_post_queue.sh`` — so nothing here asks a person anything.
 
-Run after loading ``.env``: ``set -a && source .env && set +a``.
 """
 
 from __future__ import annotations
@@ -18,12 +18,13 @@ import sys
 from demo import safe_print
 
 from omemo_content_factory.adapters.clip_publisher import ClipPublisherError
+from omemo_content_factory.composition import (
+    POSTS_PER_RUN_VAR,
+    CompositionError,
+    build_publisher,
+)
 from omemo_content_factory.infrastructure.dotenv_file import load_project_env
 from omemo_content_factory.infrastructure.file_post_queue import FilePostQueue
-from omemo_content_factory.infrastructure.upload_post_publisher import (
-    UploadPostPublisher,
-    upload_post_settings_from_env,
-)
 
 
 def main(argv: list[str]) -> int:
@@ -31,16 +32,16 @@ def main(argv: list[str]) -> int:
         safe_print(__doc__ or "")
         return 2
     try:
-        publisher = UploadPostPublisher(upload_post_settings_from_env(os.environ))
-        raw = os.environ.get("OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN", "").strip()
+        publisher, platforms = build_publisher(os.environ)
+        raw = os.environ.get(POSTS_PER_RUN_VAR, "").strip()
         queue = FilePostQueue(
             argv[0],
             publisher,
-            platforms=publisher.platforms,
+            platforms=platforms,
             max_new_per_run=int(raw) if raw else 1,
         )
         events = queue.run()
-    except (ClipPublisherError, ValueError) as error:
+    except (ClipPublisherError, CompositionError, ValueError) as error:
         safe_print(f"post queue stopped: {error}")
         return 1
     for event in events:

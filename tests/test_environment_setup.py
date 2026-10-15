@@ -109,7 +109,8 @@ def test_doc_03_a_value_is_never_part_of_the_report() -> None:
     secret = "sk-very-secret-value-123"
     checks = check_environment(
         {
-            "OMEMO_UPLOAD_POST_API_KEY": secret,
+            "OMEMO_POSTING_PROVIDER": "tiktok",
+            "OMEMO_TIKTOK_CLIENT_SECRET": secret,
             "OMEMO_PROVIDER__DEFAULT": "xai",
             "XAI_API_KEY": secret,
         },
@@ -118,7 +119,8 @@ def test_doc_03_a_value_is_never_part_of_the_report() -> None:
     )
     for check in checks:
         assert secret not in f"{check.name}{check.detail}{check.hint}"
-    assert any(c.name == "OMEMO_UPLOAD_POST_API_KEY" and c.ok for c in checks)
+    assert any(c.name == "OMEMO_TIKTOK_CLIENT_SECRET" and c.ok for c in checks)
+    assert any(c.name == "OMEMO_TIKTOK_OPEN_ID" and not c.ok for c in checks)
 
 
 def test_doc_04_an_ffmpeg_without_libass_is_a_named_failure_for_clipping() -> None:

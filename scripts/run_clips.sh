@@ -1,7 +1,7 @@
 #!/bin/zsh
 # One invocation of the clipping department for one episode card, as a schedule runs it (task 34).
 # Loads .env (nothing else does, CLIPPING_RUNBOOK.md), puts Homebrew on PATH (launchd has no login
-# shell) and appends to .omemo/clips-<card>.log. With OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN=1, every run
+# shell) and appends to .omemo/clips-<card>.log. With OMEMO_POSTING_MAX_NEW_PER_RUN=1, every run
 # posts the next approved clip and collects the previous one.
 set -eu
 cd "${0:A:h}/.."

@@ -189,10 +189,6 @@ from omemo_content_factory.infrastructure.tiktok_publisher import (
     TikTokPublisher,
     tiktok_settings_from_env,
 )
-from omemo_content_factory.infrastructure.upload_post_publisher import (
-    UploadPostPublisher,
-    upload_post_settings_from_env,
-)
 from omemo_content_factory.infrastructure.youtube_publisher import (
     YouTubePublisher,
     youtube_settings_from_env,
@@ -654,37 +650,40 @@ def build_clip_production(
 CLIP_FOOTER_VAR = "OMEMO_CLIP_FOOTER"
 """The branding line in a posted clip's bottom bar (ADR-0078); unset = none."""
 
-POSTS_PER_RUN_VAR = "OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN"
+POSTS_PER_RUN_VAR = "OMEMO_POSTING_MAX_NEW_PER_RUN"
 """How many approved clips start posting per invocation (unset = all) — pacing a schedule."""
 
+POSTING_PROVIDER_VAR = "OMEMO_POSTING_PROVIDER"
+"""Where clips are posted: ``youtube``, ``instagram``, ``tiktok`` or a comma list (ADR-0100)."""
 
 _DIRECT: dict[str, Callable[[Mapping[str, str]], ClipPublisher]] = {
     "youtube": lambda environ: YouTubePublisher(youtube_settings_from_env(environ)),
     "instagram": lambda environ: InstagramPublisher(instagram_settings_from_env(environ)),
     "tiktok": lambda environ: TikTokPublisher(tiktok_settings_from_env(environ)),
 }
-"""Platforms posted to directly, without upload-post."""
+"""The platforms clips are posted to, each through its own direct publisher."""
+
+
+def build_publisher(environ: Mapping[str, str]) -> tuple[ClipPublisher, tuple[str, ...]]:
+    """The publisher ``OMEMO_POSTING_PROVIDER`` names, and its platforms (ADR-0100 §2).
+
+    No default: an unnamed destination is refused, never guessed. One platform is its own
+    publisher; several share a ``FanOutPublisher`` (ADR-0099 §4).
+    """
+    raw = environ.get(POSTING_PROVIDER_VAR, "").strip().casefold()
+    names = tuple(name.strip() for name in raw.split(",") if name.strip())
+    if not names or len(set(names)) != len(names) or not set(names) <= set(_DIRECT):
+        raise CompositionError(
+            f"{POSTING_PROVIDER_VAR} must name {', '.join(_DIRECT)} or a comma list of them"
+        )
+    children = {name: _DIRECT[name](environ) for name in names}
+    publisher = children[names[0]] if len(names) == 1 else FanOutPublisher(children)
+    return publisher, names
 
 
 def build_posting(environ: Mapping[str, str]) -> Posting:
     """Build the explicitly selected publisher; callers still require human approval."""
-    provider = environ.get("OMEMO_POSTING_PROVIDER", "upload-post").strip().casefold()
-    publisher: ClipPublisher
-    platforms: tuple[str, ...]
-    if provider == "upload-post":
-        settings = upload_post_settings_from_env(environ)
-        publisher = UploadPostPublisher(settings)
-        platforms = settings.platforms
-    else:
-        # Direct publishers, one or several (ADR-0099 §4).
-        names = tuple(name.strip() for name in provider.split(",") if name.strip())
-        if not names or len(set(names)) != len(names) or not set(names) <= set(_DIRECT):
-            raise CompositionError(
-                "OMEMO_POSTING_PROVIDER must be upload-post or a list of " + ", ".join(_DIRECT)
-            )
-        children = {name: _DIRECT[name](environ) for name in names}
-        publisher = children[names[0]] if len(names) == 1 else FanOutPublisher(children)
-        platforms = names
+    publisher, platforms = build_publisher(environ)
     raw = environ.get(POSTS_PER_RUN_VAR, "").strip()
     try:
         limit = int(raw) if raw else None

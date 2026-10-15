@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Runs one clipping invocation for the episode card every 2 hours (task 34). With
-     OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN=1 that posts the next approved clip and collects the last.
+     OMEMO_POSTING_MAX_NEW_PER_RUN=1 that posts the next approved clip and collects the last.
      Install: cp to ~/Library/LaunchAgents/ and `launchctl bootstrap gui/$(id -u) <that path>`. -->
 <plist version="1.0">
 <dict>

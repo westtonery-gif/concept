@@ -1,6 +1,6 @@
 # Локальная фабрика → YouTube Shorts
 
-Точка входа: `factory.py`. Notion и Upload-Post для неё не нужны.
+Точка входа: `factory.py`. Notion для неё не нужен.
 Поддерживается прямая публикация в YouTube. Это не команда публикации Instagram Reels.
 
 ## Один раз на компьютере

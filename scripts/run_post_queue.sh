@@ -1,7 +1,7 @@
 #!/bin/zsh
 # One pass of the unattended post queue, as a schedule runs it (ADR-0092). Loads .env (nothing else
 # does, CLIPPING_RUNBOOK.md), puts Homebrew on PATH (launchd has no login shell) and appends to
-# .omemo/post-queue.log. With OMEMO_UPLOAD_POST_MAX_NEW_PER_RUN=1 every pass collects the clip in
+# .omemo/post-queue.log. With OMEMO_POSTING_MAX_NEW_PER_RUN=1 every pass collects the clip in
 # flight and, once none is, posts the next one.
 set -eu
 cd "${0:A:h}/.."

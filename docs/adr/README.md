@@ -124,3 +124,4 @@ be recorded as ADRs (PROJECT.md, sections 11 and 17).
 
 | [0098](0098-shared-notion-http-functions.md) | Shared HTTP functions for the three Notion adapters | Accepted |
 | [0099](0099-direct-instagram-and-tiktok-publishers.md) | Direct Instagram and TikTok publishers | Accepted |
+| [0100](0100-upload-post-removed.md) | upload-post is removed; posting is direct only | Accepted |

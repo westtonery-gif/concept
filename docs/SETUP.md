@@ -82,7 +82,7 @@ without code (add them to the block, e.g. `OMEMO_WIRE__DEFAULT=responses`):
 |---|---|---|
 | `core` | text roles: QA, post writer, story writer | Python ≥ 3.11, a model chosen with `configure_llm.py` and **its** key |
 | `clipping` | episode file → clips with captions (`demo_cut.py`, `demo_clips.py`) | `ffmpeg` **with libass**, `ffprobe`, `whisper-cli` + a GGML model, optional `fpcalc` |
-| `posting` | clips → YouTube etc. through upload-post (`demo_post_queue.py`) | `OMEMO_UPLOAD_POST_API_KEY`, `_PROFILE`, `_YOUTUBE_PRIVACY` |
+| `posting` | clips → YouTube, Instagram, TikTok directly (`demo_post_queue.py`, `demo_clips.py --publish`) | `OMEMO_POSTING_PROVIDER` + each platform's `configure_<platform>.py` (YOUTUBE_SETUP.md, SOCIAL_SETUP.md) |
 | `generation` | voiced story videos | `OMEMO_GEMINI_API_KEY`; optionally Higgsfield / Seedream / Seedance / ElevenLabs keys |
 
 ### ffmpeg with libass (captions)
@@ -119,8 +119,8 @@ sometimes invents text over music).
 
 Optional clip settings (all in `.env.example`): `OMEMO_CLIP_CAPTION_COLOR` (white | yellow |
 #RRGGBB), `OMEMO_CLIP_MUSIC` + `OMEMO_CLIP_MUSIC_VOLUME` (a quiet track under every clip),
-`OMEMO_CLIP_CANVAS`, `OMEMO_UPLOAD_POST_YOUTUBE_PRIVACY` (`unlisted` videos are not shown in feeds
-or search — use `public` to be discoverable).
+`OMEMO_CLIP_CANVAS`, `OMEMO_YOUTUBE_PRIVACY` (`unlisted` videos are not shown in feeds or search —
+use `public` to be discoverable).
 
 Run the post queue on a schedule with `scripts/com.concept.post-queue.plist` (macOS launchd) or
 cron: `0 */2 * * * cd /path/to/concept && scripts/run_post_queue.sh post-queue`.

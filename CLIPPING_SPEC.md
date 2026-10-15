@@ -195,8 +195,9 @@ Arial 72 px на холсте 1920×1080 с чёрной обводкой, сн�
 
 **Автопостинг (`ADR-0073`).** Порт `ClipPublisher` (`adapters/clip_publisher.py`): `submit(PublishRequest)`
 идемпотентен по нашему `request_id`, `status(request_id) -> PublishStatus` (`PENDING`/`COMPLETED`/
-`FAILED`/`NOT_FOUND` + результат по площадкам). Реализация — `UploadPostPublisher` над upload-post
-(`urllib`, multipart вручную, `async_upload`, `Idempotency-Key` = `request_id`). С настроенным
+`FAILED`/`NOT_FOUND` + результат по площадкам). Реализации — прямые
+`YouTubePublisher`, `InstagramPublisher`, `TikTokPublisher` (идемпотентность по локальным квитанциям,
+`ADR-0099`); upload-post удалён (`ADR-0100`). С настроенным
 публикатором каждый `APPROVED` клип получает Task `publish-clip` с `request_id` = `<artifact_id>-publish`:
 без текста поста — `FAILED NO_POST_TEXT`, ничего не отправлено; иначе Task закоммичен `RUNNING`, затем
 **сначала `status`, `submit` только при `NOT_FOUND`**; `COMPLETED` без отказов → Output

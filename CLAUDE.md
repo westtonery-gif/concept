@@ -30,7 +30,7 @@ new work by itself — see task 10 in [development notes](docs/history/developme
 - The brief path is assembled: Notion → researcher → script writer → QA → human review.
   `factory_service.py` exposes it to the two n8n workflows.
 - The clipping path indexes and renders local episodes, reviews each clip, and can publish
-  approved clips through upload-post. Start with `CLIPPING_RUNBOOK.md`.
+  approved clips directly to YouTube, Instagram and TikTok (ADR-0099, ADR-0100). Start with `CLIPPING_RUNBOOK.md`.
 - Generated stories use separate CLI scripts for writing, dialogue, storyboards, frames and
   animation. `demo_animate.py join` produces a **silent** video; audio is mixed separately.
 - Runs are stored in SQLite. Models, pricing and request budgets are configured per role.

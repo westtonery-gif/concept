@@ -265,21 +265,34 @@ def _clipping(environ: Mapping[str, str], probe: Probe, env_file: str) -> list[C
     return checks
 
 
+_PLATFORM_VARIABLES = {
+    "youtube": ("OMEMO_YOUTUBE_CHANNEL_ID",),
+    "instagram": ("OMEMO_INSTAGRAM_USER_ID",),
+    "tiktok": ("OMEMO_TIKTOK_CLIENT_KEY", "OMEMO_TIKTOK_CLIENT_SECRET", "OMEMO_TIKTOK_OPEN_ID"),
+}
+"""What each direct publisher needs; the configure_<platform>.py script writes it (ADR-0100)."""
+
+
 def _posting(environ: Mapping[str, str], probe: Probe, env_file: str) -> list[Check]:
     del probe
     hint = "see docs/SETUP.md, section Posting"
-    return [
-        _variable(environ, "posting", "OMEMO_UPLOAD_POST_API_KEY", True, hint),
-        _variable(environ, "posting", "OMEMO_UPLOAD_POST_PROFILE", True, hint),
+    checks = [
         _variable(
             environ,
             "posting",
-            "OMEMO_UPLOAD_POST_YOUTUBE_PRIVACY",
+            "OMEMO_POSTING_PROVIDER",
             True,
-            "public | unlisted | private (unlisted videos are not shown in feeds or search)",
-        ),
-        _variable(environ, "posting", "OMEMO_UPLOAD_POST_PLATFORMS", False, hint),
+            "youtube, instagram, tiktok or a comma list of them",
+        )
     ]
+    named = environ.get("OMEMO_POSTING_PROVIDER", "").casefold().split(",")
+    for platform in (name.strip() for name in named):
+        for variable in _PLATFORM_VARIABLES.get(platform, ()):
+            checks.append(
+                _variable(environ, "posting", variable, True, f"run configure_{platform}.py")
+            )
+    checks.append(_variable(environ, "posting", "OMEMO_POSTING_MAX_NEW_PER_RUN", False, hint))
+    return checks
 
 
 def _generation(environ: Mapping[str, str], probe: Probe, env_file: str) -> list[Check]:
